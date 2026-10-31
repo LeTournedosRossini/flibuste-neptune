@@ -69,6 +69,7 @@ target_sources(Neptune PRIVATE
   src/NovaChorusEditor.cpp
   src/NovaMicrodecaleEditor.cpp
   src/NovaConvolutionEditor.cpp
+  src/NovaFournaiseEditor.cpp
   src/NovaCompressorEditor.cpp
   src/NovaHistoryView.cpp
   src/NovaEditor.cpp
