@@ -759,19 +759,21 @@ int main (int argc, char** argv)
         fp.set (overdrive::outLpOn, 1.0);
         fp.set (overdrive::keySource, 1.0);
         fp.set (overdrive::keyAmount, 40.0);
-        struct FCase { const char* name; th::ThemeId id; float scale; int page; int model; };
+        struct FCase { const char* name; th::ThemeId id; float scale; int page; int model; bool insert = false; };
         const FCase fcs[] = { { "fournaise-dark-tube", th::ThemeId::Dark, 1.0f, 0, 0 }, { "fournaise-dark-fuzz", th::ThemeId::Dark, 1.0f, 0, 3 },
                               { "fournaise-light-tape", th::ThemeId::Light, 1.0f, 0, 1 }, { "fournaise-dark-filters", th::ThemeId::Dark, 1.0f, 1, 0 },
                               { "fournaise-dark-eq", th::ThemeId::Dark, 1.0f, 2, 0 }, { "fournaise-dark-key", th::ThemeId::Dark, 1.0f, 3, 0 },
-                              { "fournaise-dark-set", th::ThemeId::Dark, 1.0f, 4, 0 }, { "fournaise-dark-tube-070", th::ThemeId::Dark, 0.7f, 0, 0 } };
+                              { "fournaise-dark-set", th::ThemeId::Dark, 1.0f, 4, 0 }, { "fournaise-dark-tube-070", th::ThemeId::Dark, 0.7f, 0, 0 },
+                              { "fournaise-insert-os", th::ThemeId::Dark, 1.0f, 0, 0, true } };
         for (const auto& c : fcs)
         {
             std::fprintf (stderr, "editor %s\n", c.name);
             const auto& def = th::definition (c.id);
             fp.set (overdrive::model, c.model);
+            fp.set (overdrive::oversampling, c.insert ? 1.0 : 2.0);   // dans un insert : 2x pour voir l'annonce de latence
             NovaFournaiseEditor::Options opt;
-            opt.brand = true;
-            opt.externalKey = true;
+            opt.brand = ! c.insert;
+            opt.externalKey = ! c.insert;
             opt.moduleName = "fournaise";
             opt.noPresets = false;
             opt.stretchAuto = gWide > 1.0f;

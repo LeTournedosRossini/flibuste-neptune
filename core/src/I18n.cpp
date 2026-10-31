@@ -850,6 +850,8 @@ const Entry kEntries[] = {
     { "nv.out", { "OUT", "SORTIE" } },
     { "nv.meta_levels", { "IN {0} dB   GR {1} dB", "ENTRÉE {0} dB   RÉD. {1} dB" } },
     { "nv.latency", { "Latency {0} smp", "Latence {0} éch." } },
+    { "nv.latency_insert", { "Latency {0} smp: not compensated in Neptune", "Latence {0} éch. : non compensée dans Neptune" } },
+    { "fo.os_note", { "Oversampling adds {0} samples of latency, not compensated between tracks in Neptune. Keep it Off to stay in phase.", "Le suréchantillonnage ajoute {0} éch. de latence, non compensés entre les pistes dans Neptune. Gardez Off pour rester en phase." } },
     { "nv.ab_a", { "A", "A" } },
     { "nv.ab_b", { "B", "B" } },
     { "nv.brand_sub", { "NOVA SERIES", "SÉRIE NOVA" } },

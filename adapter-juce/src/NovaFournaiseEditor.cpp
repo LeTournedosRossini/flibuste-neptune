@@ -547,6 +547,7 @@ void NovaFournaiseEditor::buildSaturationPage()
     autoPill_->bindToggle (host(), ovd::autoGain, tx ("fo.autogain"));
     osPill_ = add<nova::Pill> (0, skin());
     osPill_->bindChoice (host(), ovd::oversampling, tx ("fo.os"), { "Off", "2x", "4x" });
+    osNote_ = add<nova::Text> (0, skin(), Token::Pink, 11.0f);   // dans un insert de Neptune : la latence du suréchantillonnage n'est pas compensée
     chPill_ = add<nova::Pill> (0, skin());
     chPill_->bindChoice (host(), ovd::channels, tx ("fo.channels"), { tx ("fo.ch0"), tx ("fo.ch1"), tx ("fo.ch2"), tx ("fo.ch3") });
 }
@@ -619,7 +620,9 @@ void NovaFournaiseEditor::buildKeyPage()
     keyPanel_ = add<nova::Panel> (3, skin());
     keyPanel_->setTitle (tx ("fo.page_key"));
     keySourcePill_ = add<nova::Pill> (3, skin());
-    keySourcePill_->bindChoice (host(), ovd::keySource, tx ("fo.key_source"), { tx ("fo.ks0"), tx ("fo.ks1"), tx ("fo.ks2") });
+    // dans un insert de Neptune il n'y a pas d'entrée latérale : seulement Aucune et Entrée principale
+    if (options().externalKey) keySourcePill_->bindChoice (host(), ovd::keySource, tx ("fo.key_source"), { tx ("fo.ks0"), tx ("fo.ks1"), tx ("fo.ks2") });
+    else keySourcePill_->bindChoice (host(), ovd::keySource, tx ("fo.key_source"), { tx ("fo.ks0"), tx ("fo.ks1") });
     for (const auto& k : { std::pair<ParamId, const char*> { ovd::keyAmount, "fo.key_amount" }, std::pair<ParamId, const char*> { ovd::keyAttack, "fo.key_attack" },
                            std::pair<ParamId, const char*> { ovd::keyRelease, "fo.key_release" }, std::pair<ParamId, const char*> { ovd::keyHp, "fo.key_hp" } })
         keyKnobs_.push_back (add<nova::KnobCard> (3, skin(), host(), k.first, tx (k.second), modalOpener(), false));
@@ -658,6 +661,7 @@ void NovaFournaiseEditor::layout()
     }
     autoPill_->setBounds (R (220, 486, 200, 36));
     osPill_->setBounds (R (428, 486, 230, 36));
+    osNote_->setBounds (R (220, 522, 910, 14));
     chPill_->setBounds (R (666, 486, 300, 36));
 
     // ---- page FILTRES : entrée (haut), sortie (bas) ; passe-haut puis passe-bas
@@ -710,7 +714,15 @@ void NovaFournaiseEditor::tick()
     outMeter_->update (dbOf (module_->meter (ovd::kOutPeakL)), dbOf (module_->meter (ovd::kOutPeakR)));
     switch (currentPage())
     {
-        case 0: retitleKnobs(); transfer_->update(); break;
+        case 0:
+        {
+            retitleKnobs(); transfer_->update();
+            const int os = choiceValue (ovd::oversampling);
+            const bool warn = ! options().brand && os > 0;
+            osNote_->setVisible (warn);
+            if (warn) osNote_->setText (juce::String::fromUTF8 (translator().format ("fo.os_note", { std::to_string (Oversampler::latencyFor (os >= 2 ? 4 : 2)) }).c_str()));
+            break;
+        }
         case 2: eqView_->update(); break;
         case 3: keyView_->update(); break;
         default: break;

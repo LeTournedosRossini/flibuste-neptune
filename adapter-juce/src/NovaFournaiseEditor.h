@@ -68,4 +68,5 @@ private:
     std::vector<nova::KnobCard*> keyKnobs_;
     KeyView* keyView_ = nullptr;
     nova::Text* keyHint_ = nullptr;
+    nova::Text* osNote_ = nullptr;
 };

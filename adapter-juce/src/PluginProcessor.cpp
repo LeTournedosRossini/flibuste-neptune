@@ -4,6 +4,7 @@
 #include "FacadeBundle.h"
 #include "neptune/core/GlobalPreset.h"
 #include "neptune/core/CompressorModule.h"
+#include "neptune/core/OverdriveModule.h"
 #include "NeptuneParameter.h"
 #include "PluginEditor.h"
 #include "neptune/core/FmPreset.h"
@@ -1182,6 +1183,8 @@ void NeptuneProcessor::uiSetInsert (StripKind kind, int index, int slot, const s
     {
         inst = neptune::core::createInsert (type, engine_.sampleRate(), engine_.maxBlockSize());
         if (inst == nullptr) return;
+        // Fournaise dans Neptune : sans suréchantillonnage, donc sans latence (celle-ci n'est pas compensée entre les pistes) ; le plugin séparé garde 2x
+        if (type == "overdrive") inst->runner.params().set (neptune::core::overdrive::oversampling, 0.0);
     }
     {
         const juce::ScopedLock lock (instrumentLock_);

@@ -714,13 +714,15 @@ void NovaShaperEditor::tick()
     const double rate = options().sampleRate ? options().sampleRate() : 48000.0;
     const int os = choiceValue (sh::oversampling);
     const int latency = (look > 0.0 ? static_cast<int> (std::lround (look * 0.001 * rate)) : 0) + Oversampler::latencyFor (os >= 2 ? 4 : os == 1 ? 2 : 1);
-    const auto lat = juce::String::fromUTF8 (translator().format ("nv.latency", { std::to_string (latency) }).c_str());
-    if (lat != latencyText_) { latencyText_ = lat; repaint (R (920, 724, 226, 56)); }
+    latencyWarn_ = ! options().brand && latency > 0;   // dans un insert de Neptune, la latence n'est pas compensée entre les pistes
+    const auto lat = juce::String::fromUTF8 (translator().format (latencyWarn_ ? "nv.latency_insert" : "nv.latency", { std::to_string (latency) }).c_str());
+    if (lat != latencyText_) { latencyText_ = lat; repaint (R (920, 716, 226, 64)); }
 }
 
 void NovaShaperEditor::paintBackground (juce::Graphics& g)
 {
-    g.setColour (skin().colour (Token::TextDim2));
+    g.setColour (skin().colour (latencyWarn_ ? Token::Pink : Token::TextDim2));
     g.setFont (skin().font (11.0f, true));
-    g.drawText (latencyText_, R (930, 724 + 12, 216, 32).toFloat(), juce::Justification::centredRight);
+    if (latencyWarn_) g.drawFittedText (latencyText_, R (930, 724 + 4, 216, 44).getSmallestIntegerContainer(), juce::Justification::centredRight, 3);
+    else g.drawText (latencyText_, R (930, 724 + 12, 216, 32).toFloat(), juce::Justification::centredRight);
 }

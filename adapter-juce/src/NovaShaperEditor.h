@@ -59,4 +59,5 @@ private:
 
     nova::Pill *chPill_ = nullptr, *deltaPill_ = nullptr, *osPill_ = nullptr, *lookPill_ = nullptr;
     juce::String metaText_, latencyText_;
+    bool latencyWarn_ = false;
 };

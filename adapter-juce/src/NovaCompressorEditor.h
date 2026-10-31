@@ -52,4 +52,5 @@ private:
     nova::Pill *inTrimPill_ = nullptr, *outTrimPill_ = nullptr;
     nova::Pill *stereoPill_ = nullptr, *stylePill_ = nullptr, *dirPill_ = nullptr, *deltaPill_ = nullptr, *osPill_ = nullptr, *lookPill_ = nullptr;
     juce::String metaText_, latencyText_;
+    bool latencyWarn_ = false;
 };

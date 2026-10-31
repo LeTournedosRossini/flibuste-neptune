@@ -160,8 +160,7 @@ void ModuleRunner::process (float* left, float* right, int n, bool bypassed) noe
 // ---- registre ----
 const std::vector<ModuleInfo>& availableModules()
 {
-    static const std::vector<ModuleInfo> modules = { { "utility", "module.utility" }, { "shaper", "module.shaper" }, { "compressor", "module.compressor" }, { "equalizer", "module.equalizer" }, { "delay", "module.delay" }, { "chorus", "module.chorus" }, { "microdecale", "module.microdecale" }, { "convolution", "module.convolution" } };
-    // « overdrive » (Fournaise) n'est pas encore proposé comme insert de Neptune : il n'a pas encore d'interface ; createModule() le connaît déjà (tests, plugin séparé).
+    static const std::vector<ModuleInfo> modules = { { "utility", "module.utility" }, { "shaper", "module.shaper" }, { "compressor", "module.compressor" }, { "equalizer", "module.equalizer" }, { "delay", "module.delay" }, { "chorus", "module.chorus" }, { "microdecale", "module.microdecale" }, { "convolution", "module.convolution" }, { "overdrive", "module.overdrive" } };
     return modules;
 }
 
