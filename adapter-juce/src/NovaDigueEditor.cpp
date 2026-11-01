@@ -113,13 +113,14 @@ NovaDigueEditor::NovaDigueEditor (ParamHost& host, const LimiterModule* module, 
     inTrimPill_->onClick = [this] { openModal (stock::inputTrim, uistate::Terminal::Pointer); };
 
     modePill_ = add<nova::Pill> (0, skin());
-    modePill_->bindChoice (host, lm::mode, tx ("lm.mode"), { tx ("lm.quality"), tx ("lm.lowlat") });
+    modePill_->bindChoice (host, lm::mode, tx ("lm.mode"), { tx ("lm.quality"), tx ("lm.lowlat"), tx ("lm.zerolat") });
     addInfo (0, modePill_, "hlp.lm_mode");
     hqPill_ = add<nova::Pill> (0, skin());
     hqPill_->setText (tx ("lm.hq"));
     hqPill_->onClick = [this] { applyHighQuality(); };
     addInfo (0, hqPill_, "hlp.lm_hq");
-    latencyText_ = add<nova::Text> (0, skin(), this->options().brand ? Token::TextDim2 : Token::Pink, 11.0f);   // dans un insert de Neptune, la latence n'est pas compensée entre les pistes
+    latencyText_ = add<nova::Text> (0, skin(), Token::TextDim2, 11.0f);
+    latencyWarn_ = add<nova::Text> (0, skin(), Token::Pink, 11.0f);   // dans un insert de Neptune, la latence (si elle n'est pas nulle) n'est pas compensée entre les pistes
 
     struct Spec { ParamId id; const char* title; bool pink; const char* help; };
     const Spec specs[5] = { { lm::threshold, "lm.threshold", false, "hlp.lm_threshold" }, { lm::ceiling, "lm.ceiling", false, "hlp.lm_ceiling" },
@@ -176,6 +177,7 @@ void NovaDigueEditor::layout()
     modePill_->setBounds (R (220, 480, 200, 32));
     hqPill_->setBounds (R (440, 480, 170, 32));
     latencyText_->setBounds (R (640, 484, 490, 24));
+    latencyWarn_->setBounds (R (640, 484, 490, 24));
     const float colW = (942.0f - 12.0f * 4.0f) / 5.0f;
     for (std::size_t i = 0; i < columns_.size(); ++i)
     {
@@ -197,8 +199,10 @@ void NovaDigueEditor::tick()
         if (currentPage() == 0) view_->push (gr);
         const double sr = options().sampleRate ? options().sampleRate() : 48000.0;
         const int latency = module_->latencySamples (host().parameters());
-        latencyText_->setText (options().brand ? tx ("lm.latency") + "  " + juce::String (latency) + " smp  (" + juce::String (1000.0 * latency / sr, 1) + " ms)"
-                                               : juce::String::fromUTF8 (translator().format ("nv.latency_insert", { std::to_string (latency) }).c_str()));
+        const bool warn = ! this->options().brand && latency > 0;
+        const auto plain = tx ("lm.latency") + "  " + juce::String (latency) + " smp  (" + juce::String (1000.0 * latency / sr, 1) + " ms)";
+        latencyText_->setText (warn ? juce::String() : plain);
+        latencyWarn_->setText (warn ? juce::String::fromUTF8 (translator().format ("nv.latency_insert", { std::to_string (latency) }).c_str()) : juce::String());
     }
     hqPill_->setOn (isHighQuality());
 }

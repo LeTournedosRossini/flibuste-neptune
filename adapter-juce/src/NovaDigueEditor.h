@@ -23,7 +23,7 @@ private:
     nova::Panel *metersPanel_ = nullptr, *navPanel_ = nullptr, *viewPanel_ = nullptr;
     nova::VMeter *inMeter_ = nullptr, *grMeter_ = nullptr, *outMeter_ = nullptr;
     nova::Pill *inTrimPill_ = nullptr, *modePill_ = nullptr, *hqPill_ = nullptr;
-    nova::Text* latencyText_ = nullptr;
+    nova::Text *latencyText_ = nullptr, *latencyWarn_ = nullptr;
     HistoryView* view_ = nullptr;
     struct Column { nova::Panel* card; nova::KnobCard* knob; };
     std::vector<Column> columns_;   // THRESHOLD, CEILING, RELEASE, LOOKAHEAD, OUTPUT

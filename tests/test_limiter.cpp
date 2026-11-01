@@ -272,6 +272,67 @@ TEST_CASE ("Digue : Low Latency, un pic plus profond sur un signal déjà limit�
     CHECK (env (48000 + 300) < env (48000 + 60) * 1.1f);
 }
 
+TEST_CASE ("Digue : Zero Latency, latence nulle, plafond tenu dès le premier échantillon", "[limiter]")
+{
+    auto r = make();
+    setP (*r, limiter::mode, kZeroLatency);
+    setP (*r, threshold, -12.0);   // gain de repos +12 dB
+    setP (*r, ceiling, 0.0);
+    CHECK (r->latencySamples() == 0);
+    std::vector<float> in (20000, 0.02f);
+    in[10000] = 1.0f;   // un seul échantillon, 3,98 après le gain de repos
+    const auto out = run (*r, in);
+    // aucun retard : l'échantillon limité est à sa place et vaut exactement le plafond
+    CHECK (out[10000] == Approx (1.0f).margin (1e-6));
+    CHECK (db (peakOf (out)) <= 0.001);
+    // l'avant du pic n'est pas touché (pas d'anticipation) : gain de repos
+    const double base = 0.02 * std::pow (10.0, 12.0 / 20.0);
+    CHECK (out[9999] == Approx (base).margin (1e-6));
+}
+
+TEST_CASE ("Digue : Zero Latency, la réduction remonte à la vitesse de Release", "[limiter]")
+{
+    auto r = make();
+    setP (*r, limiter::mode, kZeroLatency);
+    setP (*r, threshold, -12.0);
+    setP (*r, ceiling, 0.0);
+    setP (*r, release, 15.0);
+    std::vector<float> in (60000, 0.02f);
+    in[10000] = 1.0f;
+    const auto out = run (*r, in);
+    const double base = 0.02 * std::pow (10.0, 12.0 / 20.0);
+    auto gDb = [&] (std::size_t t) { return db (out[t] / base); };
+    CHECK (gDb (10001) == Approx (-12.0).margin (0.05));
+    // 4800 échantillons (0,1 s) plus tard : 15 dB/s x 0,1 s = 1,5 dB de remonté
+    CHECK (gDb (10000 + 4800) == Approx (-10.5).margin (0.05));
+    CHECK (gDb (55000) == Approx (0.0).margin (0.001));   // 12 dB à 15 dB/s : 0,8 s, soit 38 400 échantillons ; revenu au gain de repos
+}
+
+TEST_CASE ("Digue : Zero Latency, transparent sous le plafond et identique quelle que soit la taille de bloc", "[limiter]")
+{
+    {
+        auto r = make();
+        setP (*r, limiter::mode, kZeroLatency);
+        setP (*r, threshold, 0.0);
+        setP (*r, ceiling, 0.0);
+        const auto in = sine (440.0, 0.5, 20000);
+        const auto out = run (*r, in);
+        CHECK (out == in);   // bit à bit : aucun retard, aucun gain
+    }
+    const auto in = sine (200.0, 0.9, 30000);
+    std::vector<float> ref;
+    for (const int block : { 37, 64, 512, 1024 })
+    {
+        auto r = make (48000.0, block);
+        setP (*r, limiter::mode, kZeroLatency);
+        setP (*r, threshold, -18.0);
+        setP (*r, ceiling, -1.0);
+        const auto out = run (*r, in, block);
+        CHECK (db (peakOf (out)) <= -1.0 + 0.001);
+        if (ref.empty()) ref = out; else CHECK (out == ref);
+    }
+}
+
 TEST_CASE ("Digue : stéréo liée, un pic à gauche réduit aussi la droite", "[limiter]")
 {
     auto r = make();

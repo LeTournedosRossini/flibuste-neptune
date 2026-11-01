@@ -9,6 +9,7 @@ namespace limiter
 {
 int lookaheadSamples (double sampleRate, int mode, double lookaheadMs) noexcept
 {
+    if (mode == kZeroLatency) return 0;
     const double ms = mode == kLowLatency ? lowLatencyMs : std::clamp (lookaheadMs, 1.0, maxLookaheadMs);
     // Low Latency : arrondi vers le bas (52 échantillons à 44,1 kHz, 56 à 48 kHz, comme le limiteur de référence) ; Quality : à l'entier le plus proche (441 / 480)
     const double samples = ms * 0.001 * sampleRate;
@@ -29,7 +30,7 @@ bool LimiterModule::declareParams (ParameterSet& set, std::string* error) const
         && set.add (fine (P::continuous (ceiling, "Ceiling", Unit::Decibel, -24.0, 0.0, -0.3)), error)
         && set.add (P::continuous (release, "Release", Unit::DecibelPerSecond, 1.0, 100.0, 15.0, Curve::Exponential), error)
         && set.add (fixed (P::continuous (lookahead, "Lookahead", Unit::Milliseconds, 1.0, maxLookaheadMs, maxLookaheadMs)), error)
-        && set.add (fixed (P::choice (mode, "Mode", { "Quality", "Low Latency" }, kQuality)), error);
+        && set.add (fixed (P::choice (mode, "Mode", { "Quality", "Low Latency", "Zero Latency" }, kQuality)), error);
 }
 
 void LimiterModule::bind (const ParameterSet& set)
@@ -58,7 +59,7 @@ int LimiterModule::maxLatencySamples (double sampleRate) const noexcept
 
 int LimiterModule::latencySamples (const ParameterSet& params) const noexcept
 {
-    const int mode = params.getAt (idx_[limiter::mode - limiter::threshold]) >= 0.5 ? limiter::kLowLatency : limiter::kQuality;
+    const int mode = std::clamp (static_cast<int> (std::lround (params.getAt (idx_[limiter::mode - limiter::threshold]))), 0, static_cast<int> (limiter::kNumModes) - 1);
     return limiter::lookaheadSamples (sampleRate_, mode, params.getAt (idx_[limiter::lookahead - limiter::threshold]));
 }
 
@@ -73,6 +74,7 @@ void LimiterModule::reset() noexcept
     prev_ = 1.0;
     slope_ = slewDefault_;
     holdUntil_ = 0;
+    redDb_ = 0.0;
     slowDb_ = 0.0;
     inPeak_[0] = inPeak_[1] = outPeak_[0] = outPeak_[1] = 0.0f;
     lastReductionDb_ = 0.0;
@@ -83,7 +85,7 @@ void LimiterModule::configure (int mode, int delay) noexcept
 {
     mode_ = mode;
     delay_ = std::min (delay, maxDelay_);
-    look_ = mode == limiter::kLowLatency ? delay_ : std::max (1, static_cast<int> (std::lround (limiter::rampShare * delay_)));
+    look_ = mode == limiter::kZeroLatency ? 1 : mode == limiter::kLowLatency ? delay_ : std::max (1, static_cast<int> (std::lround (limiter::rampShare * delay_)));
     rise_ = mode == limiter::kLowLatency ? std::max (1, static_cast<int> (std::lround (limiter::riseMs * 0.001 * sampleRate_)))
                                          : std::max (1, delay_);
     hold_ = mode == limiter::kLowLatency ? static_cast<int> (std::lround (limiter::lowLatencyHoldMs * 0.001 * sampleRate_)) : 0;
@@ -95,7 +97,7 @@ void LimiterModule::process (float* left, float* right, int n, const ParameterSe
 {
     using namespace limiter;
     auto get = [&] (ParamId id) { return params.getAt (idx_[id - threshold]); };
-    const int mode = get (limiter::mode) >= 0.5 ? kLowLatency : kQuality;
+    const int mode = std::clamp (static_cast<int> (std::lround (get (limiter::mode))), 0, static_cast<int> (kNumModes) - 1);
     const int delay = lookaheadSamples (sampleRate_, mode, get (lookahead));
     if (mode != mode_ || delay != delay_) configure (mode, delay);
     const double ceilDb = get (ceiling);
@@ -145,6 +147,22 @@ void LimiterModule::process (float* left, float* right, int n, const ParameterSe
 // Un échantillon d'entrée : on range u et r, puis on calcule le gain de l'échantillon d'il y a `delay_` pas (dont les `delay_` suivants sont connus).
 void LimiterModule::step (float inL, float inR, float& outL, float& outR) noexcept
 {
+    if (mode_ == limiter::kZeroLatency)
+    {
+        // aucune anticipation : le gain tombe d'un coup à l'échantillon qui dépasse le plafond, puis remonte de Release dB par seconde
+        const float zL = static_cast<float> (inL * boostLin_), zR = static_cast<float> (inR * boostLin_);
+        const double zPeak = std::max (std::abs (static_cast<double> (zL)), std::abs (static_cast<double> (zR)));
+        const double zr = std::min (1.0, ceilLin_ / std::max (zPeak, 1e-12));
+        const double needDb = zr < 1.0 ? -20.0 * std::log10 (zr) : 0.0;
+        const double decayed = redDb_ - slowDown_;
+        double zg;
+        if (needDb >= decayed) { redDb_ = needDb; zg = zr; }   // le plafond est tenu exactement sur cet échantillon
+        else { redDb_ = std::max (decayed, 0.0); zg = redDb_ > 0.0 ? std::pow (10.0, -redDb_ / 20.0) : 1.0; }
+        lastReductionDb_ = redDb_;
+        outL = static_cast<float> (zL * zg);
+        outR = static_cast<float> (zR * zg);
+        return;
+    }
     const auto cap = static_cast<std::int64_t> (cap_);
     const auto slot = [cap] (std::int64_t t) { return static_cast<std::size_t> (((t % cap) + cap) % cap); };
 

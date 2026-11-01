@@ -27,9 +27,9 @@ constexpr ParamId threshold = 100;   // dB, -60..+12 : gain d'entrée relatif au
 constexpr ParamId ceiling = 101;     // dB, -24..0
 constexpr ParamId release = 102;     // dB/s, 1..100
 constexpr ParamId lookahead = 103;   // ms, 1..10 (mode Quality ; non automatisable : c'est la latence)
-constexpr ParamId mode = 104;        // choix : 0 Quality, 1 Low Latency (non automatisable : c'est la latence)
+constexpr ParamId mode = 104;        // choix : 0 Quality, 1 Low Latency, 2 Zero Latency (non automatisable : c'est la latence)
 
-enum Mode : int { kQuality = 0, kLowLatency = 1, kNumModes };
+enum Mode : int { kQuality = 0, kLowLatency = 1, kZeroLatency = 2, kNumModes };   // kZeroLatency : aucune anticipation, attaque instantanée (pour le direct)
 
 constexpr double maxLookaheadMs = 10.0;
 constexpr double lowLatencyMs = 1.18;        // latence déclarée en Low Latency (52 échantillons à 44,1 kHz, 56 à 48 kHz)
@@ -85,6 +85,7 @@ private:
     std::int64_t lastBelow_ = 0;    // dernier instant où r < 1
     // étage rapide
     double prev_ = 1.0, slope_ = 0.0;
+    double redDb_ = 0.0;            // Zero Latency : réduction de gain courante (dB)
     std::int64_t holdUntil_ = 0;    // Low Latency : la remontée ne peut commencer qu'à cet instant (pic + maintien)
     // étage lent (dB)
     double slowDb_ = 0.0;
