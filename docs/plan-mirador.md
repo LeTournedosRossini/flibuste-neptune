@@ -80,4 +80,4 @@ Même style NOVA, pages : SONIE, MIXAGE, STÉRÉO, SPECTRE, SETTINGS. Mètres à
 
 1. Nom : Mirador : nom retenu par Jean le 2026-10-30.
 2. Une entrée latérale (mesurer une autre piste) est-elle utile ?
-3. Faut-il une courbe de sonie qui se superpose à la forme d'onde du projet ? Cela exige une analyse hors ligne et sort du cadre de cette première version.
+3. (Hors cadre.) Faut-il une courbe de sonie qui se superpose à la forme d'onde du projet ? Cela exige une analyse hors ligne et sort du cadre de cette première version.

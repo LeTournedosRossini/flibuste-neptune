@@ -31,6 +31,7 @@ const char* unitText (Unit u)
         case Unit::Degrees: return "degrés";
         case Unit::Samples: return "échantillons";
         case Unit::Ratio: return "rapport";
+        case Unit::DecibelPerSecond: return "dB/s";
         default: return "";
     }
 }

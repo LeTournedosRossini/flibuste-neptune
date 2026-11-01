@@ -704,6 +704,48 @@ target_link_libraries(Fournaise
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
 
+# ---- Digue : limiteur brickwall à anticipation (modes Quality et Low Latency), plugin CLAP effet indépendant ------------------------------------------
+# Cœur : LimiterModule (module stock) ; interface NOVA (NovaDigueEditor). Plan : docs/plan-limiteur.md.
+set(DIGUE_CLAP_ID "com.tournedosrossini.digue" CACHE STRING "Identifiant CLAP de Digue")
+
+juce_add_plugin(Digue
+  COMPANY_NAME                "Le Tournedos Rossini"
+  PRODUCT_NAME                "Digue"
+  PLUGIN_MANUFACTURER_CODE    Trss
+  PLUGIN_CODE                 Digu
+  IS_SYNTH                    FALSE
+  NEEDS_MIDI_INPUT            FALSE
+  FORMATS                     Standalone)
+
+clap_juce_extensions_plugin(
+  TARGET        Digue
+  CLAP_ID       "${DIGUE_CLAP_ID}"
+  CLAP_FEATURES audio-effect limiter stereo)
+
+target_sources(Digue PRIVATE
+  src/DiguePlugin.cpp
+  src/NovaDigueEditor.cpp
+  src/NovaEditor.cpp
+  src/NovaKit.cpp
+  src/NeptuneKnob.cpp
+  src/KnobModal.cpp)
+
+target_compile_definitions(Digue PUBLIC
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+  JUCE_VST3_CAN_REPLACE_VST2=0)
+
+target_link_libraries(Digue
+  PRIVATE
+    neptune_core
+    juce::juce_audio_utils
+    juce::juce_audio_plugin_client
+    clap_juce_extensions
+  PUBLIC
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_lto_flags
+    juce::juce_recommended_warning_flags)
+
 # ---- NovaGallery : rendu hors-ligne en PNG des composants communs NOVA (NovaKit), pour la comparaison avec les maquettes HTML ----------
 # Outil de développement (CI Linux : exécuté sous xvfb, images archivées) ; non installé.
 juce_add_console_app(NovaGallery PRODUCT_NAME "NovaGallery")

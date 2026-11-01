@@ -16,7 +16,7 @@ namespace neptune::core
 {
 using ParamId = std::uint32_t; // identifiant stable : ne change jamais une fois publié (automation de l'hôte)
 
-enum class Unit { None, Decibel, Hertz, Milliseconds, Seconds, Percent, Cents, Semitones, Octaves, Degrees, Samples, Ratio };
+enum class Unit { None, Decibel, Hertz, Milliseconds, Seconds, Percent, Cents, Semitones, Octaves, Degrees, Samples, Ratio, DecibelPerSecond };
 
 enum class Kind
 {

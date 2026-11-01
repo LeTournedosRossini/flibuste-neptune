@@ -212,6 +212,7 @@ const char* unitSuffix (Unit u)
         case Unit::Degrees:      return " °";
         case Unit::Samples:      return " smp";
         case Unit::Ratio:        return ":1";
+        case Unit::DecibelPerSecond: return " dB/s";
         case Unit::None:         break;
     }
     return "";

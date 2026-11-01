@@ -7,6 +7,7 @@
 #include "neptune/core/ChorusModule.h"
 #include "neptune/core/ConvolutionModule.h"
 #include "neptune/core/OverdriveModule.h"
+#include "neptune/core/LimiterModule.h"
 #include "neptune/core/CompressorModule.h"
 #include "neptune/core/DelayModule.h"
 #include "neptune/core/EqualizerModule.h"
@@ -175,6 +176,7 @@ std::unique_ptr<StockModule> createModule (std::string_view typeId)
     if (typeId == "microdecale") return std::make_unique<MicrodecaleModule>();
     if (typeId == "convolution") return std::make_unique<ConvolutionModule>();
     if (typeId == "overdrive") return std::make_unique<OverdriveModule>();
+    if (typeId == "limiter") return std::make_unique<LimiterModule>();
     return nullptr;
 }
 
