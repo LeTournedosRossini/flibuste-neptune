@@ -331,6 +331,7 @@ private:
     // --- traitement d'une bande (un bloc de `chunkN_` échantillons)
     bool runInserts (Inserts&, Stereo&) noexcept;
     static bool hasInserts (const Inserts&) noexcept;
+    static bool hasSourceInsert (const Inserts&) noexcept;   // un générateur (Diapason) : la bande doit tourner sans instrument ni entrée
     void applyFaderPan (const Stereo& in, Stereo& postFader, Stereo& fin, const AtomicStrip&, const ParamIndices&, float& lastFader,
                         float& lastPanL, float& lastPanR, bool muted) noexcept;
     void meterOf (const Stereo& out, std::atomic<float>& pkL, std::atomic<float>& pkR, std::atomic<float>& rmsL, std::atomic<float>& rmsR) noexcept;
@@ -398,6 +399,8 @@ private:
     {
         struct Line { std::vector<float> l, r; std::size_t w = 0; int delay = 0; std::uint32_t stamp = 0; };
         int total = 0;
+        int used = 0;   // arêtes retardées : 0 = plan vide, le thread audio ne le consulte pas
+        std::vector<int> usedIndex;   // leurs indices (bande * kEdges + arête), pour le balayage de fin de bloc
         std::vector<int> delays = std::vector<int> (static_cast<std::size_t> (kStrips * kEdges), 0);
         std::vector<Line> lines = std::vector<Line> (static_cast<std::size_t> (kStrips * kEdges));   // à l'usage du seul thread audio une fois publié
     };

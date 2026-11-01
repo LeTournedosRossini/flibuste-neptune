@@ -852,7 +852,11 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
         t.appliedActive = active;
     }
     if (insertsDirty_.exchange (false, std::memory_order_acq_rel)) adoptInserts();
-    if (planSlot_.adoptPending()) plan_ = const_cast<LatencyPlan*> (planSlot_.current());   // plan de compensation de latence
+    if (planSlot_.adoptPending())   // plan de compensation de latence ; un plan sans arête retardée n'est pas consulté (aucun coût)
+    {
+        const auto* p = planSlot_.current();
+        plan_ = p != nullptr && p->used > 0 ? const_cast<LatencyPlan*> (p) : nullptr;
+    }
     drainUiEvents();
     if (numChannels < 1 || out[0] == nullptr || numFrames <= 0) { hostL_ = hostR_ = nullptr; hostFrames_ = 0; return; }
 
@@ -884,6 +888,13 @@ std::pair<float*, float*> Engine::channelPair (int output) const noexcept
     const int l = 2 * (output - 1), r = l + 1;
     if (output < 1 || r >= chunkChannels_) return { nullptr, nullptr };
     return { chunkOut_[l], chunkOut_[r] };
+}
+
+bool Engine::hasSourceInsert (const Inserts& ins) noexcept
+{
+    for (const auto& s : ins)
+        if (const auto* inst = s.slot.current(); inst != nullptr && inst->runner.module().isSource()) return true;
+    return false;
 }
 
 bool Engine::hasInserts (const Inserts& ins) noexcept
@@ -1208,7 +1219,7 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         nextSibling_[static_cast<std::size_t> (p)] = firstChild_[static_cast<std::size_t> (parent)];
         firstChild_[static_cast<std::size_t> (parent)] = p;
         if (param (x.idx.solo, 0.0) >= 0.5) subtreeSolo_[static_cast<std::size_t> (numTracks + p)] = 1;
-        if (x.peakL.load (std::memory_order_relaxed) != 0.0f || x.peakR.load (std::memory_order_relaxed) != 0.0f) subtreeBusy_[static_cast<std::size_t> (numTracks + p)] = 1;
+        if (x.peakL.load (std::memory_order_relaxed) != 0.0f || x.peakR.load (std::memory_order_relaxed) != 0.0f || hasSourceInsert (x.inserts)) subtreeBusy_[static_cast<std::size_t> (numTracks + p)] = 1;
     }
     for (int t = 0; t < kTracks; ++t)
         if (param (tracks_[static_cast<std::size_t> (t)].idx.solo, 0.0) >= 0.5) subtreeSolo_[static_cast<std::size_t> (t)] = 1;
@@ -1267,7 +1278,7 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
             for (int k = 0; k < kModulators; ++k) mods[k] = static_cast<float> (param (t.idx.mod[static_cast<std::size_t> (k)], 100.0) / 100.0);
             t.voices.setModulators (mods);
         }
-        if (wasSilent && idle && subtreeBusy_[static_cast<std::size_t> (ti)] == 0) { t.lastSend.fill (0.0f); continue; }
+        if (wasSilent && idle && subtreeBusy_[static_cast<std::size_t> (ti)] == 0 && ! hasSourceInsert (t.inserts)) { t.lastSend.fill (0.0f); continue; }
 
         std::fill (raw_.l.begin(), raw_.l.begin() + n, 0.0f);
         std::fill (raw_.r.begin(), raw_.r.begin() + n, 0.0f);
@@ -1437,7 +1448,7 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
     {
         auto& b = buses_[static_cast<std::size_t> (bi)];
         const bool wasSilent = b.peakL.load (std::memory_order_relaxed) == 0.0f && b.peakR.load (std::memory_order_relaxed) == 0.0f;
-        if (! b.hasInput && wasSilent) { b.lastSend.fill (0.0f); continue; }
+        if (! b.hasInput && wasSilent && ! hasSourceInsert (b.inserts)) { b.lastSend.fill (0.0f); continue; }
         const bool muted = param (b.idx.mute, 0.0) >= 0.5 || (busSolo_ && param (b.idx.solo, 0.0) < 0.5);
         Stereo& in = busIn_[static_cast<std::size_t> (bi)];
         Stereo* afterInserts = &in;
@@ -1479,6 +1490,7 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
             runInserts (masterInserts_, master_);
         }
         const auto pair = channelPair (masterOutput_.load (std::memory_order_relaxed));
+        const bool masterDelayed = plan_ != nullptr && plan_->lines[static_cast<std::size_t> (masterStrip * kEdges + kEdgeDirect)].delay > 0;
         float peakL = 0.0f, peakR = 0.0f, sumL = 0.0f, sumR = 0.0f;
         for (int i = 0; i < n; ++i)
         {
@@ -1490,10 +1502,19 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
             sumL += l * l; sumR += r * r;
             loudL_[static_cast<std::size_t> (i)] = l;
             loudR_[static_cast<std::size_t> (i)] = r;
-            postFader_.l[static_cast<std::size_t> (i)] = l;   // sortie vers l'hôte : retardée plus bas pour s'aligner sur la latence totale du plugin
-            postFader_.r[static_cast<std::size_t> (i)] = r;
+            if (masterDelayed)
+            {
+                postFader_.l[static_cast<std::size_t> (i)] = l;   // sortie vers l'hôte : retardée plus bas pour s'aligner sur la latence totale du plugin
+                postFader_.r[static_cast<std::size_t> (i)] = r;
+            }
+            else
+            {
+                if (pair.first != nullptr) pair.first[i] += l;
+                if (pair.second != nullptr) pair.second[i] += r;
+            }
             gt += tStep; gf += fStep; gl += plStep; gr += prStep;
         }
+        if (masterDelayed)
         {
             const Stereo& hostOut = delayed (masterStrip, kEdgeDirect, postFader_);
             for (int i = 0; i < n; ++i)
@@ -1510,8 +1531,11 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         masterRmsR_.store (std::sqrt (sumR / static_cast<float> (n)), std::memory_order_relaxed);
     }
     if (plan_ != nullptr)
-        for (auto& ln : plan_->lines)
-            if (ln.delay > 0 && ln.stamp != planStamp_) feedSilence (ln, n);
+        for (const int idx : plan_->usedIndex)
+        {
+            auto& ln = plan_->lines[static_cast<std::size_t> (idx)];
+            if (ln.stamp != planStamp_) feedSilence (ln, n);
+        }
 }
 
 Engine::Meter Engine::trackMeter (int t) const noexcept
@@ -1752,6 +1776,8 @@ int Engine::updateLatencyPlan()
         for (std::size_t i = 0; i < plan->delays.size(); ++i)
             if (const int d = plan->delays[i]; d > 0)
             {
+                ++plan->used;
+                plan->usedIndex.push_back (static_cast<int> (i));
                 auto& ln = plan->lines[i];
                 ln.delay = d;
                 ln.l.assign (static_cast<std::size_t> (d) + 1, 0.0f);

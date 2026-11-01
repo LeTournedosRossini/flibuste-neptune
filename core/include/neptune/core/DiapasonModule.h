@@ -22,6 +22,7 @@ public:
     void prepare (double sampleRate, int maxBlockSize) override;
     void reset() noexcept override;
     void process (float* left, float* right, int n, const ParameterSet& params) noexcept override;
+    bool isSource() const noexcept override { return true; }
 
     // L'interface (déclencheur, sons de batterie, affichage du pas et des crêtes) parle directement au moteur.
     generator::GeneratorEngine& engine() noexcept { return engine_; }

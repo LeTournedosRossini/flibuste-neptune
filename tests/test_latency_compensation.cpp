@@ -1,10 +1,12 @@
 // Compensation de latence de Neptune (profil Studio) : un insert à latence sur une piste ne décale plus cette piste par rapport aux autres.
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <vector>
 
+#include "neptune/core/DiapasonModule.h"
 #include "neptune/core/Engine.h"
 #include "neptune/core/LimiterModule.h"
 #include "neptune/core/Mixer.h"
@@ -136,4 +138,27 @@ TEST_CASE ("compensation : la latence est la même par un bus que par la sortie 
     CHECK (out[4000] > 0.2f);
     CHECK (firstAbove (out, 0.001f) >= static_cast<std::size_t> (total) - 1);
     CHECK (out[static_cast<std::size_t> (total) + 8] > 0.9f * out[4000]);
+}
+
+TEST_CASE ("un générateur en insert sur une piste sans instrument sonne (la piste n'est pas sautée)", "[engine][insert]")
+{
+    Rig r;
+    mixer::StripSettings s;
+    s.routing.mainEnabled = false;
+    s.routing.directOut = 2;   // sortie directe 2 = voies 3-4
+    r.engine.setTrackSettings (0, s);
+    auto ins = createInsert ("diapason", kRate, kBlock);
+    REQUIRE (ins != nullptr);
+    auto& p = ins->runner.params();
+    p.set (generator::signal, generator::kSine);
+    p.set (generator::mode, generator::kContinuous);
+    p.set (generator::on, 1.0);
+    r.engine.setInsert (StripKind::Track, 0, 0, ins);
+    float peak = 0.0f;
+    for (int b = 0; b < 40; ++b)
+    {
+        r.engine.process (r.ptrs.data(), static_cast<int> (r.ptrs.size()), kBlock);
+        for (const float v : r.bufs[2]) peak = std::max (peak, std::abs (v));
+    }
+    CHECK (peak > 0.01f);
 }

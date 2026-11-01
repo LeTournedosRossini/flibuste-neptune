@@ -48,6 +48,8 @@ public:
     // Profil Live de Neptune : le module passe en variante à latence nulle (anticipation et suréchantillonnage coupés) SANS toucher à ses réglages ; le retour
     // en profil Studio rend les réglages de l'utilisateur. Appelé par le moteur à chaque bloc (atomique, sans coût).
     virtual void setZeroLatency (bool) noexcept {}
+    // Le module produit du signal à partir de rien (générateur) : sa bande doit être traitée même sans instrument ni entrée.
+    virtual bool isSource() const noexcept { return false; }
     // Valeur par défaut du mix commun (%) : 100 pour un effet en insert ordinaire, moins pour un effet de départ (delay).
     virtual double defaultMixPercent() const noexcept { return 100.0; }
 
