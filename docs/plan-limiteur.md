@@ -49,4 +49,12 @@ Chemin du `.clap`, noms exacts des réglages Threshold / Ceiling / Release (unit
 - Cœur `LimiterModule` écrit, 11 tests (`tests/test_limiter.cpp`), 887 cas du cœur passent. Plugin `Digue.clap` compilé et installé sous Linux (`~/.clap/Digue.clap`) ; Windows non fait.
 - Banc (`compare_clone.py`, mode Quality, lecture des réglages par le texte affiché) : 29 cas sur 29 dans la tolérance avec `--latency 480` (28 sur 29 avec la détection automatique, qui échoue seulement sur le sinus de 30 Hz limité dès le début). Pire écart hors cas difficiles 0,0415 dB. Threshold et Ceiling s'affichent avec deux décimales : le banc règle par le texte, et avec une seule le plafond « 0.0 » couvrait 0,05 dB.
 - Low Latency et lookahead court : implémentés, testés seulement par propriété (plafond tenu, creux gardé), jamais comparés à ReaLimit. Interface jamais vue à l'écran ni dans Reaper.
-- Pas dans le menu d'inserts de Neptune.
+- Pas dans le menu d'inserts de Neptune (avant le 2026-11-01, soir : fait ensuite, voir plus bas).
+
+## État au 2026-11-01 (soir, 19:50)
+- **Low Latency** : maintien de 480 échantillons comptés depuis le pic ; **un pic qui arrive après la fin du maintien le relance** (même si la descente est minuscule), **un pic plus profond que le creux tenu (de plus de 0,01 %) le relance aussi**, les pics égaux ne l'étendent pas. 24 cas sur 29 dans 0,05 dB sur les références Low Latency du banc (15 avant). Restent : `W1024`, `W8192`, `X_rel6`, `T_lim_f60`, `Q96`.
+- Le banc (message 1930) a vérifié : 44,1 et 96 kHz (latence 52 et 113 échantillons en Low Latency, écart 0,004 dB sur impulsion isolée), Windows identique à Linux bit à bit (43 rendus), règle des suites d'impulsions : **pas de règle simple** (dépend de la position dans le flux par rapport à des blocs internes de ReaLimit, taille inconnue), à ne pas imiter.
+- Méthode : comparaison hors ligne avec un petit programme (`limiter_cli`) sur le dossier `digue/refll` du dossier temporaire du banc (29 entrées et références Low Latency rendues par ReaLimit ; à redemander au banc s'il a disparu) ; le critère « 0,01 % » est empirique.
+
+## Digue comme insert de Neptune (2026-11-01, soir)
+Type d'insert `limiter` (menu des inserts, après Fournaise), éditeur `NovaDigueEditor` ouvert par `InsertOverlay` (comme Fournaise), état sauvé par le type d'insert (rien de plus). Dans un insert, la latence (441 échantillons en Quality à 44,1 kHz) n'est pas compensée entre les pistes : une annonce rose le dit (`nv.latency_insert`). Regardé à l'écran sur le Standalone sous Xvfb ; pas encore dans Reaper.

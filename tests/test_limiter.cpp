@@ -238,6 +238,40 @@ TEST_CASE ("Digue : Low Latency, le maintien dure 480 échantillons à 48 kHz de
     CHECK (g (10000 + 480) > g (10000 + 479) + 1e-4);
 }
 
+TEST_CASE ("Digue : Low Latency, une impulsion juste après la fin du maintien le relance", "[limiter]")
+{
+    auto r = make();
+    setP (*r, limiter::mode, kLowLatency);
+    setP (*r, threshold, -12.0);
+    setP (*r, ceiling, 0.0);
+    std::vector<float> in (30000, 0.02f);
+    in[10000] = 1.0f;
+    in[10500] = 1.0f;   // 20 échantillons après la fin du maintien : la remontée a déjà commencé
+    const auto out = run (*r, in);
+    const std::size_t d = static_cast<std::size_t> (r->latencySamples());
+    const double base = 0.02 * std::pow (10.0, 12.0 / 20.0);
+    auto g = [&] (std::size_t t) { return out[t + d] / base; };
+    // le deuxième pic relance un maintien de 480 échantillons : le gain reste plat de 10520 à 10970 (sans relance il aurait remonté à 1,0)
+    CHECK (g (10970) == Approx (g (10520)).margin (1e-3));
+    CHECK (g (10990) > g (10970) + 1e-4);
+}
+
+TEST_CASE ("Digue : Low Latency, un pic plus profond sur un signal déjà limité relance le maintien", "[limiter]")
+{
+    auto r = make();
+    setP (*r, limiter::mode, kLowLatency);
+    setP (*r, threshold, -24.0);
+    setP (*r, ceiling, 0.0);
+    std::vector<float> in = sine (440.0, 0.1, 100000);   // limité en continu (+24 dB)
+    for (std::size_t i = 48000; i < 48004; ++i) in[i] = 0.9f;   // pic bien plus profond
+    const auto out = run (*r, in);
+    const std::size_t d = static_cast<std::size_t> (r->latencySamples());
+    // enveloppe de la sortie (crête sur 110 échantillons, une période du sinus) juste après le pic et 300 échantillons plus tard : le creux est tenu (480 échantillons)
+    auto env = [&] (std::size_t t) { float p = 0.0f; for (std::size_t i = t + d; i < t + d + 110; ++i) p = std::max (p, std::abs (out[i])); return p; };
+    CHECK (env (48000 + 60) < 0.5f);
+    CHECK (env (48000 + 300) < env (48000 + 60) * 1.1f);
+}
+
 TEST_CASE ("Digue : stéréo liée, un pic à gauche réduit aussi la droite", "[limiter]")
 {
     auto r = make();

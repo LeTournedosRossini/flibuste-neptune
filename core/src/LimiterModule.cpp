@@ -203,7 +203,7 @@ void LimiterModule::step (float inL, float inR, float& outL, float& outR) noexce
             {
                 candRel = allowedMin;
                 slope_ = (1.0 - candRel) / rise_;
-                if (lowLatency && ! holding && candRel < prev_) holdUntil_ = t + allowedK - 1 + hold_;
+                if (lowLatency && (! holding || allowedMin < prev_ * 0.9999)) holdUntil_ = t + allowedK - 1 + hold_;   // le maintien repart d'un pic arrivé après sa fin (même si la descente est minuscule : Q500) ou d'un pic plus profond que le creux tenu (Za9)
             }
         }
         prev_ = candRel;
