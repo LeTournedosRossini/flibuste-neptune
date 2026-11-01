@@ -100,9 +100,9 @@ void CompressorModule::bind (const ParameterSet& set)
 int CompressorModule::latencySamples (const ParameterSet& params) const noexcept
 {
     auto at = [&] (ParamId id) { return idx_[static_cast<std::size_t> (id - 100)] == ParameterSet::npos ? 0.0 : params.getAt (idx_[static_cast<std::size_t> (id - 100)]); };
-    const int os = static_cast<int> (std::lround (at (oversample)));
+    const int os = zero_.load (std::memory_order_relaxed) ? 0 : static_cast<int> (std::lround (at (oversample)));
     const int f = os >= 2 ? 4 : os == 1 ? 2 : 1;
-    const double look = at (lookahead);
+    const double look = zero_.load (std::memory_order_relaxed) ? std::min (at (lookahead), 0.0) : at (lookahead);
     const int main = look > 0.0 ? static_cast<int> (std::lround (std::min (look, maxLookaheadMs) * 0.001 * sampleRate_)) : 0;
     return main + Oversampler::latencyFor (f);
 }
@@ -192,8 +192,9 @@ void CompressorModule::readSettings (const ParameterSet& params) noexcept
     s.wet2 = param (wet2) * 0.01;
     s.deltaOn = param (delta) >= 0.5;
     s.clipper = param (clipperDrive);
-    s.oversample = static_cast<int> (std::lround (param (oversample)));
-    s.lookaheadMs = param (lookahead);
+    const bool zeroLat = zero_.load (std::memory_order_relaxed);   // profil Live : ni suréchantillonnage ni anticipation du signal (une anticipation négative, sur la clé, reste sans latence)
+    s.oversample = zeroLat ? 0 : static_cast<int> (std::lround (param (oversample)));
+    s.lookaheadMs = zeroLat ? std::min (param (lookahead), 0.0) : param (lookahead);
     s.rmsOn = param (rmsOn) >= 0.5;
     s.rmsLengthMs = param (rmsLength);
     s.rmsSpeed = param (rmsSpeed);

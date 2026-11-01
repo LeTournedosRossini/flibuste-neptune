@@ -99,8 +99,9 @@ void ShaperModule::bind (const ParameterSet& set)
 int ShaperModule::latencySamples (const ParameterSet& params) const noexcept
 {
     const auto at = [&] (ParamId id) { return idx_[static_cast<std::size_t> (id - 100)] == ParameterSet::npos ? 0.0 : params.getAt (idx_[static_cast<std::size_t> (id - 100)]); };
-    const int look = static_cast<int> (std::lround (std::clamp (at (lookahead), 0.0, maxLookaheadMs) * 0.001 * sampleRate_));
-    const int os = static_cast<int> (std::lround (at (oversampling)));
+    const bool zeroLat = zero_.load (std::memory_order_relaxed);
+    const int look = zeroLat ? 0 : static_cast<int> (std::lround (std::clamp (at (lookahead), 0.0, maxLookaheadMs) * 0.001 * sampleRate_));
+    const int os = zeroLat ? 0 : static_cast<int> (std::lround (at (oversampling)));
     return look + Oversampler::latencyFor (os >= 2 ? 4 : os == 1 ? 2 : 1);
 }
 
@@ -210,7 +211,8 @@ void ShaperModule::process (float* left, float* right, int n, const ParameterSet
 
     // ---- réglages du bloc
     const int mode = static_cast<int> (std::lround (param (channelMode)));            // 0 Stereo, 1 Dual Mono, 2 M-S
-    const int osIndex = static_cast<int> (std::lround (param (oversampling)));
+    const bool zeroLat = zero_.load (std::memory_order_relaxed);   // profil Live : ni suréchantillonnage ni anticipation
+    const int osIndex = zeroLat ? 0 : static_cast<int> (std::lround (param (oversampling)));
     const int factor = osIndex >= 2 ? 4 : osIndex == 1 ? 2 : 1;
     if (factor != factor_)
     {
@@ -218,7 +220,7 @@ void ShaperModule::process (float* left, float* right, int n, const ParameterSet
         for (auto& c : ch_) { c.os.setFactor (factor); std::fill (c.gainRing.begin(), c.gainRing.end(), 1.0f); }
     }
     for (auto& c : ch_) c.os.setFactor (factor_);
-    const int look = std::min (static_cast<int> (std::lround (std::clamp (param (lookahead), 0.0, maxLookaheadMs) * 0.001 * fs)), static_cast<int> (ch_[0].delay.size()) - 2);
+    const int look = zeroLat ? 0 : std::min (static_cast<int> (std::lround (std::clamp (param (lookahead), 0.0, maxLookaheadMs) * 0.001 * fs)), static_cast<int> (ch_[0].delay.size()) - 2);
     const int totalLatency = look + Oversampler::latencyFor (factor_);
     const bool scOn = param (scEnable) >= 0.5;
     const int source = scOn ? static_cast<int> (std::lround (param (scSource))) : 0;

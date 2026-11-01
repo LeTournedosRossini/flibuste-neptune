@@ -64,8 +64,13 @@ public:
     // nuls : pas d'entrée. Alimente les pistes de type Entrée audio dont le réglage « entrée de l'hôte » est actif.
     void setHostInput (const float* left, const float* right, int frames) noexcept { hostL_ = left; hostR_ = right; hostFrames_ = frames; }
     // Profil Live/Studio effectif de l'instance ; appelé par l'adaptateur avant chaque bloc (sans coût). Aucun effet audible pour l'instant.
-    void setProfile (PerformanceProfile p) noexcept { profile_ = p; }
-    PerformanceProfile profile() const noexcept { return profile_; }
+    void setProfile (PerformanceProfile p) noexcept { profile_.store (p, std::memory_order_relaxed); }
+    PerformanceProfile profile() const noexcept { return profile_.load (std::memory_order_relaxed); }
+    // Compensation de latence (profil Studio) : thread de message, à rappeler régulièrement et après chaque changement d'insert ou de routage.
+    // Recalcule la latence de chaque chemin (inserts, bus, master), aligne par des retards les signaux qui se somment et les sorties, publie le plan s'il change.
+    // Rend la latence totale (échantillons) à annoncer à l'hôte : 0 en profil Live (les modules passent alors à latence nulle).
+    int updateLatencyPlan();
+    int latencySamples() const noexcept { return planTotal_.load (std::memory_order_relaxed); }
 
     // Paramètres lus à chaque bloc (SamplerParams.h, ProbePool.h, Mixer.h). Appelé hors temps réel, avant l'audio.
     void attachParameters (const ParameterSet* parameters) noexcept;
@@ -330,7 +335,9 @@ private:
                         float& lastPanL, float& lastPanR, bool muted) noexcept;
     void meterOf (const Stereo& out, std::atomic<float>& pkL, std::atomic<float>& pkR, std::atomic<float>& rmsL, std::atomic<float>& rmsR) noexcept;
     void routeStrip (const AtomicStrip&, const ParamIndices&, std::array<float, mixer::numSends>& lastSend, const Stereo& pre, const Stereo& post,
-                     const Stereo& postFader, const Stereo& out, bool isBus, int busIndex, bool sumIntoParent) noexcept;
+                     const Stereo& postFader, const Stereo& out, bool isBus, int busIndex, bool sumIntoParent, int stripId) noexcept;
+    // Retard de compensation d'une arête (bande, arête) : rend `src` tel quel s'il n'y en a pas, sinon une copie retardée (tampon commun, valable jusqu'à l'appel suivant).
+    const Stereo& delayed (int strip, int edge, const Stereo& src) noexcept;
     void processParallel (int p, int depth, bool ancestorSolo, const Stereo& parentPre, const Stereo& parentPost, const Stereo& parentFader,
                           const Stereo& parentFin, Stereo& parentSum, float parentGainFrom, float parentGainTo) noexcept;
     std::pair<float*, float*> channelPair (int output) const noexcept;
@@ -347,7 +354,7 @@ private:
     double sampleRate_ = 0.0;
     int maxBlockSize_ = 0;
     int activeNotes_ = 0;
-    PerformanceProfile profile_ = PerformanceProfile::Live;
+    std::atomic<PerformanceProfile> profile_ { PerformanceProfile::Live };
 
     static constexpr std::size_t kUiQueueSize = 256; // puissance de 2
     std::array<UiEvent, kUiQueueSize> uiQueue_ {};
@@ -382,6 +389,30 @@ private:
     std::size_t masterVolume_ = ParameterSet::npos, masterPan_ = ParameterSet::npos, masterMute_ = ParameterSet::npos,
                 masterTrim_ = ParameterSet::npos, masterMono_ = ParameterSet::npos;
     Inserts masterInserts_;
+    // ---- compensation de latence
+    static constexpr int kEdgeSelf = mixer::numSends + 3;   // arêtes d'une bande : envois 0..numSends-1, principale, directe, vers la somme du parent, elle-même vers sa somme
+    static constexpr int kEdgeMain = mixer::numSends, kEdgeDirect = mixer::numSends + 1, kEdgeInto = mixer::numSends + 2, kEdges = mixer::numSends + 4;
+    static constexpr int kStrips = kTracks + kBuses + kParallels + 1;   // pistes, bus, pistes parallèles, Master
+    static constexpr int masterStrip = kTracks + kBuses + kParallels;
+    struct LatencyPlan
+    {
+        struct Line { std::vector<float> l, r; std::size_t w = 0; int delay = 0; std::uint32_t stamp = 0; };
+        int total = 0;
+        std::vector<int> delays = std::vector<int> (static_cast<std::size_t> (kStrips * kEdges), 0);
+        std::vector<Line> lines = std::vector<Line> (static_cast<std::size_t> (kStrips * kEdges));   // à l'usage du seul thread audio une fois publié
+    };
+    HandoffSlot<LatencyPlan> planSlot_;
+    LatencyPlan* plan_ = nullptr;                     // thread audio
+    std::uint32_t planStamp_ = 0;                      // thread audio : numéro du bloc
+    std::vector<int> publishedDelays_;                 // thread de message : le dernier plan publié
+    int publishedTotal_ = -1;
+    std::atomic<int> planTotal_ { 0 };
+    std::array<std::array<std::shared_ptr<const InsertInstance>, mixer::numInserts>, kStrips> msgInserts_;   // thread de message : les inserts, pour en lire la latence
+    static int stripIndex (StripKind kind, int index) noexcept
+    {
+        return kind == StripKind::Track ? index : kind == StripKind::Bus ? kTracks + index : kind == StripKind::Parallel ? kTracks + kBuses + index : masterStrip;
+    }
+    void feedSilence (LatencyPlan::Line&, int n) noexcept;
     std::atomic<bool> insertsDirty_ { false }; // un insert a été publié : le thread audio les adopte au prochain bloc
     float lastMasterTrim_ = 1.0f, lastMasterFader_ = 1.0f, lastMasterPanL_ = 1.0f, lastMasterPanR_ = 1.0f;
     std::atomic<float> masterPeakL_ { 0.0f }, masterPeakR_ { 0.0f }, masterRmsL_ { 0.0f }, masterRmsR_ { 0.0f };
@@ -390,6 +421,7 @@ private:
     struct Stereo { std::vector<float> l, r; void resize (std::size_t n) { l.assign (n, 0.0f); r.assign (n, 0.0f); } };
     struct Level { Stereo pre, post, fader, fin, sum; void resize (std::size_t n) { pre.resize (n); post.resize (n); fader.resize (n); fin.resize (n); sum.resize (n); } };
     Stereo raw_, inserted_, postFader_, final_, sum0_, master_; // niveau 0 : la piste
+    Stereo delayTmp_;                                           // sortie d'un retard de compensation
     std::vector<Level> levels_;                                 // niveau d >= 1 : levels_[d - 1], pour les pistes parallèles
     std::array<Stereo, kBuses> busIn_;
     std::array<Stereo, kTracks> trackIn_;                       // envois reçus par les pistes « Entrée audio »

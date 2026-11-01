@@ -71,6 +71,7 @@ target_sources(Neptune PRIVATE
   src/NovaConvolutionEditor.cpp
   src/NovaFournaiseEditor.cpp
   src/NovaDigueEditor.cpp
+  src/NovaDiapasonEditor.cpp
   src/NovaCompressorEditor.cpp
   src/NovaHistoryView.cpp
   src/NovaEditor.cpp

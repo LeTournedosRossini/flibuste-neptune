@@ -8,6 +8,7 @@
 #include "neptune/core/ConvolutionModule.h"
 #include "neptune/core/OverdriveModule.h"
 #include "neptune/core/LimiterModule.h"
+#include "neptune/core/DiapasonModule.h"
 #include "neptune/core/CompressorModule.h"
 #include "neptune/core/DelayModule.h"
 #include "neptune/core/EqualizerModule.h"
@@ -161,7 +162,7 @@ void ModuleRunner::process (float* left, float* right, int n, bool bypassed) noe
 // ---- registre ----
 const std::vector<ModuleInfo>& availableModules()
 {
-    static const std::vector<ModuleInfo> modules = { { "utility", "module.utility" }, { "shaper", "module.shaper" }, { "compressor", "module.compressor" }, { "equalizer", "module.equalizer" }, { "delay", "module.delay" }, { "chorus", "module.chorus" }, { "microdecale", "module.microdecale" }, { "convolution", "module.convolution" }, { "overdrive", "module.overdrive" }, { "limiter", "module.limiter" } };
+    static const std::vector<ModuleInfo> modules = { { "utility", "module.utility" }, { "shaper", "module.shaper" }, { "compressor", "module.compressor" }, { "equalizer", "module.equalizer" }, { "delay", "module.delay" }, { "chorus", "module.chorus" }, { "microdecale", "module.microdecale" }, { "convolution", "module.convolution" }, { "overdrive", "module.overdrive" }, { "limiter", "module.limiter" }, { "diapason", "module.diapason" } };
     return modules;
 }
 
@@ -177,6 +178,7 @@ std::unique_ptr<StockModule> createModule (std::string_view typeId)
     if (typeId == "convolution") return std::make_unique<ConvolutionModule>();
     if (typeId == "overdrive") return std::make_unique<OverdriveModule>();
     if (typeId == "limiter") return std::make_unique<LimiterModule>();
+    if (typeId == "diapason") return std::make_unique<DiapasonModule>();
     return nullptr;
 }
 

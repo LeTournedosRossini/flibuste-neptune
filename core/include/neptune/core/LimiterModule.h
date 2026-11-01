@@ -57,6 +57,7 @@ public:
     void reset() noexcept override;
     void process (float* left, float* right, int n, const ParameterSet& params) noexcept override;
     int latencySamples (const ParameterSet&) const noexcept override;
+    void setZeroLatency (bool z) noexcept override { zero_.store (z, std::memory_order_relaxed); }
     int maxLatencySamples (double sampleRate) const noexcept override;
 
     int numMeters() const noexcept override { return limiter::kNumMeters; }
@@ -66,6 +67,7 @@ public:
     }
 
 private:
+    std::atomic<bool> zero_ { false };   // profil Live : variante à latence nulle (setZeroLatency)
     void configure (int mode, int delay) noexcept;   // fixe l'anticipation, les durées et vide les tampons
     void step (float inL, float inR, float& outL, float& outR) noexcept;
 

@@ -309,7 +309,7 @@ void OverdriveModule::reset() noexcept
 int OverdriveModule::latencySamples (const ParameterSet& params) const noexcept
 {
     const auto i = params.indexOf (oversampling);
-    const int f = i == ParameterSet::npos ? 2 : kFactors[choiceIndex (params.getAt (i), 3)];
+    const int f = zero_.load (std::memory_order_relaxed) ? 1 : i == ParameterSet::npos ? 2 : kFactors[choiceIndex (params.getAt (i), 3)];
     return Oversampler::latencyFor (f);
 }
 
@@ -368,7 +368,7 @@ void OverdriveModule::updateDesigns() noexcept
     haveLast_ = true;
 
     modelIndex_ = choiceIndex (param (model), kNumModels);
-    factor_ = kFactors[choiceIndex (param (oversampling), 3)];
+    factor_ = zero_.load (std::memory_order_relaxed) ? 1 : kFactors[choiceIndex (param (oversampling), 3)];   // profil Live : pas de suréchantillonnage
     channelMode_ = choiceIndex (param (channels), kNumChannelModes);
     keyMode_ = choiceIndex (param (keySource), kNumKeySources);
     latency_ = Oversampler::latencyFor (factor_);

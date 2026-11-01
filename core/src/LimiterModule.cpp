@@ -59,7 +59,7 @@ int LimiterModule::maxLatencySamples (double sampleRate) const noexcept
 
 int LimiterModule::latencySamples (const ParameterSet& params) const noexcept
 {
-    const int mode = std::clamp (static_cast<int> (std::lround (params.getAt (idx_[limiter::mode - limiter::threshold]))), 0, static_cast<int> (limiter::kNumModes) - 1);
+    const int mode = zero_.load (std::memory_order_relaxed) ? static_cast<int> (limiter::kZeroLatency) : std::clamp (static_cast<int> (std::lround (params.getAt (idx_[limiter::mode - limiter::threshold]))), 0, static_cast<int> (limiter::kNumModes) - 1);
     return limiter::lookaheadSamples (sampleRate_, mode, params.getAt (idx_[limiter::lookahead - limiter::threshold]));
 }
 
@@ -97,7 +97,7 @@ void LimiterModule::process (float* left, float* right, int n, const ParameterSe
 {
     using namespace limiter;
     auto get = [&] (ParamId id) { return params.getAt (idx_[id - threshold]); };
-    const int mode = std::clamp (static_cast<int> (std::lround (get (limiter::mode))), 0, static_cast<int> (kNumModes) - 1);
+    const int mode = zero_.load (std::memory_order_relaxed) ? static_cast<int> (kZeroLatency) : std::clamp (static_cast<int> (std::lround (get (limiter::mode))), 0, static_cast<int> (kNumModes) - 1);   // profil Live : Zero Latency
     const int delay = lookaheadSamples (sampleRate_, mode, get (lookahead));
     if (mode != mode_ || delay != delay_) configure (mode, delay);
     const double ceilDb = get (ceiling);

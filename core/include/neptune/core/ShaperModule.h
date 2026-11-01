@@ -83,6 +83,7 @@ public:
     void reset() noexcept override;
     void process (float* left, float* right, int n, const ParameterSet& params) noexcept override;
     int latencySamples (const ParameterSet&) const noexcept override;
+    void setZeroLatency (bool z) noexcept override { zero_.store (z, std::memory_order_relaxed); }
     int maxLatencySamples (double sampleRate) const noexcept override;
     bool wantsKey() const noexcept override { return true; }
     void setKey (const float* left, const float* right) noexcept override { keyL_ = left; keyR_ = right; }
@@ -99,6 +100,7 @@ public:
     double detectionResponseDb (const ParameterSet&, double f) const noexcept;
 
 private:
+    std::atomic<bool> zero_ { false };   // profil Live : variante à latence nulle (setZeroLatency)
     struct Channel
     {
         Oversampler os;

@@ -60,7 +60,7 @@ void Engine::prepare (double sampleRate, int maxBlockSize) noexcept
     lastMasterTrim_ = lastMasterFader_ = 1.0f;
     lastMasterPanL_ = lastMasterPanR_ = 1.0f;
     const auto n = static_cast<std::size_t> (maxBlockSize_);
-    raw_.resize (n); inserted_.resize (n); postFader_.resize (n); final_.resize (n); sum0_.resize (n); master_.resize (n);
+    raw_.resize (n); inserted_.resize (n); postFader_.resize (n); final_.resize (n); sum0_.resize (n); master_.resize (n); delayTmp_.resize (n);
     loudL_.assign (n, 0.0f);
     loudR_.assign (n, 0.0f);
     loudness_.prepare (sampleRate);
@@ -157,6 +157,7 @@ void Engine::setInsert (StripKind kind, int index, int slot, std::shared_ptr<con
 {
     auto* ins = insertsOf (kind, index);
     if (ins == nullptr || slot < 0 || slot >= kInserts) return;
+    msgInserts_[static_cast<std::size_t> (stripIndex (kind, index))][static_cast<std::size_t> (slot)] = insert;
     (*ins)[static_cast<std::size_t> (slot)].slot.publish (std::move (insert));
     insertsDirty_.store (true, std::memory_order_release);
 }
@@ -164,6 +165,7 @@ void Engine::setInsert (StripKind kind, int index, int slot, std::shared_ptr<con
 void Engine::collectGarbage()
 {
     routerSlot_.collect();
+    planSlot_.collect();
     for (auto& t : tracks_)
     {
         t.slot.collect();
@@ -850,6 +852,7 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
         t.appliedActive = active;
     }
     if (insertsDirty_.exchange (false, std::memory_order_acq_rel)) adoptInserts();
+    if (planSlot_.adoptPending()) plan_ = const_cast<LatencyPlan*> (planSlot_.current());   // plan de compensation de latence
     drainUiEvents();
     if (numChannels < 1 || out[0] == nullptr || numFrames <= 0) { hostL_ = hostR_ = nullptr; hostFrames_ = 0; return; }
 
@@ -899,6 +902,7 @@ bool Engine::runInserts (Inserts& ins, Stereo& buf) noexcept
         auto* inst = const_cast<InsertInstance*> (s.slot.current()); // le thread audio est seul utilisateur du DSP après la remise
         if (inst == nullptr) continue;
         any = true;
+        inst->runner.setZeroLatency (profile_ == PerformanceProfile::Live);   // profil Live : variante à latence nulle de chaque module (réglages intacts)
         inst->runner.process (buf.l.data(), buf.r.data(), chunkN_, param (s.bypass, 0.0) >= 0.5);
     }
     return any;
@@ -952,7 +956,7 @@ void Engine::meterOf (const Stereo& out, std::atomic<float>& pkL, std::atomic<fl
 // bande (son signal propre + ses pistes parallèles). Pour une piste parallèle, `sumIntoParent` est vrai : la sortie principale est
 // alors la somme dans le parent, faite par l'appelant.
 void Engine::routeStrip (const AtomicStrip& cfg, const ParamIndices& idx, std::array<float, mixer::numSends>& lastSend, const Stereo& pre,
-                         const Stereo& post, const Stereo& postFader, const Stereo& out, bool isBus, int busIndex, bool sumIntoParent) noexcept
+                         const Stereo& post, const Stereo& postFader, const Stereo& out, bool isBus, int busIndex, bool sumIntoParent, int stripId) noexcept
 {
     using namespace mixer;
     const int n = chunkN_;
@@ -976,7 +980,7 @@ void Engine::routeStrip (const AtomicStrip& cfg, const ParamIndices& idx, std::a
             valid = ! (isBus && dest - 1 <= busIndex);
         if (! valid) { last = target; continue; }
         const int tap = cfg.sends[static_cast<std::size_t> (s)].tap.load (std::memory_order_relaxed);
-        const Stereo& src = tap == 0 ? pre : (tap == 1 ? post : (tap == 2 ? postFader : out));
+        const Stereo& src = delayed (stripId, s, tap == 0 ? pre : (tap == 1 ? post : (tap == 2 ? postFader : out)));   // compensation de latence : aligné sur la destination
         float spl = 1.0f, spr = 1.0f;
         panGains (static_cast<PanMode> (cfg.panMode.load (std::memory_order_relaxed)), cfg.sends[static_cast<std::size_t> (s)].pan.load (std::memory_order_relaxed), spl, spr);
         Stereo& bus = toTrack ? trackIn_[static_cast<std::size_t> (destTrack)] : busIn_[static_cast<std::size_t> (dest - 1)];
@@ -1001,10 +1005,11 @@ void Engine::routeStrip (const AtomicStrip& cfg, const ParamIndices& idx, std::a
             target = &busIn_[static_cast<std::size_t> (dest - 1)];
             buses_[static_cast<std::size_t> (dest - 1)].hasInput = true;
         }
+        const Stereo& mainOut = delayed (stripId, kEdgeMain, out);
         for (int i = 0; i < n; ++i)
         {
-            target->l[static_cast<std::size_t> (i)] += out.l[static_cast<std::size_t> (i)];
-            target->r[static_cast<std::size_t> (i)] += out.r[static_cast<std::size_t> (i)];
+            target->l[static_cast<std::size_t> (i)] += mainOut.l[static_cast<std::size_t> (i)];
+            target->r[static_cast<std::size_t> (i)] += mainOut.r[static_cast<std::size_t> (i)];
         }
     }
     const int direct = cfg.directOut.load (std::memory_order_relaxed);
@@ -1012,11 +1017,14 @@ void Engine::routeStrip (const AtomicStrip& cfg, const ParamIndices& idx, std::a
     {
         const auto pair = channelPair (direct);
         if (pair.first != nullptr && pair.second != nullptr)
+        {
+            const Stereo& directOut = delayed (stripId, kEdgeDirect, out);
             for (int i = 0; i < n; ++i)
             {
-                pair.first[i] += out.l[static_cast<std::size_t> (i)];
-                pair.second[i] += out.r[static_cast<std::size_t> (i)];
+                pair.first[i] += directOut.l[static_cast<std::size_t> (i)];
+                pair.second[i] += directOut.r[static_cast<std::size_t> (i)];
             }
+        }
     }
 }
 
@@ -1074,7 +1082,7 @@ void Engine::processParallel (int p, int depth, bool ancestorSolo, const Stereo&
     if (gateOwn || hasChildren)
     {
         if (gateOwn) { std::fill (L.sum.l.begin(), L.sum.l.begin() + n, 0.0f); std::fill (L.sum.r.begin(), L.sum.r.begin() + n, 0.0f); }
-        else { std::copy (L.fin.l.begin(), L.fin.l.begin() + n, L.sum.l.begin()); std::copy (L.fin.r.begin(), L.fin.r.begin() + n, L.sum.r.begin()); }
+        else { const Stereo& own = delayed (kTracks + kBuses + p, kEdgeSelf, L.fin); std::copy (own.l.begin(), own.l.begin() + n, L.sum.l.begin()); std::copy (own.r.begin(), own.r.begin() + n, L.sum.r.begin()); }
         for (int child = firstChild_[static_cast<std::size_t> (self)]; child >= 0; child = nextSibling_[static_cast<std::size_t> (child)])
             processParallel (child, depth + 1, audible, L.pre, *post, L.fader, L.fin, L.sum, gainFrom, gainTo);
         out = &L.sum;
@@ -1082,13 +1090,16 @@ void Engine::processParallel (int p, int depth, bool ancestorSolo, const Stereo&
     meterOf (*out, P.peakL, P.peakR, P.rmsL, P.rmsR);
 
     const bool toParent = P.config.mainEnabled.load (std::memory_order_relaxed) != 0;
-    routeStrip (P.config, P.idx, P.lastSend, L.pre, *post, L.fader, *out, false, -1, true);
+    routeStrip (P.config, P.idx, P.lastSend, L.pre, *post, L.fader, *out, false, -1, true, kTracks + kBuses + p);
     if (toParent)
+    {
+        const Stereo& intoParent = delayed (kTracks + kBuses + p, kEdgeInto, *out);   // aligné sur la somme du parent
         for (int i = 0; i < n; ++i)
         {
-            parentSum.l[static_cast<std::size_t> (i)] += out->l[static_cast<std::size_t> (i)];
-            parentSum.r[static_cast<std::size_t> (i)] += out->r[static_cast<std::size_t> (i)];
+            parentSum.l[static_cast<std::size_t> (i)] += intoParent.l[static_cast<std::size_t> (i)];
+            parentSum.r[static_cast<std::size_t> (i)] += intoParent.r[static_cast<std::size_t> (i)];
         }
+    }
 }
 
 static_assert (modulation::kInsertSlots == mixer::numInserts, "les emplacements d'insert de la modulation doivent suivre le mixeur");
@@ -1108,8 +1119,45 @@ void Engine::addInsertOffset (void* context, int slot, ParamId moduleParam, floa
     if (c.engine->insertTouched_.size() < c.engine->insertTouched_.capacity()) c.engine->insertTouched_.push_back ({ c.track, slot, inst, index });
 }
 
+const Engine::Stereo& Engine::delayed (int strip, int edge, const Stereo& src) noexcept
+{
+    if (plan_ == nullptr) return src;
+    auto& ln = plan_->lines[static_cast<std::size_t> (strip * kEdges + edge)];
+    if (ln.delay <= 0) return src;
+    const auto n = static_cast<std::size_t> (chunkN_);
+    const std::size_t cap = ln.l.size(), delay = static_cast<std::size_t> (ln.delay);   // cap = delay + 1
+    std::size_t w = ln.w;
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        ln.l[w] = src.l[i];
+        ln.r[w] = src.r[i];
+        const std::size_t rd = w >= delay ? w - delay : w + cap - delay;
+        delayTmp_.l[i] = ln.l[rd];
+        delayTmp_.r[i] = ln.r[rd];
+        if (++w == cap) w = 0;
+    }
+    ln.w = w;
+    ln.stamp = planStamp_;
+    return delayTmp_;
+}
+
+// Une arête que le bloc n'a pas alimentée (bande inactive, envoi coupé) : son retard avance d'un bloc de silence, pour ne pas ressortir un vieux signal plus tard.
+void Engine::feedSilence (LatencyPlan::Line& ln, int n) noexcept
+{
+    const std::size_t cap = ln.l.size();
+    std::size_t w = ln.w;
+    for (int i = 0; i < n; ++i)
+    {
+        ln.l[w] = 0.0f;
+        ln.r[w] = 0.0f;
+        if (++w == cap) w = 0;
+    }
+    ln.w = w;
+}
+
 void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
 {
+    ++planStamp_;
     using namespace mixer;
     chunkOut_ = out;
     chunkChannels_ = numChannels;
@@ -1376,13 +1424,13 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         if (gateOwn || hasChildren)
         {
             if (gateOwn) { std::fill (sum0_.l.begin(), sum0_.l.begin() + n, 0.0f); std::fill (sum0_.r.begin(), sum0_.r.begin() + n, 0.0f); }
-            else { std::copy (final_.l.begin(), final_.l.begin() + n, sum0_.l.begin()); std::copy (final_.r.begin(), final_.r.begin() + n, sum0_.r.begin()); }
+            else { const Stereo& own = delayed (ti, kEdgeSelf, final_); std::copy (own.l.begin(), own.l.begin() + n, sum0_.l.begin()); std::copy (own.r.begin(), own.r.begin() + n, sum0_.r.begin()); }
             for (int child = firstChild_[static_cast<std::size_t> (ti)]; child >= 0; child = nextSibling_[static_cast<std::size_t> (child)])
                 processParallel (child, 1, selfSolo, raw_, *afterInserts, postFader_, final_, sum0_, faderFrom, faderTo);
             trackOut = &sum0_;
         }
         meterOf (*trackOut, t.peakL, t.peakR, t.rmsL, t.rmsR);
-        routeStrip (t.config, t.idx, t.lastSend, raw_, *afterInserts, postFader_, *trackOut, false, -1, false);
+        routeStrip (t.config, t.idx, t.lastSend, raw_, *afterInserts, postFader_, *trackOut, false, -1, false, ti);
     }
     // ---- bus, dans l'ordre : un bus n'alimente que des bus d'indice supérieur
     for (int bi = 0; bi < kBuses; ++bi)
@@ -1402,7 +1450,7 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         }
         applyFaderPan (*afterInserts, postFader_, final_, b.config, b.idx, b.lastFader, b.lastPanL, b.lastPanR, muted);
         meterOf (final_, b.peakL, b.peakR, b.rmsL, b.rmsR);
-        routeStrip (b.config, b.idx, b.lastSend, in, *afterInserts, postFader_, final_, true, bi, false);
+        routeStrip (b.config, b.idx, b.lastSend, in, *afterInserts, postFader_, final_, true, bi, false, kTracks + bi);
     }
     // ---- master : trim, inserts, fader, pan, mute, réduction mono
     {
@@ -1442,9 +1490,17 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
             sumL += l * l; sumR += r * r;
             loudL_[static_cast<std::size_t> (i)] = l;
             loudR_[static_cast<std::size_t> (i)] = r;
-            if (pair.first != nullptr) pair.first[i] += l;
-            if (pair.second != nullptr) pair.second[i] += r;
+            postFader_.l[static_cast<std::size_t> (i)] = l;   // sortie vers l'hôte : retardée plus bas pour s'aligner sur la latence totale du plugin
+            postFader_.r[static_cast<std::size_t> (i)] = r;
             gt += tStep; gf += fStep; gl += plStep; gr += prStep;
+        }
+        {
+            const Stereo& hostOut = delayed (masterStrip, kEdgeDirect, postFader_);
+            for (int i = 0; i < n; ++i)
+            {
+                if (pair.first != nullptr) pair.first[i] += hostOut.l[static_cast<std::size_t> (i)];
+                if (pair.second != nullptr) pair.second[i] += hostOut.r[static_cast<std::size_t> (i)];
+            }
         }
         lastMasterTrim_ = trimTarget; lastMasterFader_ = faderTarget; lastMasterPanL_ = pl; lastMasterPanR_ = pr;
         loudness_.push (loudL_.data(), loudR_.data(), n);
@@ -1453,6 +1509,9 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         masterRmsL_.store (std::sqrt (sumL / static_cast<float> (n)), std::memory_order_relaxed);
         masterRmsR_.store (std::sqrt (sumR / static_cast<float> (n)), std::memory_order_relaxed);
     }
+    if (plan_ != nullptr)
+        for (auto& ln : plan_->lines)
+            if (ln.delay > 0 && ln.stamp != planStamp_) feedSilence (ln, n);
 }
 
 Engine::Meter Engine::trackMeter (int t) const noexcept
@@ -1568,5 +1627,144 @@ int Engine::readVoices (VoiceInfo* out, int maxOut) const noexcept
         if (voiceSeq_.load (std::memory_order_relaxed) == before) return n;
     }
     return 0; // trop de collisions d'écriture (très improbable) : cette image est ignorée
+}
+
+// ---- compensation de latence : le plan (thread de message)
+//
+// Latence d'une bande = somme des latences de ses inserts. Chaque point où des signaux se somment (entrée d'un bus, d'une piste « Entrée audio », du Master, somme d'une
+// piste et de ses parallèles) attend le plus tardif de ses arrivants : les autres sont retardés d'autant, arête par arête. Toutes les sorties vers l'hôte sont alignées sur la
+// plus tardive, dont la valeur est la latence annoncée au plugin. En profil Live, les modules sont à latence nulle (Engine::runInserts) : le plan est vide et la latence annoncée est 0.
+int Engine::updateLatencyPlan()
+{
+    using namespace mixer;
+    auto plan = std::make_shared<LatencyPlan>();
+    int total = 0;
+    if (profile() != PerformanceProfile::Live)
+    {
+        std::array<int, kStrips> in {}, t1 {}, t3 {}, maxArr {};
+        struct Edge { int strip, edge, dest, arrival; };   // dest < 0 : sortie vers l'hôte
+        std::vector<Edge> edges;
+        auto setDelay = [&plan] (int strip, int edge, int delay) { plan->delays[static_cast<std::size_t> (strip * kEdges + edge)] = std::clamp (delay, 0, 192000); };
+        auto stripLatency = [this] (int id)
+        {
+            int sum = 0;
+            for (const auto& inst : msgInserts_[static_cast<std::size_t> (id)])
+                if (inst != nullptr) sum += inst->runner.latencySamples();
+            return sum;
+        };
+        auto configOf = [this] (int id) -> const AtomicStrip&
+        {
+            if (id < kTracks) return tracks_[static_cast<std::size_t> (id)].config;
+            if (id < kTracks + kBuses) return buses_[static_cast<std::size_t> (id - kTracks)].config;
+            return parallels_[static_cast<std::size_t> (id - kTracks - kBuses)].config;
+        };
+        auto rootIsAudioIn = [this] (int root) { return root >= 0 && tracks_[static_cast<std::size_t> (root)].type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::AudioIn); };
+
+        std::function<void (int, int, int)> doStrip = [&] (int id, int root, int depth)
+        {
+            const bool isBus = id >= kTracks && id < kTracks + kBuses, isParallel = id >= kTracks + kBuses;
+            t1[static_cast<std::size_t> (id)] = in[static_cast<std::size_t> (id)] + stripLatency (id);
+            int sumLat = t1[static_cast<std::size_t> (id)];
+            std::vector<int> contributing;
+            if (! isBus && depth < kParallels)
+                for (int c = 0; c < kParallels; ++c)
+                {
+                    const auto& P = parallels_[static_cast<std::size_t> (c)];
+                    if (P.active.load (std::memory_order_relaxed) == 0) continue;
+                    const int parent = P.parent.load (std::memory_order_relaxed);
+                    const int parentId = parent < kTracks ? parent : kTracks + kBuses + (parent - kTracks);
+                    if (parentId != id) continue;
+                    const int cid = kTracks + kBuses + c, tap = P.tap.load (std::memory_order_relaxed);
+                    in[static_cast<std::size_t> (cid)] = tap == 0 ? in[static_cast<std::size_t> (id)] : t1[static_cast<std::size_t> (id)];
+                    doStrip (cid, root, depth + 1);
+                    if (P.config.mainEnabled.load (std::memory_order_relaxed) != 0)
+                    {
+                        contributing.push_back (cid);
+                        sumLat = std::max (sumLat, t3[static_cast<std::size_t> (cid)]);
+                    }
+                }
+            t3[static_cast<std::size_t> (id)] = sumLat;
+            if (! contributing.empty())
+            {
+                setDelay (id, kEdgeSelf, sumLat - t1[static_cast<std::size_t> (id)]);
+                for (const int cid : contributing) setDelay (cid, kEdgeInto, sumLat - t3[static_cast<std::size_t> (cid)]);
+            }
+            const auto& cfg = configOf (id);
+            const int busIndex = isBus ? id - kTracks : -1;
+            for (int j = 0; j < numSends; ++j)
+            {
+                const auto& snd = cfg.sends[static_cast<std::size_t> (j)];
+                const int dest = snd.destination.load (std::memory_order_relaxed);
+                if (dest <= 0 || snd.mute.load (std::memory_order_relaxed) != 0) continue;
+                const int tap = snd.tap.load (std::memory_order_relaxed);
+                const int arrival = tap == 0 ? in[static_cast<std::size_t> (id)] : tap == 3 ? t3[static_cast<std::size_t> (id)] : t1[static_cast<std::size_t> (id)];
+                int destId = -1;
+                if (dest > kBuses)
+                {
+                    const int destTrack = dest - kBuses - 1;
+                    const bool ok = ! isBus && destTrack >= 0 && destTrack < kTracks && destTrack != root && (! rootIsAudioIn (root) || destTrack > root)
+                                 && tracks_[static_cast<std::size_t> (destTrack)].active.load (std::memory_order_relaxed) != 0
+                                 && tracks_[static_cast<std::size_t> (destTrack)].type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::AudioIn);
+                    if (ok) destId = destTrack;
+                }
+                else if (! (isBus && dest - 1 <= busIndex)) destId = kTracks + dest - 1;
+                if (destId < 0) continue;
+                edges.push_back ({ id, j, destId, arrival });
+                maxArr[static_cast<std::size_t> (destId)] = std::max (maxArr[static_cast<std::size_t> (destId)], arrival);
+            }
+            if (! isParallel && cfg.mainEnabled.load (std::memory_order_relaxed) != 0)
+            {
+                const int dest = cfg.mainDest.load (std::memory_order_relaxed);
+                const int destId = (dest > 0 && dest <= kBuses && ! (isBus && dest - 1 <= busIndex)) ? kTracks + dest - 1 : masterStrip;
+                edges.push_back ({ id, kEdgeMain, destId, t3[static_cast<std::size_t> (id)] });
+                maxArr[static_cast<std::size_t> (destId)] = std::max (maxArr[static_cast<std::size_t> (destId)], t3[static_cast<std::size_t> (id)]);
+            }
+            const int direct = cfg.directOut.load (std::memory_order_relaxed);
+            if (direct >= 1 && direct <= numOutputs) edges.push_back ({ id, kEdgeDirect, -1, t3[static_cast<std::size_t> (id)] });
+        };
+
+        for (int t = 0; t < kTracks; ++t)   // pistes ordinaires, puis pistes « Entrée audio » (elles reçoivent des envois), puis bus dans l'ordre, puis Master
+            if (tracks_[static_cast<std::size_t> (t)].active.load (std::memory_order_relaxed) != 0
+                && tracks_[static_cast<std::size_t> (t)].type.load (std::memory_order_relaxed) != static_cast<int> (TrackType::AudioIn))
+                doStrip (t, t, 0);
+        for (int t = 0; t < kTracks; ++t)
+            if (tracks_[static_cast<std::size_t> (t)].active.load (std::memory_order_relaxed) != 0
+                && tracks_[static_cast<std::size_t> (t)].type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::AudioIn))
+            {
+                in[static_cast<std::size_t> (t)] = maxArr[static_cast<std::size_t> (t)];
+                doStrip (t, t, 0);
+            }
+        for (int b = 0; b < kBuses; ++b)
+        {
+            const int id = kTracks + b;
+            in[static_cast<std::size_t> (id)] = maxArr[static_cast<std::size_t> (id)];
+            doStrip (id, -1, 0);
+        }
+        in[static_cast<std::size_t> (masterStrip)] = maxArr[static_cast<std::size_t> (masterStrip)];
+        t1[static_cast<std::size_t> (masterStrip)] = t3[static_cast<std::size_t> (masterStrip)] = in[static_cast<std::size_t> (masterStrip)] + stripLatency (masterStrip);
+        edges.push_back ({ masterStrip, kEdgeDirect, -1, t3[static_cast<std::size_t> (masterStrip)] });
+
+        for (const auto& e : edges)
+            if (e.dest < 0) total = std::max (total, e.arrival);
+        for (const auto& e : edges)
+            setDelay (e.strip, e.edge, (e.dest < 0 ? total : in[static_cast<std::size_t> (e.dest)]) - e.arrival);
+        plan->total = total;
+        for (std::size_t i = 0; i < plan->delays.size(); ++i)
+            if (const int d = plan->delays[i]; d > 0)
+            {
+                auto& ln = plan->lines[i];
+                ln.delay = d;
+                ln.l.assign (static_cast<std::size_t> (d) + 1, 0.0f);
+                ln.r.assign (static_cast<std::size_t> (d) + 1, 0.0f);
+            }
+    }
+    if (plan->delays != publishedDelays_ || total != publishedTotal_)
+    {
+        publishedDelays_ = plan->delays;
+        publishedTotal_ = total;
+        planTotal_.store (total, std::memory_order_relaxed);
+        planSlot_.publish (std::move (plan));
+    }
+    return total;
 }
 } // namespace neptune::core

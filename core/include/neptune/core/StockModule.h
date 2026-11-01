@@ -45,6 +45,9 @@ public:
     virtual int latencySamples (const ParameterSet&) const noexcept { return 0; }
     // Borne supérieure de la latence à la cadence donnée (dimensionne le retard du signal sec du ModuleRunner).
     virtual int maxLatencySamples (double /*sampleRate*/) const noexcept { return 0; }
+    // Profil Live de Neptune : le module passe en variante à latence nulle (anticipation et suréchantillonnage coupés) SANS toucher à ses réglages ; le retour
+    // en profil Studio rend les réglages de l'utilisateur. Appelé par le moteur à chaque bloc (atomique, sans coût).
+    virtual void setZeroLatency (bool) noexcept {}
     // Valeur par défaut du mix commun (%) : 100 pour un effet en insert ordinaire, moins pour un effet de départ (delay).
     virtual double defaultMixPercent() const noexcept { return 100.0; }
 
@@ -89,6 +92,7 @@ public:
     bool wantsKey() const noexcept { return module_->wantsKey(); }
 
     int latencySamples() const noexcept { return module_->latencySamples (params_); }
+    void setZeroLatency (bool zero) noexcept { module_->setZeroLatency (zero); }
 
 private:
     // Les paramètres sont déclarés AVANT le module : à la destruction, le module (et un éventuel thread qui lit les paramètres) disparaît le premier.

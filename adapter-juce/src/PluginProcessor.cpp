@@ -2059,6 +2059,16 @@ void NeptuneProcessor::controlTick()
 {
     using neptune::core::control::Action;
     control_.collectGarbage();
+    if (++latencyTicks_ >= 6)   // environ 5 fois par seconde : le plan de compensation suit les inserts, le routage et le profil
+    {
+        latencyTicks_ = 0;
+        const int latency = engine_.updateLatencyPlan();
+        if (latency != declaredLatency_)
+        {
+            declaredLatency_ = latency;
+            setLatencySamples (latency);
+        }
+    }
     syncOsc();   // un état chargé par l'hôte peut avoir activé ou arrêté le serveur
     feedbackTick();
     drainCombinationPrograms();

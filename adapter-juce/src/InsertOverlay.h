@@ -10,6 +10,7 @@
 #include "NovaConvolutionEditor.h"
 #include "NovaFournaiseEditor.h"
 #include "NovaDigueEditor.h"
+#include "NovaDiapasonEditor.h"
 #include "NovaEqualizerEditor.h"
 #include "NovaShaperEditor.h"
 #include "UtilityEditor.h"
@@ -53,6 +54,7 @@ private:
     std::unique_ptr<NovaConvolutionEditor> convContent_;
     std::unique_ptr<NovaFournaiseEditor> overdriveContent_;
     std::unique_ptr<NovaDigueEditor> limiterContent_;
+    std::unique_ptr<NovaDiapasonEditor> diapasonContent_;
     std::unique_ptr<NovaCompressorEditor> compressorContent_;
     juce::TextButton bypassButton_, closeButton_;
     juce::String title_;
