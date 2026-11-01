@@ -161,7 +161,7 @@ void ModuleRunner::process (float* left, float* right, int n, bool bypassed) noe
 // ---- registre ----
 const std::vector<ModuleInfo>& availableModules()
 {
-    static const std::vector<ModuleInfo> modules = { { "utility", "module.utility" }, { "shaper", "module.shaper" }, { "compressor", "module.compressor" }, { "equalizer", "module.equalizer" }, { "delay", "module.delay" }, { "chorus", "module.chorus" }, { "microdecale", "module.microdecale" }, { "convolution", "module.convolution" }, { "overdrive", "module.overdrive" } };
+    static const std::vector<ModuleInfo> modules = { { "utility", "module.utility" }, { "shaper", "module.shaper" }, { "compressor", "module.compressor" }, { "equalizer", "module.equalizer" }, { "delay", "module.delay" }, { "chorus", "module.chorus" }, { "microdecale", "module.microdecale" }, { "convolution", "module.convolution" }, { "overdrive", "module.overdrive" }, { "limiter", "module.limiter" } };
     return modules;
 }
 

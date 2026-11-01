@@ -12,8 +12,16 @@ InsertOverlay::InsertOverlay (NeptuneProcessor& p, NeptuneProcessor::StripKind k
     if (handle_.instance == nullptr) return;
     bypassId_ = processor_.insertBypassParam (kind, index, slot);
 
-    const bool isShaper = handle_.instance->type == "shaper", isCompressor = handle_.instance->type == "compressor", isEqualizer = handle_.instance->type == "equalizer", isDelay = handle_.instance->type == "delay", isChorus = handle_.instance->type == "chorus", isMicro = handle_.instance->type == "microdecale", isConv = handle_.instance->type == "convolution", isOverdrive = handle_.instance->type == "overdrive";
-    if (isOverdrive)
+    const bool isShaper = handle_.instance->type == "shaper", isCompressor = handle_.instance->type == "compressor", isEqualizer = handle_.instance->type == "equalizer", isDelay = handle_.instance->type == "delay", isChorus = handle_.instance->type == "chorus", isMicro = handle_.instance->type == "microdecale", isConv = handle_.instance->type == "convolution", isOverdrive = handle_.instance->type == "overdrive", isLimiter = handle_.instance->type == "limiter";
+    if (isLimiter)
+    {
+        NovaDigueEditor::Options opt;
+        opt.moduleName = "digue";
+        opt.sampleRate = [this] { return processor_.getSampleRate() > 0.0 ? processor_.getSampleRate() : 48000.0; };
+        limiterContent_ = std::make_unique<NovaDigueEditor> (*handle_.host, static_cast<const LimiterModule*> (&handle_.instance->runner.module()), palette_, knobStyle, tr_, opt);
+        addAndMakeVisible (*limiterContent_);
+    }
+    else if (isOverdrive)
     {
         NovaFournaiseEditor::Options opt;
         opt.moduleName = "fournaise";
@@ -94,7 +102,7 @@ InsertOverlay::InsertOverlay (NeptuneProcessor& p, NeptuneProcessor::StripKind k
                                    : kind == NeptuneProcessor::StripKind::Parallel
                                          ? juce::String::fromUTF8 (tr_.format ("insert.where_parallel", { std::to_string (index + 1) }).c_str())
                                          : text ("insert.where_master");
-    title_ = text (isOverdrive ? "module.overdrive" : isConv ? "module.convolution" : isMicro ? "module.microdecale" : isChorus ? "module.chorus" : isDelay ? "module.delay" : isEqualizer ? "module.equalizer" : isCompressor ? "module.compressor" : isShaper ? "module.shaper" : "module.utility") + "  -  " + where + "  -  "
+    title_ = text (isLimiter ? "module.limiter" : isOverdrive ? "module.overdrive" : isConv ? "module.convolution" : isMicro ? "module.microdecale" : isChorus ? "module.chorus" : isDelay ? "module.delay" : isEqualizer ? "module.equalizer" : isCompressor ? "module.compressor" : isShaper ? "module.shaper" : "module.utility") + "  -  " + where + "  -  "
            + juce::String::fromUTF8 (tr_.format ("insert.slot", { std::to_string (slot + 1) }).c_str());
 
     bypassButton_.setButtonText (text ("insert.bypass"));
@@ -147,6 +155,7 @@ void InsertOverlay::resized()
     if (microContent_ != nullptr) microContent_->setBounds (r);
     if (convContent_ != nullptr) convContent_->setBounds (r);
     if (overdriveContent_ != nullptr) overdriveContent_->setBounds (r);
+    if (limiterContent_ != nullptr) limiterContent_->setBounds (r);
     if (compressorContent_ != nullptr) compressorContent_->setBounds (r);
 }
 
@@ -179,5 +188,6 @@ bool InsertOverlay::keyPressed (const juce::KeyPress& k)
     if (microContent_ != nullptr) return microContent_->keyPressed (k);
     if (convContent_ != nullptr) return convContent_->keyPressed (k);
     if (overdriveContent_ != nullptr) return overdriveContent_->keyPressed (k);
+    if (limiterContent_ != nullptr) return limiterContent_->keyPressed (k);
     return false;
 }

@@ -119,7 +119,7 @@ NovaDigueEditor::NovaDigueEditor (ParamHost& host, const LimiterModule* module, 
     hqPill_->setText (tx ("lm.hq"));
     hqPill_->onClick = [this] { applyHighQuality(); };
     addInfo (0, hqPill_, "hlp.lm_hq");
-    latencyText_ = add<nova::Text> (0, skin(), Token::TextDim2, 11.0f);
+    latencyText_ = add<nova::Text> (0, skin(), this->options().brand ? Token::TextDim2 : Token::Pink, 11.0f);   // dans un insert de Neptune, la latence n'est pas compensée entre les pistes
 
     struct Spec { ParamId id; const char* title; bool pink; const char* help; };
     const Spec specs[5] = { { lm::threshold, "lm.threshold", false, "hlp.lm_threshold" }, { lm::ceiling, "lm.ceiling", false, "hlp.lm_ceiling" },
@@ -197,7 +197,8 @@ void NovaDigueEditor::tick()
         if (currentPage() == 0) view_->push (gr);
         const double sr = options().sampleRate ? options().sampleRate() : 48000.0;
         const int latency = module_->latencySamples (host().parameters());
-        latencyText_->setText (tx ("lm.latency") + "  " + juce::String (latency) + " smp  (" + juce::String (1000.0 * latency / sr, 1) + " ms)");
+        latencyText_->setText (options().brand ? tx ("lm.latency") + "  " + juce::String (latency) + " smp  (" + juce::String (1000.0 * latency / sr, 1) + " ms)"
+                                               : juce::String::fromUTF8 (translator().format ("nv.latency_insert", { std::to_string (latency) }).c_str()));
     }
     hqPill_->setOn (isHighQuality());
 }
