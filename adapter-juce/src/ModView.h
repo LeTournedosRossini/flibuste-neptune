@@ -21,7 +21,7 @@ public:
     ~ModView() override;
 
     void resized() override;
-    void paint (juce::Graphics&) override {}
+    void paint (juce::Graphics&) override;
 
 private:
     class RouteRow;
@@ -46,6 +46,7 @@ private:
     neptune::core::modulation::Matrix matrix_;      // copie de travail (peut contenir des routes encore sans destination)
     neptune::core::modulation::Matrix committed_;   // ce qui a été enregistré en dernier : un écart venu d'ailleurs recharge la vue
     bool updating_ = false;
+    juce::Rectangle<int> lfoPanel_, envPanel_, routesPanel_;   // conteneurs dessinés derrière les commandes
 
     std::array<LfoRow, neptune::core::modulation::kLfos> lfoRows_;
     std::array<juce::TextButton, neptune::core::modulation::kEnvelopes> envButtons_;   // choix de l'enveloppe montrée

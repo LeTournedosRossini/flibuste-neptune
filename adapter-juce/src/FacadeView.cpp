@@ -341,12 +341,14 @@ public:
         auto& o = owner_;
         const auto area = canvasArea();
         g.setColour (o.colour (Token::PanelBg));
-        g.fillRect (area);
+        g.fillRoundedRectangle (area, 10.0f);
 
         const juce::Image image_ = picture (o.facade_.image, 2048);
         {
             juce::Graphics::ScopedSaveState keep (g);
-            g.reduceClipRegion (area.toNearestInt());
+            juce::Path rounded;
+            rounded.addRoundedRectangle (area, 10.0f);
+            g.reduceClipRegion (rounded);
             if (image_.isValid())
             {
                 const float iw = static_cast<float> (image_.getWidth()), ih = static_cast<float> (image_.getHeight());
@@ -377,8 +379,8 @@ public:
                 }
             }
         }
-        g.setColour (o.colour (Token::Border));
-        g.drawRect (area, 1.0f);
+        g.setColour (o.colour (Token::Pb));
+        g.drawRoundedRectangle (area.reduced (0.5f), 10.0f, 1.0f);
 
         if (o.facade_.widgets.empty())
         {
@@ -3105,7 +3107,8 @@ void FacadeView::resized()
     {
         return juce::roundToInt (std::ceil (getLookAndFeel().getTextButtonFont (const_cast<juce::TextButton&> (b), rowH).getStringWidthFloat (b.getButtonText()))) + pad;
     };
-    auto area = getLocalBounds();
+    const auto whole = getLocalBounds();
+    auto area = whole.reduced (12, 8);   // barre d'outils dans un conteneur arrondi
     auto layoutRow = [&] (juce::Rectangle<int> row, std::initializer_list<juce::TextButton*> buttons)
     {
         for (auto* b : buttons)
@@ -3164,7 +3167,8 @@ void FacadeView::resized()
         flow ({ &knobButton_, &buttonButton_, &menuButton_, &sliderButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &setKeyButton_, &midiButton_, &meterButton_ });
         flow ({ &linkButton_, &textButton_, &styleButton_, &meterSourceButton_, &midiEditButton_, &actionModeButton_, &lampSourceButton_, &orientButton_, &notchesButton_, &scaleButton_, &invertButton_, &captureButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbWheelsButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
     }
-    canvas_->setBounds (area);
+    toolbarRect_ = juce::Rectangle<int> (whole.getX(), whole.getY(), whole.getWidth(), area.getY() - whole.getY());
+    canvas_->setBounds (whole.withTop (toolbarRect_.getBottom() + 4));
     if (picker_ != nullptr) picker_->setBounds (getLocalBounds());
     if (prompt_ != nullptr) prompt_->setBounds (getLocalBounds());
     if (help_ != nullptr) help_->setBounds (getLocalBounds());
@@ -3174,7 +3178,15 @@ void FacadeView::resized()
     if (midiPanel_ != nullptr) midiPanel_->setBounds (getLocalBounds());
 }
 
-void FacadeView::paint (juce::Graphics&) {}
+void FacadeView::paint (juce::Graphics& g)
+{
+    if (toolbarRect_.isEmpty()) return;
+    const auto b = toolbarRect_.toFloat().reduced (0.5f);
+    g.setColour (colour (Token::PanelBg));
+    g.fillRoundedRectangle (b, 10.0f);
+    g.setColour (colour (Token::Pb));
+    g.drawRoundedRectangle (b, 10.0f, 1.0f);
+}
 
 bool FacadeView::isInterestedInFileDrag (const juce::StringArray& files)
 {

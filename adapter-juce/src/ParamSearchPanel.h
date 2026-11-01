@@ -70,6 +70,8 @@ public:
     void paint (juce::Graphics& g) override
     {
         g.fillAll (juce::Colours::black.withAlpha (0.6f));
+        g.setColour (colour (neptune::core::theme::Token::BgApp).withAlpha (1.0f));   // dessous opaque : le fond du thème est translucide
+        g.fillRoundedRectangle (panel().toFloat(), 10.0f);
         g.setColour (colour (neptune::core::theme::Token::PanelBg));
         g.fillRoundedRectangle (panel().toFloat(), 10.0f);
         g.setColour (colour (neptune::core::theme::Token::Border));

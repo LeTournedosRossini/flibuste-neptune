@@ -25,7 +25,7 @@ public:
     std::function<void (NeptuneProcessor::StripKind, int index, int slot)> onOpenInsert;
 
     // Taille de conception : en dessous, tout le mixeur est réduit proportionnellement (au lieu de déborder sur le master et le bas).
-    static constexpr int designWidth = 900, designHeight = 660;
+    static constexpr int designWidth = 1110, designHeight = 660;   // 16 bus + master (140) + marges des conteneurs
     void placeScaled (juce::Rectangle<int> area);
     // Zoom demandé (0,6 à 1,6 ; 1 = taille de conception) : le mixeur ne dépasse jamais la place disponible, donc il grossit seulement si la fenêtre le permet.
     void setZoom (float z);
@@ -70,6 +70,7 @@ private:
     juce::Label zoomLabel_;
     float zoom_ = 1.0f;
     juce::Rectangle<int> lastArea_;
+    juce::Rectangle<int> tracksPanel_, busesPanel_;   // conteneurs dessinés derrière les bandes
     std::array<bool, neptune::core::mixer::numTracks> shownTracks_ {}; // pistes actives telles qu'affichées
     std::uint32_t lastRevision_ = 0xFFFFFFFFu;
 

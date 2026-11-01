@@ -57,9 +57,18 @@ public:
         refresh (r);
     }
 
+    void paint (juce::Graphics& g) override   // une carte par route
+    {
+        const auto b = getLocalBounds().toFloat().reduced (0.5f);
+        g.setColour (owner_.colour (Token::BgCard));
+        g.fillRoundedRectangle (b, 7.0f);
+        g.setColour (owner_.colour (Token::Border));
+        g.drawRoundedRectangle (b, 7.0f, 1.0f);
+    }
+
     void resized() override
     {
-        auto r = getLocalBounds().reduced (2);
+        auto r = getLocalBounds().reduced (4, 2);
         remove_.setBounds (r.removeFromRight (kRemoveW));
         r.removeFromRight (kGapS);
         dest_.setBounds (r.removeFromRight (kDestW));
@@ -279,13 +288,32 @@ juce::Colour ModView::colour (Token t) const
     return juce::Colour (c.r, c.g, c.b, static_cast<float> (c.a));
 }
 
+void ModView::paint (juce::Graphics& g)
+{
+    for (const auto& r : { lfoPanel_, envPanel_, routesPanel_ })
+    {
+        if (r.isEmpty()) continue;
+        const auto b = r.toFloat().reduced (0.5f);
+        g.setColour (colour (Token::PanelBg));
+        g.fillRoundedRectangle (b, 10.0f);
+        g.setColour (colour (Token::Pb));
+        g.drawRoundedRectangle (b, 10.0f, 1.0f);
+    }
+}
+
 void ModView::resized()
 {
+    // trois conteneurs arrondis : LFO (en haut à gauche), enveloppes (en haut à droite), routes (en bas)
     auto r = getLocalBounds();
-    auto top = r.removeFromTop (6 + 26 + 250 + 6);
-    top.removeFromTop (6);
-    auto left = top.removeFromLeft (top.getWidth() / 2 - 10);
-    top.removeFromLeft (20);
+    auto topRow = r.removeFromTop (300);
+    lfoPanel_ = topRow.removeFromLeft (topRow.getWidth() / 2 - 6);
+    topRow.removeFromLeft (12);
+    envPanel_ = topRow;
+    r.removeFromTop (12);
+    routesPanel_ = r;
+    auto left = lfoPanel_.reduced (14, 10);
+    auto top = envPanel_.reduced (14, 10);
+    r = routesPanel_.reduced (14, 10);
     lfoCaption_.setBounds (left.removeFromTop (26));
     envCaption_.setBounds (top.removeFromTop (26));
     {
@@ -312,7 +340,6 @@ void ModView::resized()
     for (auto& b : envButtons_) { b.setBounds (selector.removeFromLeft (80).reduced (2)); }
     envTag_.setBounds (selector);
     envEditor_->setBounds (top);
-    r.removeFromTop (6);
     auto head = r.removeFromTop (30);
     routesCaption_.setBounds (head.removeFromLeft (200));
     addButton_.setBounds (head.removeFromRight (160));
@@ -324,7 +351,7 @@ void ModView::resized()
     {
         // même géométrie que RouteRow::resized(), sur la largeur visible de la liste
         const int width = std::max (400, view_.getMaximumVisibleWidth());
-        auto row = legendRow.withWidth (width).reduced (2, 0);
+        auto row = legendRow.withWidth (width).reduced (4, 0);
         row.removeFromRight (kRemoveW + kGapS);
         routeHead_[5].setBounds (row.removeFromRight (kDestW));
         row.removeFromRight (kGapS);

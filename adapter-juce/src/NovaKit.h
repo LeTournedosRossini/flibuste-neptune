@@ -81,7 +81,10 @@ void setParam (ParamHost&, neptune::core::ParamId, double plain);
 void setParamNormalised (ParamHost&, neptune::core::ParamId, double normalised);
 
 // Pastille de numéro / légende d'en-tête : fond de l'en-tête, logo, nom et sous-titre.
-void paintHeaderBar (juce::Graphics&, const Skin&, juce::Rectangle<float>, const juce::String& word, const juce::String& sub);
+// Full : logo, nom, sous-titre et version (plugin séparé). Window : idem sans la version à droite (la fenêtre y met ses boutons ; la version suit alors `sub`).
+// Compact : seulement le nom de l'instrument, à gauche (éditeur intégré dans une fenêtre qui a déjà son propre en-tête).
+enum class HeaderStyle { Full, Window, Compact };
+void paintHeaderBar (juce::Graphics&, const Skin&, juce::Rectangle<float>, const juce::String& word, const juce::String& sub, HeaderStyle = HeaderStyle::Full);
 void paintBottomBar (juce::Graphics&, const Skin&, juce::Rectangle<float>);
 
 // ------------------------------------------------------------------------------------------------ cadre-carte (.panel)

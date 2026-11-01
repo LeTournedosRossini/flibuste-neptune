@@ -157,7 +157,7 @@ void EditorBase::paint (juce::Graphics& g)
 {
     g.fillAll (skin_.colour (Token::BgApp));
     const auto f = frame_.toFloat();
-    paintHeaderBar (g, skin_, f.withHeight (skin_.px (headerH)), word_, tx ("nv.brand_sub"));
+    paintHeaderBar (g, skin_, f.withHeight (skin_.px (headerH)), word_, tx ("nv.brand_sub"), options_.embedded ? HeaderStyle::Compact : HeaderStyle::Full);
     paintBottomBar (g, skin_, f.withTop (f.getBottom() - skin_.px (bottomH)));
     paintBackground (g);
 }

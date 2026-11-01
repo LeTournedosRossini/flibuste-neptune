@@ -110,6 +110,8 @@ public:
     void paint (juce::Graphics& g) override
     {
         g.fillAll (juce::Colours::black.withAlpha (0.6f));
+        g.setColour (colour (neptune::core::theme::Token::BgApp).withAlpha (1.0f));   // le fond du thème est translucide : sans ce dessous opaque, la fenêtre laisse voir le Mixeur
+        g.fillRoundedRectangle (panel().toFloat(), 10.0f);
         g.setColour (colour (neptune::core::theme::Token::PanelBg));
         g.fillRoundedRectangle (panel().toFloat(), 10.0f);
         g.setColour (colour (neptune::core::theme::Token::Border));

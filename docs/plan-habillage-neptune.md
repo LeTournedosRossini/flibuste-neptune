@@ -1,0 +1,37 @@
+# Plan : habillage de Neptune au style NOVA (2026-11-01)
+
+Décision de l'utilisateur : **habillage seulement** (pas de refonte de la mise en page). Inventaire fait par lecture du code ; aucune capture d'écran vue pour l'instant.
+
+## État actuel
+- La fenêtre `NeptuneEditor` (`PluginEditor.cpp/.h`, 1160 x 960 logique, racine mise à l'échelle par `ScaledRoot`) utilise déjà `nova::Skin` (palette, jetons) et `nova::LookAndFeel` (menus, info-bulles, défilement, boutons JUCE standards) et `NeptuneKnob` (style Led).
+- Elle n'utilise **aucune** brique de mise en page du kit : ni `paintHeaderBar` / `paintBottomBar`, ni `Panel`, `Pill`, `Switch`, `NavItem`, `KnobCard`, `VMeter`, `InfoButton`.
+- En-tête actuel (`paintContent`) : titre « Neptune » en texte 28 pt, version en 10 pt dessous, puis une rangée de `juce::TextButton` (vues, MIDI, OSC, presets globaux, console, split, annuler/refaire, panique, nombre de voix, profil, latence). Pas de logo, pas de bandeau, pas de ligne de séparation.
+- Les vues sont dessinées à la main avec les jetons de couleur (`Token::BgCard`, `Border`...) : `MixerView` (1487 lignes, bandes de piste avec cartes à 8 px de rayon), `ModView`, `RouterView`, `FacadeView` (3908 lignes), `ControlPanel`, `ChokePanel`, `AudioInView`, `MidiFilterEditor`, `MidiMessagePanel`, `CombinationsPanel`, `ImportWizard`, `InsertOverlay`, `KnobModal`. Rayons, épaisseurs de trait, tailles de police et marges propres à chacune.
+- Déjà au style NOVA : l'éditeur Synthé / FM intégré (`InstrumentPanel`), les inserts (`InsertOverlay` ouvre les éditeurs NOVA).
+
+## Ordre proposé
+1. **En-tête et pied** : `paintHeaderBar` (logo, nom, sous-titre, version) et `paintBottomBar` autour de la fenêtre ; les boutons de la rangée du haut deviennent des `nova::Pill`, le choix de piste reste un menu habillé ; la bascule Mixeur / Mapping / Façade / Modulation / Routeur devient des `NavItem` (comme les pages des autres plugins). Annuler, refaire, panique en `Pill`.
+2. **Mixeur** : cartes de bande sur le modèle `Panel` ; `VMeter` pour les niveaux ; `Pill` pour mute / solo / MIDI ; mêmes rayons et épaisseurs.
+3. **Modulation, Routeur** : cartes et pastilles du kit.
+4. **Façade** : seulement les éléments communs (barre d'outils, panneaux) ; le dessin de l'instrument lui-même reste le sien.
+5. **Calques** (filtre MIDI, envoi MIDI, combinaisons, assistant d'import) : en-têtes et boutons du kit.
+
+Compiler et installer après chaque étape ; l'utilisateur regarde dans Reaper entre deux.
+
+## Points à demander
+- Captures d'écran de Neptune (Mixeur, Mapping, Façade, Modulation, Routeur, un calque) et d'un plugin NOVA de référence (Fournaise ou Délai), pour fixer ce qui compte le plus.
+- Le logo : le dégradé accent / rose du kit convient-il à Neptune, ou Neptune a-t-il son identité ?
+- La hauteur de la fenêtre : l'en-tête NOVA prend de la place ; la fenêtre de 960 de haut la supporte-t-elle ?
+
+## État au 2026-11-01 (soir)
+Fait, installé sous Linux et Windows, regardé dans Reaper par Jean (« très bien ») :
+1. **En-tête et pied NOVA** : logo, NEPTUNE, version en sous-titre (`nova::HeaderStyle::Window`) ; pied NOVA derrière la rangée du bas. Les boutons de la barre du haut gardent le dessin des `TextButton` du LookAndFeel NOVA, déjà identique à celui des pastilles ; ils n'ont pas été remplacés par des `Pill`.
+2. **Éditeurs intégrés** (Synthé, FM, Orgue, Sampler) : option `embedded` : en-tête « Compact » (nom de l'instrument seulement, sans logo, sous-titre ni version). Leur bande d'en-tête et leur pied sont gardés : ils portent le menu de presets, le A/B, REC et PLAY.
+3. **Mixeur** : conteneur « pistes » (défilement, zoom) et conteneur « bus » avec le master à leur droite, de la hauteur d'une bande, sur deux colonnes (140 de large : plus large qu'avant, pour tenir sonie, Trim, Pan, fader et mètres). Largeur de conception 900 -> 1110.
+4. **MOD** : trois conteneurs (LFO, enveloppes, routes), une carte par route. **Routeur** : un conteneur, une carte par règle.
+5. **Façade** : barre d'outils dans un conteneur arrondi, cadre du canevas à coins arrondis ; le dessin des widgets de l'utilisateur n'est pas touché.
+6. **Calques** : fenêtres des combinaisons, de l'envoi MIDI et de la recherche de paramètres rendues opaques (le fond PanelBg du thème est translucide : on voyait le Mixeur à travers) ; boutons du filtre MIDI élargis (« + Condition » était coupé) ; page Probe dans un conteneur.
+
+Reste : assistant d'import (non regardé), éventuellement l'en-tête compact plus bas, une barre de navigation en `NavItem` à la place des onglets de texte (non demandé).
+
+Contrôle visuel sans captures de l'utilisateur : `Neptune_Standalone` (cible de `build-local`) lancé sous Xvfb, capture par `xwd -root` (24 bits par pixel), clics et redimensionnement par python-xlib (XTEST), le tout dans un script lancé par `claude-build linux` qui tue Xvfb à la sortie. Les mètres restent vides (pas d'audio).

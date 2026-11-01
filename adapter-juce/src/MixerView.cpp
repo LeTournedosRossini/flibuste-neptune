@@ -12,9 +12,10 @@ using neptune::core::theme::Token;
 namespace
 {
 constexpr int kStripW = 58;
-constexpr int kMinStripH = 300, kMaxStripH = 360;
+constexpr int kMinStripH = 288, kMaxStripH = 360;
+constexpr int kPanelPad = 6, kPanelTitleH = 20, kPanelGap = 8;   // conteneurs « pistes » et « bus »
 constexpr int kInsertRowH = 18, kVisibleInserts = 4;
-constexpr int kMasterW = 112;
+constexpr int kMasterW = 140;   // deux colonnes : réglages à gauche, fader et vu-mètres à droite ; de la hauteur d'une bande
 constexpr double kFaderMinDb = -100.0, kFaderMaxDb = 6.0;
 
 juce::String u8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
@@ -1041,26 +1042,32 @@ public:
 
     void resized() override
     {
+        // deux colonnes pour tenir dans la hauteur d'une bande : réglages à gauche, fader et vu-mètres à droite
         auto r = getLocalBounds().reduced (3);
-        title_.setBounds (r.removeFromTop (20));
-        output_.setBounds (r.removeFromTop (24).reduced (0, 1));
-        panMode_.setBounds (r.removeFromTop (24).reduced (0, 1));
+        rightArea_ = r.removeFromRight (50);
+        r.removeFromRight (3);
+        title_.setBounds (r.removeFromTop (18));
+        output_.setBounds (r.removeFromTop (22).reduced (0, 1));
+        panMode_.setBounds (r.removeFromTop (22).reduced (0, 1));
         inserts_.setBounds (r.removeFromTop (InsertList::heightNeeded() + 2).reduced (0, 1));
         // sonie : M (momentanée), S (court terme), I (intégrée), TP (crête vraie) puis le bouton de remise à zéro
-        lufsArea_ = r.removeFromTop (4 * 14 + 4);
-        lufsReset_.setBounds (r.removeFromTop (20).reduced (0, 1));
-        auto line = r.removeFromTop (18);
-        trimLabel_.setBounds (line);
-        trim_.setBounds (r.removeFromTop (18));
-        line = r.removeFromTop (18);
-        panLabel_.setBounds (line);
-        pan_.setBounds (r.removeFromTop (18));
-        auto bottom = r.removeFromBottom (26);
+        lufsArea_ = r.removeFromTop (4 * 13 + 2);
+        lufsReset_.setBounds (r.removeFromTop (18).reduced (0, 1));
+        r.removeFromTop (8);
+        auto trimRow = r.removeFromTop (18);   // « Trim » et « Pan » : libellé à gauche, curseur à droite, sur la même ligne, sous la sonie
+        trimLabel_.setBounds (trimRow.removeFromLeft (28));
+        trim_.setBounds (trimRow);
+        r.removeFromTop (2);
+        auto panRow = r.removeFromTop (18);
+        panLabel_.setBounds (panRow.removeFromLeft (28));
+        pan_.setBounds (panRow);
+        auto bottom = r.removeFromBottom (24);   // M et Mono en bas de la colonne
         mute_.setBounds (bottom.removeFromLeft (bottom.getWidth() / 2).reduced (1));
         mono_.setBounds (bottom.reduced (1));
-        r.removeFromBottom (16);
-        faderArea_ = r;
-        fader_.setBounds (r.removeFromLeft (r.getWidth() - 40));
+        auto col = rightArea_.withTrimmedBottom (16);
+        faderArea_ = col;
+        fader_.setBounds (col.removeFromLeft (24));
+        meterArea_ = juce::Rectangle<int> (col.getX() + 2, col.getY(), 25, col.getHeight());
     }
 
     void paint (juce::Graphics& g) override
@@ -1069,23 +1076,23 @@ public:
         g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 8.0f);
         g.setColour (owner_.colour (Token::Accent));
         g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 8.0f, 1.5f);
-        const juce::Rectangle<int> m (getWidth() - 38, faderArea_.getY(), 34, faderArea_.getHeight());
+        const juce::Rectangle<int> m = meterArea_;
         auto bar = [&] (float lin, float rms, int x)
         {
             const float db = dbOf (lin), rdb = dbOf (rms);
             const float h = juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 66.0f) * static_cast<float> (m.getHeight());
             const float rh = juce::jlimit (0.0f, 1.0f, (rdb + 60.0f) / 66.0f) * static_cast<float> (m.getHeight());
             g.setColour (owner_.colour (Token::Grid));
-            g.fillRoundedRectangle (static_cast<float> (x), static_cast<float> (m.getY()), 12.0f, static_cast<float> (m.getHeight()), 4.0f);
-            const juce::Rectangle<float> level (static_cast<float> (x), static_cast<float> (m.getBottom()) - h, 12.0f, h);
+            g.fillRoundedRectangle (static_cast<float> (x), static_cast<float> (m.getY()), 11.0f, static_cast<float> (m.getHeight()), 4.0f);
+            const juce::Rectangle<float> level (static_cast<float> (x), static_cast<float> (m.getBottom()) - h, 11.0f, h);
             const auto top = db > 0.0f ? owner_.colour (Token::KnobHot) : owner_.colour (Token::Accent).brighter (0.3f);
             g.setGradientFill (juce::ColourGradient (top, level.getX(), level.getY(), owner_.colour (Token::Accent), level.getX(), level.getBottom(), false));
             g.fillRoundedRectangle (level, 4.0f);
             g.setColour (owner_.colour (Token::Text).withAlpha (0.6f)); // RMS
-            g.fillRect (x + 3, m.getBottom() - static_cast<int> (rh), 6, static_cast<int> (rh));
+            g.fillRect (x + 2, m.getBottom() - static_cast<int> (rh), 6, static_cast<int> (rh));
         };
         bar (peakL_, rmsL_, m.getX());
-        bar (peakR_, rmsR_, m.getX() + 15);
+        bar (peakR_, rmsR_, m.getX() + 14);
         {
             // LUFS : valeurs à une décimale, « -inf » en dessous de -100 ; la crête vraie passe en rouge au-dessus de -1 dBTP
             auto value = [] (float v) { return v <= -100.0f ? juce::String ("-inf") : juce::String (v, 1); };
@@ -1094,7 +1101,7 @@ public:
             g.setFont (juce::FontOptions (11.0f));
             for (int i = 0; i < 4; ++i)
             {
-                auto row = juce::Rectangle<int> (lufsArea_.getX() + 2, lufsArea_.getY() + 2 + i * 14, lufsArea_.getWidth() - 4, 14);
+                auto row = juce::Rectangle<int> (lufsArea_.getX() + 2, lufsArea_.getY() + 1 + i * 13, lufsArea_.getWidth() - 4, 13);
                 g.setColour (owner_.colour (Token::TextDim));
                 g.drawText (names[i], row.removeFromLeft (22), juce::Justification::centredLeft);
                 g.setColour (i == 3 && values[i] > -1.0f ? owner_.colour (Token::KnobHot) : owner_.colour (Token::Accent));
@@ -1104,7 +1111,7 @@ public:
         g.setColour (owner_.colour (Token::Text));
         g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
         g.drawText (fader_.getValue() <= kFaderMinDb ? juce::String::fromUTF8 ("-inf") : juce::String (fader_.getValue(), 1) + " dB",
-                    2, getHeight() - 42, getWidth() - 4, 14, juce::Justification::centred);
+                    rightArea_.getX(), rightArea_.getBottom() - 14, rightArea_.getWidth(), 14, juce::Justification::centred);
     }
 
 private:
@@ -1113,7 +1120,7 @@ private:
     juce::ComboBox output_, panMode_;
     BoundSlider pan_, trim_, fader_;
     BoundToggle mute_, mono_;
-    juce::Rectangle<int> faderArea_, lufsArea_;
+    juce::Rectangle<int> faderArea_, lufsArea_, rightArea_, meterArea_;
     juce::TextButton lufsReset_;
     neptune::core::LoudnessMeter::Reading lufs_;
     float peakL_ = 0.0f, peakR_ = 0.0f, rmsL_ = 0.0f, rmsR_ = 0.0f;
@@ -1229,20 +1236,22 @@ void MixerView::layoutTracks()
 {
     auto r = getLocalBounds();
     const int scrollbar = 12;
-    stripHeight_ = juce::jlimit (kMinStripH, kMaxStripH, (getHeight() - 40 - scrollbar) / 2); // deux rangées de bandes + leurs titres
-    auto masterArea = r.removeFromRight (kMasterW + 6);
-    master_->setBounds (masterArea.withTrimmedLeft (6).withHeight (stripHeight_ * 2 + 40 + scrollbar));
+    // deux conteneurs : « pistes » (titre, bandes qui défilent) puis « bus » (titre, 16 bus et le master à leur droite, de la même hauteur)
+    const int chrome = 4 * kPanelPad + 2 * kPanelTitleH + kPanelGap + scrollbar;
+    stripHeight_ = juce::jlimit (kMinStripH, kMaxStripH, (getHeight() - chrome) / 2);
     const int gap = 1;
+    tracksPanel_ = r.removeFromTop (kPanelPad * 2 + kPanelTitleH + stripHeight_ + scrollbar);
+    r.removeFromTop (kPanelGap);
+    busesPanel_ = r.removeFromTop (kPanelPad * 2 + kPanelTitleH + stripHeight_);
     {
+        auto inner = tracksPanel_.reduced (kPanelPad + 2, kPanelPad);
         // rangée du titre : « PISTES » à gauche, réglage du zoom (− pourcentage +) à droite
-        auto top = r.removeFromTop (22);
+        auto top = inner.removeFromTop (kPanelTitleH);
         zoomIn_.setBounds (top.removeFromRight (26).reduced (0, 1));
         zoomLabel_.setBounds (top.removeFromRight (50));
         zoomOut_.setBounds (top.removeFromRight (26).reduced (0, 1));
         tracksTitle_.setBounds (top);
-    }
-    {
-        auto area = r.removeFromTop (stripHeight_ + scrollbar);
+        auto area = inner;
         trackViewport_.setBounds (area);
         for (auto& s : parallels_) s->setVisible (false);
         int x = 0;
@@ -1267,19 +1276,31 @@ void MixerView::layoutTracks()
         const int contentW = x + kStripW + 30;
         trackRow_.setSize (juce::jmax (contentW, area.getWidth() - 2), stripHeight_);
     }
-    busesTitle_.setBounds (r.removeFromTop (20));
     {
-        auto area = r.removeFromTop (stripHeight_);
-        int x = area.getX();
+        auto inner = busesPanel_.reduced (kPanelPad + 2, kPanelPad);
+        busesTitle_.setBounds (inner.removeFromTop (kPanelTitleH));
+        int x = inner.getX();
         for (auto& s : buses_)
         {
-            s->setBounds (x, area.getY(), kStripW, stripHeight_);
+            s->setBounds (x, inner.getY(), kStripW, stripHeight_);
             x += kStripW + gap;
         }
+        master_->setBounds (x + 8, inner.getY(), kMasterW, stripHeight_);
     }
 }
 
-void MixerView::paint (juce::Graphics&) {}
+void MixerView::paint (juce::Graphics& g)
+{
+    for (const auto& r : { tracksPanel_, busesPanel_ })
+    {
+        if (r.isEmpty()) continue;
+        const auto b = r.toFloat().reduced (0.5f);
+        g.setColour (colour (Token::PanelBg));
+        g.fillRoundedRectangle (b, 10.0f);
+        g.setColour (colour (Token::Pb));
+        g.drawRoundedRectangle (b, 10.0f, 1.0f);
+    }
+}
 
 void MixerView::refresh()
 {

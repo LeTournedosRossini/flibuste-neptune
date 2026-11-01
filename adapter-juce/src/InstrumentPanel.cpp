@@ -31,6 +31,7 @@ InstrumentPanel::InstrumentPanel (NeptuneProcessor& p, const theme::Palette& pal
     {
         NovaSynthEditor::Options opt;
         opt.noBypass = true;
+        opt.embedded = true;
         opt.moduleName = moduleName;
         opt.sampleRate = [&proc] { return proc.getSampleRate() > 0.0 ? proc.getSampleRate() : 48000.0; };
         return opt;
@@ -89,6 +90,7 @@ InstrumentPanel::InstrumentPanel (NeptuneProcessor& p, const theme::Palette& pal
     {
         NovaSamplerEditor::Options opt;
         opt.noBypass = true;
+        opt.embedded = true;
         opt.noPresets = true;
         opt.noAB = true;
         opt.moduleName = "sampler";

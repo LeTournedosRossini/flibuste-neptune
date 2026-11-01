@@ -120,11 +120,18 @@ bool changed (ParamHost& host, neptune::core::ParamId id, std::uint32_t& seen)
 } // namespace
 
 // ------------------------------------------------------------------------------------------------ barres
-void paintHeaderBar (juce::Graphics& g, const Skin& skin, juce::Rectangle<float> r, const juce::String& word, const juce::String& sub)
+void paintHeaderBar (juce::Graphics& g, const Skin& skin, juce::Rectangle<float> r, const juce::String& word, const juce::String& sub, HeaderStyle style)
 {
     skin.fill (g, Token::HeaderBg, r);
     g.setColour (skin.colour (Token::Pb));
     g.fillRect (r.getX(), r.getBottom() - 1.0f, r.getWidth(), 1.0f);
+    if (style == HeaderStyle::Compact)
+    {
+        g.setColour (skin.colour (Token::Text));
+        g.setFont (skin.font (17.0f, true));
+        g.drawText (word, juce::Rectangle<float> (r.getX() + skin.px (18.0f), r.getY(), skin.px (260.0f), r.getHeight()), juce::Justification::centredLeft, false);
+        return;
+    }
     // logo : carré arrondi en dégradé accent -> rose
     auto logo = juce::Rectangle<float> (r.getX() + skin.px (14.0f), r.getCentreY() - skin.px (17.0f), skin.px (34.0f), skin.px (34.0f));
     g.setGradientFill (juce::ColourGradient (skin.colour (Token::Accent), logo.getX(), logo.getY(), skin.colour (Token::Pink), logo.getRight(),
@@ -149,6 +156,7 @@ void paintHeaderBar (juce::Graphics& g, const Skin& skin, juce::Rectangle<float>
     g.setFont (skin.font (8.0f, true));
     g.drawText (sub, juce::Rectangle<float> (logo.getRight() + skin.px (10.0f), r.getCentreY() + skin.px (4.0f), skin.px (260.0f), skin.px (12.0f)),
                 juce::Justification::centredLeft, false);
+    if (style == HeaderStyle::Window) return;
     // numéro de version de développement, à droite : pour vérifier d'un coup d'œil quelle version tourne
     g.setColour (skin.colour (Token::TextDim));
     g.setFont (skin.font (8.0f, false));

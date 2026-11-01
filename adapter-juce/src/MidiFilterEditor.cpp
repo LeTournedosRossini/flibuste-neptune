@@ -390,11 +390,11 @@ void MidiFilterEditor::resized()
     auto buttons = left.removeFromBottom (32);
     left.removeFromBottom (6);
     m.list.setBounds (left);
-    const int bw = buttons.getWidth() / 5;
-    m.addLeaf.setBounds (buttons.removeFromLeft (bw).reduced (1));
-    m.addGroup.setBounds (buttons.removeFromLeft (bw).reduced (1));
-    m.up.setBounds (buttons.removeFromLeft (bw).reduced (1));
-    m.down.setBounds (buttons.removeFromLeft (bw).reduced (1));
+    const int bw = buttons.getWidth();   // « + Condition » et « + Group » ont besoin de plus de place que Up / Down
+    m.addLeaf.setBounds (buttons.removeFromLeft (bw * 28 / 100).reduced (1));
+    m.addGroup.setBounds (buttons.removeFromLeft (bw * 22 / 100).reduced (1));
+    m.up.setBounds (buttons.removeFromLeft (bw * 15 / 100).reduced (1));
+    m.down.setBounds (buttons.removeFromLeft (bw * 17 / 100).reduced (1));
     m.remove.setBounds (buttons.reduced (1));
 
     auto row = [&r] (int h = 28) { auto x = r.removeFromTop (h); r.removeFromTop (6); return x; };

@@ -22,6 +22,7 @@ public:
         bool brand = false;    // plugin séparé : marque et bouton de bypass dans l'en-tête (dans un insert, la fenêtre du plugin les fournit)
         std::function<double()> sampleRate;
         bool externalKey = false;   // entrée sidechain de l'hôte disponible (plugin séparé) ; faux dans un insert de Neptune (shaper)
+        bool embedded = false;      // éditeur intégré dans la fenêtre de Neptune, qui a déjà logo, nom et version : l'en-tête ne garde que le nom de l'instrument
         bool noPresets = false;     // pas de pastille de preset (le Sampler n'a pas de presets)
         bool noAB = false;          // pas de bouton A/B
         bool noBypass = false;      // pas de pastille de bypass (instrument : aucun paramètre `stock::bypass`)

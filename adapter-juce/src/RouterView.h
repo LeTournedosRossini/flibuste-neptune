@@ -20,7 +20,7 @@ public:
     ~RouterView() override;
 
     void resized() override;
-    void paint (juce::Graphics&) override {}
+    void paint (juce::Graphics&) override;
 
 private:
     class RuleRow;

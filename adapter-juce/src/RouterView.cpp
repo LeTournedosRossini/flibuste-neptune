@@ -84,9 +84,18 @@ public:
         refresh (edit());
     }
 
+    void paint (juce::Graphics& g) override   // une carte par règle
+    {
+        const auto b = getLocalBounds().toFloat().reduced (0.5f);
+        g.setColour (owner_.colour (Token::BgCard));
+        g.fillRoundedRectangle (b, 7.0f);
+        g.setColour (owner_.colour (Token::Border));
+        g.drawRoundedRectangle (b, 7.0f, 1.0f);
+    }
+
     void resized() override
     {
-        auto r = getLocalBounds().reduced (2);
+        auto r = getLocalBounds().reduced (4, 2);
         on_.setBounds (r.removeFromLeft (kOnW));
         r.removeFromLeft (kGap);
         name_.setBounds (r.removeFromLeft (kNameW));
@@ -299,16 +308,24 @@ juce::Colour RouterView::colour (Token t) const
     return juce::Colour (c.r, c.g, c.b, static_cast<float> (c.a));
 }
 
+void RouterView::paint (juce::Graphics& g)
+{
+    const auto b = getLocalBounds().toFloat().reduced (0.5f);
+    g.setColour (colour (Token::PanelBg));
+    g.fillRoundedRectangle (b, 10.0f);
+    g.setColour (colour (Token::Pb));
+    g.drawRoundedRectangle (b, 10.0f, 1.0f);
+}
+
 void RouterView::resized()
 {
-    auto r = getLocalBounds();
-    r.removeFromTop (6);
+    auto r = getLocalBounds().reduced (14, 10);   // tout dans un conteneur arrondi
     auto head = r.removeFromTop (30);
     title_.setBounds (head.removeFromLeft (220));
     addButton_.setBounds (head.removeFromRight (160));
     hint_.setBounds (head);
     r.removeFromTop (4);
-    auto legend = r.removeFromTop (20).reduced (2, 0);
+    auto legend = r.removeFromTop (20).reduced (4, 0);
     view_.setBounds (r);
     layoutRows();
     // même géométrie que RuleRow::resized()

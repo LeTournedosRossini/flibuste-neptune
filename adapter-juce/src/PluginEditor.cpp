@@ -1085,7 +1085,7 @@ void NeptuneEditor::resized()
 
     {
         // barre du haut : boutons resserrés autour de leur texte (28 de haut, centrés sur l'ancienne rangée)
-        static constexpr int barY = 36, barH = 28, pad = 22, gap = 6;
+        static constexpr int barY = (headerH - 28) / 2, barH = 28, pad = 16, gap = 6;
         auto fit = [this] (const juce::TextButton& b, int minWidth)
         {
             const juce::Font f (novaSkin_.font (novaLook_.buttonFontSize (barH), true));
@@ -1102,7 +1102,7 @@ void NeptuneEditor::resized()
         const int panicW = fit (panicButton_, 60);
         right -= 4;
         panicButton_.setBounds (right - panicW, barY, panicW, barH);
-        int left = 190;
+        int left = 250;   // après le logo, le nom et la version
         unlockButton_.setBounds (left, barY, fit (unlockButton_, 120), barH);
         trackBox_.setBounds (left, barY, 80, barH);
         left += 80 + gap + 2;
@@ -1112,8 +1112,8 @@ void NeptuneEditor::resized()
             b->setBounds (left, barY, w, barH);
             left += w + gap;
         }
-        const int top = 80 + diagH_;   // sous les lignes de chargement et d'activité des pistes
-        const int areaH = juce::jmax (200, lh_ - top - 40 - (recoveryShown_ ? 40 : 0));
+        const int top = contentTop + diagH_;   // sous les lignes de chargement et d'activité des pistes
+        const int areaH = juce::jmax (200, lh_ - top - bottomH - (recoveryShown_ ? 40 : 0));
         if (showSplit_)
         {
             // deux panneaux au choix (le Mixeur est réduit pour tenir), barre de séparation entre les deux
@@ -1136,21 +1136,21 @@ void NeptuneEditor::resized()
         }
         else
         {
-            mixerView_->placeScaled ({ 32, top, lw_ - 64, juce::jmax (200, lh_ - top - 40) });
+            mixerView_->placeScaled ({ 32, top, lw_ - 64, juce::jmax (200, lh_ - top - bottomH) });
             facadeView_->setBounds (32, top, lw_ - 64, areaH);
         }
         if (! showSplit_)
         {
-            modView_->setBounds (32, top, lw_ - 64, juce::jmax (200, lh_ - top - 40 - (recoveryShown_ ? 40 : 0)));
-            routerView_->setBounds (32, top, lw_ - 64, juce::jmax (200, lh_ - top - 40 - (recoveryShown_ ? 40 : 0)));
+            modView_->setBounds (32, top, lw_ - 64, juce::jmax (200, lh_ - top - bottomH - (recoveryShown_ ? 40 : 0)));
+            routerView_->setBounds (32, top, lw_ - 64, juce::jmax (200, lh_ - top - bottomH - (recoveryShown_ ? 40 : 0)));
         }
     }
     if (midiFilterEditor_) midiFilterEditor_->setBounds (rootBounds());
     if (midiSendPanel_) midiSendPanel_->setBounds (rootBounds());
     if (combiPanel_) combiPanel_->setBounds (rootBounds());
     if (instrumentPanel_ != nullptr)
-        instrumentPanel_->setBounds (juce::Rectangle<int> (32, 80, lw_ - 64, juce::jmax (300, lh_ - 40 - 80 - (recoveryShown_ ? 40 : 0))));   // jusqu'à la rangée du bas (et au-dessus du bandeau de récupération)
-    audioInView_->setBounds ({ 32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40 - (recoveryShown_ ? 40 : 0)) });
+        instrumentPanel_->setBounds (juce::Rectangle<int> (32, contentTop, lw_ - 64, juce::jmax (300, lh_ - bottomH - contentTop - (recoveryShown_ ? 40 : 0))));   // jusqu'à la rangée du bas (et au-dessus du bandeau de récupération)
+    audioInView_->setBounds ({ 32, contentTop, lw_ - 64, juce::jmax (200, lh_ - contentTop - bottomH - (recoveryShown_ ? 40 : 0)) });
     if (insertOverlay_) insertOverlay_->setBounds (rootBounds());
 
     {
@@ -1192,13 +1192,12 @@ void NeptuneEditor::paintContent (juce::Graphics& g)
     using namespace neptune::core;
     g.fillAll (colour (Token::BgApp));
 
+    // en-tête et pied de la série NOVA ; la version de développement est le sous-titre, pour voir quelle version tourne
+    nova::paintHeaderBar (g, novaSkin_, juce::Rectangle<float> (0.0f, 0.0f, static_cast<float> (lw_), static_cast<float> (headerH)), "NEPTUNE",
+                          juce::String (neptune::core::version::kString), nova::HeaderStyle::Window);
+    nova::paintBottomBar (g, novaSkin_, juce::Rectangle<float> (0.0f, static_cast<float> (lh_ - bottomH), static_cast<float> (lw_), static_cast<float> (bottomH)));
     auto area = rootBounds().reduced (32);
-    g.setColour (colour (Token::Text));
-    g.setFont (juce::FontOptions (28.0f, juce::Font::bold));
-    g.drawText ("Neptune", area.removeFromTop (40), juce::Justification::centredLeft);
-    g.setColour (colour (Token::TextDim));   // numéro de version de développement, sous le titre : pour vérifier quelle version tourne
-    g.setFont (juce::FontOptions (10.0f));
-    g.drawText (neptune::core::version::kString, juce::Rectangle<int> (32, 66, 330, 12), juce::Justification::centredLeft);
+    area.removeFromTop (contentTop - 32);
     {
         const int needed = (processor_.loadSummary().empty() ? 0 : 18) + (! processor_.showDiagnostics() || processor_.activitySummary().empty() ? 0 : 16);
         if (needed != diagH_)
@@ -1211,17 +1210,26 @@ void NeptuneEditor::paintContent (juce::Graphics& g)
     {
         g.setColour (colour (Token::Accent));
         g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-        g.drawText (juce::String::fromUTF8 (loading.c_str()), juce::Rectangle<int> (32, 80, lw_ - 64, 18), juce::Justification::centredLeft, true);
+        g.drawText (juce::String::fromUTF8 (loading.c_str()), juce::Rectangle<int> (32, contentTop, lw_ - 64, 18), juce::Justification::centredLeft, true);
     }
     if (const auto activity = processor_.showDiagnostics() ? processor_.activitySummary() : std::string(); ! activity.empty())   // vérifie que la piste a son instrument et reçoit des notes
     {
         g.setColour (colour (Token::TextDim));
         g.setFont (juce::FontOptions (11.0f));
-        g.drawText (juce::String::fromUTF8 (activity.c_str()), juce::Rectangle<int> (32, 80 + (processor_.loadSummary().empty() ? 0 : 18), lw_ - 64, 14), juce::Justification::centredLeft, true);
+        g.drawText (juce::String::fromUTF8 (activity.c_str()), juce::Rectangle<int> (32, contentTop + (processor_.loadSummary().empty() ? 0 : 18), lw_ - 64, 14), juce::Justification::centredLeft, true);
     }
 
     if (showProbe_)
     {
+    {
+        const auto box = juce::Rectangle<float> (20.0f, static_cast<float> (contentTop - 6), static_cast<float> (lw_ - 40), static_cast<float> (lh_ - bottomH - contentTop - 4));
+        g.setColour (colour (Token::PanelBg));
+        g.fillRoundedRectangle (box, 10.0f);
+        g.setColour (colour (Token::Pb));
+        g.drawRoundedRectangle (box.reduced (0.5f), 10.0f, 1.0f);
+        area.removeFromTop (12);
+        area.removeFromLeft (10);
+    }
     auto& ps = processor_.parameters();
     g.setColour (colour (Token::TextDim));
     g.setFont (juce::FontOptions (14.0f));

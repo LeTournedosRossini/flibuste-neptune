@@ -60,6 +60,7 @@ private:
     juce::Rectangle<int> rootBounds() const noexcept { return { 0, 0, lw_, lh_ }; } // taille logique (avant mise à l'échelle)
     ScaledRoot root_;
     int lw_ = 1160, lh_ = 960;
+    static constexpr int headerH = 58, bottomH = 40, contentTop = 68;   // en-tête et pied NOVA (logique) ; les vues commencent à contentTop
 
     NeptuneProcessor& processor_;
     // Langue, thème et contraste viennent de settings.json, lus une fois au démarrage de l'instance.
