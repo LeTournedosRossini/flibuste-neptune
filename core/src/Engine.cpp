@@ -158,6 +158,7 @@ void Engine::setInsert (StripKind kind, int index, int slot, std::shared_ptr<con
     auto* ins = insertsOf (kind, index);
     if (ins == nullptr || slot < 0 || slot >= kInserts) return;
     msgInserts_[static_cast<std::size_t> (stripIndex (kind, index))][static_cast<std::size_t> (slot)] = insert;
+    if (insert != nullptr) const_cast<InsertInstance&> (*insert).runner.setZeroLatency (profile() == PerformanceProfile::Live);   // le profil en cours, avant que le thread audio ne le voie
     (*ins)[static_cast<std::size_t> (slot)].slot.publish (std::move (insert));
     insertsDirty_.store (true, std::memory_order_release);
 }
@@ -1662,6 +1663,11 @@ int Engine::updateLatencyPlan()
 {
     using namespace mixer;
     const bool live = profile() == PerformanceProfile::Live;
+    // La variante à latence nulle suit le profil ICI aussi, pas seulement dans le thread audio : si aucun bloc ne tourne (hôte arrêté, piste muette), la latence des inserts
+    // (et celle que leurs éditeurs affichent) doit quand même suivre le profil.
+    for (auto& strip : msgInserts_)
+        for (auto& inst : strip)
+            if (inst != nullptr) const_cast<InsertInstance&> (*inst).runner.setZeroLatency (live);
     if (live && publishedEmpty_) return 0;   // profil Live et plan vide déjà publié : rien à calculer, rien à allouer (cet appel revient cinq fois par seconde)
     auto& delays = workDelays_;
     delays.assign (static_cast<std::size_t> (kStrips * kEdges), 0);

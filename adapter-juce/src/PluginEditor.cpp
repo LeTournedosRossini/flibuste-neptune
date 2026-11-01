@@ -211,12 +211,14 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
         auto& shared = processor_.profile().shared();
         shared.set (shared.get() == neptune::core::PerformanceProfile::Live ? neptune::core::PerformanceProfile::Studio
                                                                              : neptune::core::PerformanceProfile::Live);
+        processor_.refreshLatency();   // le plan de latence suit le profil tout de suite
     };
     addAndMakeVisible (profileSwitchButton_);
     profileLockButton_.onClick = [this]
     {
         auto& p = processor_.profile();
         if (p.locked()) p.unlock(); else p.lockToCurrent();
+        processor_.refreshLatency();
         processor_.notifyStateChanged();
     };
     addAndMakeVisible (profileLockButton_);
@@ -1041,6 +1043,7 @@ void NeptuneEditor::timerCallback()
     if (audioInView_->isVisible()) audioInView_->refresh();
     updateRecoveryBanner();
     updateProfileControls();
+    if (++latencyTicks_ >= 6) { latencyTicks_ = 0; processor_.refreshLatency(); }   // fenêtre ouverte : la latence annoncée suit le profil même si la minuterie du processeur ne tourne pas
     updateUndoButtons();
     {
         // compteur de voix actives, toutes pistes confondues (Sampler et Synthé)

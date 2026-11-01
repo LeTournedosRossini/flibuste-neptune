@@ -180,6 +180,18 @@ TEST_CASE ("compensation : Studio puis Live annonce 0 même quand le plan n'avai
     CHECK (r.engine.updateLatencyPlan() == 480);
 }
 
+TEST_CASE ("compensation : le profil Studio donne la latence même si aucun bloc n'a tourné depuis le Live", "[latency][engine]")
+{
+    Rig r;
+    r.engine.setProfile (PerformanceProfile::Live);
+    r.addLimiter (0);
+    r.engine.process (r.ptrs.data(), 16, kBlock);   // un bloc en Live : l'insert passe en latence nulle
+    CHECK (r.engine.updateLatencyPlan() == 0);
+    r.engine.setProfile (PerformanceProfile::Studio);
+    CHECK (r.engine.updateLatencyPlan() == 480);   // sans qu'aucun bloc ne tourne : le profil suffit
+    CHECK (r.engine.latencySamples() == 480);
+}
+
 // Coût d'un appel à updateLatencyPlan (caché : `neptune_core_tests "[.perf]"`) : il revient cinq fois par seconde sur le thread de message.
 TEST_CASE ("coût d'un appel à updateLatencyPlan", "[.perf]")
 {
