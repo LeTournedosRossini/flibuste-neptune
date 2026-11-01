@@ -2055,6 +2055,17 @@ void NeptuneProcessor::uiSetOscAllInterfaces (bool on)
     syncOsc();
 }
 
+void NeptuneProcessor::refreshLatency()
+{
+    engine_.setProfile (profile_.effective());   // le moteur ne le reçoit sinon qu'au premier bloc audio
+    const int latency = engine_.updateLatencyPlan();
+    if (latency != declaredLatency_)
+    {
+        declaredLatency_ = latency;
+        setLatencySamples (latency);
+    }
+}
+
 void NeptuneProcessor::controlTick()
 {
     using neptune::core::control::Action;
@@ -2062,12 +2073,7 @@ void NeptuneProcessor::controlTick()
     if (++latencyTicks_ >= 6)   // environ 5 fois par seconde : le plan de compensation suit les inserts, le routage et le profil
     {
         latencyTicks_ = 0;
-        const int latency = engine_.updateLatencyPlan();
-        if (latency != declaredLatency_)
-        {
-            declaredLatency_ = latency;
-            setLatencySamples (latency);
-        }
+        refreshLatency();
     }
     syncOsc();   // un état chargé par l'hôte peut avoir activé ou arrêté le serveur
     feedbackTick();
@@ -2273,6 +2279,7 @@ void NeptuneProcessor::discardRecovered()
 void NeptuneProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engine_.prepare (sampleRate, samplesPerBlock);
+    refreshLatency();   // à l'activation, sans attendre la minuterie (un hôte sans boucle d'événements ne la verrait jamais)
     const auto capacity = static_cast<std::size_t> (juce::jmax (samplesPerBlock, 8192));
     hostIn_[0].assign (capacity, 0.0f);
     hostIn_[1].assign (capacity, 0.0f);
@@ -2488,6 +2495,7 @@ void NeptuneProcessor::setStateInformation (const void* data, int sizeInBytes)
     // Les valeurs ont changé hors des événements de paramètres : le wrapper en tire un `params.rescan(VALUES)`
     // vers l'hôte (exigé par le CLAP et vérifié par clap-validator, test state-reproducibility).
     updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
+    refreshLatency();   // le verrou de profil et les inserts de l'état chargé fixent la latence à annoncer
 }
 
 bool NeptuneProcessor::supportsDirectEvent (uint16_t spaceId, uint16_t type)

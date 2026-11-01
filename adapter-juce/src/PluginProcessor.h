@@ -505,6 +505,7 @@ private:
     bool oscRunning_ = false;
     AutosaveTimer controlTimer_;
     void controlTick();
+    void refreshLatency();   // profil effectif -> moteur, plan de compensation, latence annoncée à l'hôte (thread de message, ou activation / chargement d'état)
     int declaredLatency_ = 0, latencyTicks_ = 0;   // latence annoncée à l'hôte (compensation de latence du moteur, profil Studio)
 
     // Notes terminées à signaler à l'hôte (NOTE_END). Écrit et lu sur le thread audio uniquement.
