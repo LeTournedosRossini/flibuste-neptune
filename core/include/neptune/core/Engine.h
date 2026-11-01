@@ -409,6 +409,8 @@ private:
     std::uint32_t planStamp_ = 0;                      // thread audio : numéro du bloc
     std::vector<int> publishedDelays_;                 // thread de message : le dernier plan publié
     int publishedTotal_ = -1;
+    bool publishedEmpty_ = false;                      // le plan publié n'a aucune arête retardée
+    std::vector<int> workDelays_;                      // tampon de calcul de updateLatencyPlan (réutilisé, sans allocation à chaque appel)
     std::atomic<int> planTotal_ { 0 };
     std::array<std::array<std::shared_ptr<const InsertInstance>, mixer::numInserts>, kStrips> msgInserts_;   // thread de message : les inserts, pour en lire la latence
     static int stripIndex (StripKind kind, int index) noexcept

@@ -1661,14 +1661,17 @@ int Engine::readVoices (VoiceInfo* out, int maxOut) const noexcept
 int Engine::updateLatencyPlan()
 {
     using namespace mixer;
-    auto plan = std::make_shared<LatencyPlan>();
+    const bool live = profile() == PerformanceProfile::Live;
+    if (live && publishedEmpty_) return 0;   // profil Live et plan vide déjà publié : rien à calculer, rien à allouer (cet appel revient cinq fois par seconde)
+    auto& delays = workDelays_;
+    delays.assign (static_cast<std::size_t> (kStrips * kEdges), 0);
     int total = 0;
-    if (profile() != PerformanceProfile::Live)
+    if (! live)
     {
         std::array<int, kStrips> in {}, t1 {}, t3 {}, maxArr {};
         struct Edge { int strip, edge, dest, arrival; };   // dest < 0 : sortie vers l'hôte
         std::vector<Edge> edges;
-        auto setDelay = [&plan] (int strip, int edge, int delay) { plan->delays[static_cast<std::size_t> (strip * kEdges + edge)] = std::clamp (delay, 0, 192000); };
+        auto setDelay = [&delays] (int strip, int edge, int delay) { delays[static_cast<std::size_t> (strip * kEdges + edge)] = std::clamp (delay, 0, 192000); };
         auto stripLatency = [this] (int id)
         {
             int sum = 0;
@@ -1772,25 +1775,26 @@ int Engine::updateLatencyPlan()
             if (e.dest < 0) total = std::max (total, e.arrival);
         for (const auto& e : edges)
             setDelay (e.strip, e.edge, (e.dest < 0 ? total : in[static_cast<std::size_t> (e.dest)]) - e.arrival);
-        plan->total = total;
-        for (std::size_t i = 0; i < plan->delays.size(); ++i)
-            if (const int d = plan->delays[i]; d > 0)
-            {
-                ++plan->used;
-                plan->usedIndex.push_back (static_cast<int> (i));
-                auto& ln = plan->lines[i];
-                ln.delay = d;
-                ln.l.assign (static_cast<std::size_t> (d) + 1, 0.0f);
-                ln.r.assign (static_cast<std::size_t> (d) + 1, 0.0f);
-            }
     }
-    if (plan->delays != publishedDelays_ || total != publishedTotal_)
-    {
-        publishedDelays_ = plan->delays;
-        publishedTotal_ = total;
-        planTotal_.store (total, std::memory_order_relaxed);
-        planSlot_.publish (std::move (plan));
-    }
+    if (delays == publishedDelays_ && total == publishedTotal_) return total;   // rien n'a changé : pas d'allocation, pas de publication
+    auto plan = std::make_shared<LatencyPlan>();
+    plan->total = total;
+    plan->delays = delays;
+    for (std::size_t i = 0; i < plan->delays.size(); ++i)
+        if (const int d = plan->delays[i]; d > 0)
+        {
+            ++plan->used;
+            plan->usedIndex.push_back (static_cast<int> (i));
+            auto& ln = plan->lines[i];
+            ln.delay = d;
+            ln.l.assign (static_cast<std::size_t> (d) + 1, 0.0f);
+            ln.r.assign (static_cast<std::size_t> (d) + 1, 0.0f);
+        }
+    publishedDelays_ = delays;
+    publishedTotal_ = total;
+    publishedEmpty_ = plan->used == 0 && total == 0;
+    planTotal_.store (total, std::memory_order_relaxed);
+    planSlot_.publish (std::move (plan));
     return total;
 }
 } // namespace neptune::core

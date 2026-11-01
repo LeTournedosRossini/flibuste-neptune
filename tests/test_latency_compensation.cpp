@@ -2,7 +2,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <memory>
 #include <vector>
 
@@ -161,4 +163,36 @@ TEST_CASE ("un générateur en insert sur une piste sans instrument sonne (la pi
         for (const float v : r.bufs[2]) peak = std::max (peak, std::abs (v));
     }
     CHECK (peak > 0.01f);
+}
+
+TEST_CASE ("compensation : Studio puis Live annonce 0 même quand le plan n'avait aucun retard", "[latency][engine]")
+{
+    Rig r;
+    r.engine.setProfile (PerformanceProfile::Studio);
+    r.addLimiter (0);   // une seule piste active avec une latence : aucune arête retardée, mais la latence totale vaut 480
+    CHECK (r.engine.updateLatencyPlan() == 480);
+    CHECK (r.engine.updateLatencyPlan() == 480);   // rien n'a changé : même valeur, rien de republié
+    r.engine.setProfile (PerformanceProfile::Live);
+    CHECK (r.engine.updateLatencyPlan() == 0);
+    CHECK (r.engine.latencySamples() == 0);
+    CHECK (r.engine.updateLatencyPlan() == 0);
+    r.engine.setProfile (PerformanceProfile::Studio);
+    CHECK (r.engine.updateLatencyPlan() == 480);
+}
+
+// Coût d'un appel à updateLatencyPlan (caché : `neptune_core_tests "[.perf]"`) : il revient cinq fois par seconde sur le thread de message.
+TEST_CASE ("coût d'un appel à updateLatencyPlan", "[.perf]")
+{
+    Rig r;
+    r.addLimiter (0);
+    for (const auto profile : { PerformanceProfile::Live, PerformanceProfile::Studio })
+    {
+        r.engine.setProfile (profile);
+        r.engine.updateLatencyPlan();
+        const int n = 2000;
+        const auto t0 = std::chrono::steady_clock::now();
+        for (int i = 0; i < n; ++i) r.engine.updateLatencyPlan();
+        const auto t1 = std::chrono::steady_clock::now();
+        std::printf ("updateLatencyPlan %s : %.2f us par appel\n", profile == PerformanceProfile::Live ? "Live" : "Studio", std::chrono::duration<double, std::micro> (t1 - t0).count() / n);
+    }
 }
