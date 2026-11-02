@@ -32,6 +32,7 @@ InstrumentPanel::InstrumentPanel (NeptuneProcessor& p, const theme::Palette& pal
         NovaSynthEditor::Options opt;
         opt.noBypass = true;
         opt.embedded = true;
+        opt.stretchAuto = true;   // le panneau suit la largeur de la fenêtre de Neptune
         opt.moduleName = moduleName;
         opt.sampleRate = [&proc] { return proc.getSampleRate() > 0.0 ? proc.getSampleRate() : 48000.0; };
         return opt;
