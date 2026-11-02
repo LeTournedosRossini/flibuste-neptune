@@ -440,6 +440,18 @@ private:
     mutable juce::CriticalSection instrumentLock_;
     neptune::core::MixerState mixer_;                                   // protégé par instrumentLock_
     neptune::core::combi::Controller combi_;                            // état de jeu des combinaisons : fil de message seulement
+    // Glissement des valeurs continues rappelées par une scène (fil de message seulement ; avancé par controlTick, environ 30 fois par seconde).
+    struct Glide
+    {
+        neptune::core::ParameterSet* set = nullptr;
+        std::shared_ptr<neptune::core::InsertInstance> keep;   // garde vivant le module d'un insert
+        std::size_t index = 0;
+        double start = 0.0, target = 0.0, startMs = 0.0, durationMs = 1.0;
+        juce::AudioProcessorParameter* host = nullptr;         // paramètre d'hôte à prévenir (jeu principal seulement)
+    };
+    std::vector<Glide> glides_;
+    void startGlide (neptune::core::ParameterSet&, std::shared_ptr<neptune::core::InsertInstance> keep, std::size_t index, double target, int milliseconds, juce::AudioProcessorParameter* host);
+    void glideTick();
     neptune::core::combi::Result combiExecute (const std::function<neptune::core::combi::Outcome (neptune::core::combi::Library&)>&);
     // Changements de programme MIDI reçus par le fil audio (canal << 8 | programme), consommés sur le fil de message (voir controlTick).
     juce::AbstractFifo combiProgramFifo_ { 64 };

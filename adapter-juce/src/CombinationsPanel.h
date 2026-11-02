@@ -2,6 +2,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <algorithm>
 #include <functional>
+#include <iterator>
 #include <string>
 #include "PluginProcessor.h"
 #include "neptune/core/Combinations.h"
@@ -108,6 +109,16 @@ public:
             }
             edit (std::move (lib), "Scene: record model");
         };
+        glideLabel_.setText (text ("comb.glide"), juce::dontSendNotification);
+        glideLabel_.setColour (juce::Label::textColourId, colour (neptune::core::theme::Token::Text));
+        glideBox_.addItem (text ("comb.glide_0"), 1);
+        for (std::size_t i = 1; i < std::size (glideTimes); ++i) glideBox_.addItem (juce::String (glideTimes[i]) + " ms", static_cast<int> (i) + 1);
+        glideBox_.onChange = [this]
+        {
+            auto lib = lib_;
+            lib.glideMs = glideTimes[static_cast<std::size_t> (juce::jlimit (1, static_cast<int> (std::size (glideTimes)), glideBox_.getSelectedId()) - 1)];
+            edit (std::move (lib), "Scene: glide");
+        };
         captureEdit_.setButtonText (text ("comb.custom_edit"));
         captureEdit_.onClick = [this] { showCustomMenu(); };
         insertStep_.setButtonText (text ("comb.insert_step"));
@@ -117,7 +128,7 @@ public:
         stepLabel_.setFont (juce::FontOptions (14.0f, juce::Font::bold));
         stepLabel_.setColour (juce::Label::textColourId, colour (neptune::core::theme::Token::Accent));
         stepLabel_.setJustificationType (juce::Justification::centredRight);
-        for (auto* c : std::initializer_list<juce::Component*> { &captureLabel_, &captureBox_, &captureEdit_, &insertStep_, &deleteStep_, &stepLabel_ }) addAndMakeVisible (*c);
+        for (auto* c : std::initializer_list<juce::Component*> { &captureLabel_, &captureBox_, &captureEdit_, &glideLabel_, &glideBox_, &insertStep_, &deleteStep_, &stepLabel_ }) addAndMakeVisible (*c);
 
         generals_.setModel (&generalsModel_);
         generals_.setRowHeight (30);
@@ -158,6 +169,12 @@ public:
             captureBox_.setBounds (row.removeFromLeft (470));
             row.removeFromLeft (8);
             captureEdit_.setBounds (row.removeFromLeft (120));
+        }
+        r.removeFromTop (6);
+        {
+            auto row = r.removeFromTop (34);
+            glideLabel_.setBounds (row.removeFromLeft (100));
+            glideBox_.setBounds (row.removeFromLeft (200));
         }
         r.removeFromTop (6);
         auto bank = r.removeFromTop (34);
@@ -223,7 +240,7 @@ private:
         const auto& c = palette_.color (t);
         return juce::Colour (c.r, c.g, c.b, static_cast<float> (c.a));
     }
-    juce::Rectangle<int> panel() const { return juce::Rectangle<int> (940, juce::jmin (700, getHeight() - 20)).withCentre (getLocalBounds().getCentre()); }
+    juce::Rectangle<int> panel() const { return juce::Rectangle<int> (940, juce::jmin (740, getHeight() - 20)).withCentre (getLocalBounds().getCentre()); }
 
     static juce::String utf8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
 
@@ -440,6 +457,11 @@ private:
                             juce::dontSendNotification);
         captureBox_.setSelectedId (static_cast<int> (lib_.capture.tpl) + 1, juce::dontSendNotification);
         captureEdit_.setVisible (lib_.capture.tpl == neptune::core::combi::Template::Custom);
+        {
+            int item = 1;
+            for (std::size_t i = 0; i < std::size (glideTimes); ++i) if (glideTimes[i] == lib_.glideMs) item = static_cast<int> (i) + 1;
+            glideBox_.setSelectedId (item, juce::dontSendNotification);
+        }
         stepLabel_.setText (juce::String::fromUTF8 (tr_.format ("comb.step", { std::to_string (status_.sequencePosition + 1), std::to_string (lib_.sequence.size()) }).c_str()), juce::dontSendNotification);
         generals_.updateContent();
         sequence_.updateContent();
@@ -495,8 +517,9 @@ private:
     bool divisional_ = false;      // onglet DIVISIONNELS : les mémoires montrées sont celles du clavier `track_`
     int track_ = 0;
     juce::TextButton generalsTab_, divisionalsTab_;
-    juce::Label keyboardLabel_, captureLabel_, stepLabel_;
-    juce::ComboBox keyboardBox_, captureBox_;
+    static constexpr int glideTimes[] = { 0, 50, 100, 200, 300, 500, 1000, 2000 };
+    juce::Label keyboardLabel_, captureLabel_, glideLabel_, stepLabel_;
+    juce::ComboBox keyboardBox_, captureBox_, glideBox_;
     juce::TextButton captureEdit_, insertStep_, deleteStep_, store_;
     juce::Label title_, hint_, bankLabel_, generalsTitle_, sequenceTitle_;
     juce::TextButton prevBank_, nextBank_, recall_, rename_, erase_, addToSequence_, up_, down_, remove_, clear_, close_;

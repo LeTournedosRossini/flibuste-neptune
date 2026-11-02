@@ -152,6 +152,7 @@ bool templateFromKey (const std::string& key, Template& out)
 
 Library sanitised (Library lib)
 {
+    lib.glideMs = std::clamp (lib.glideMs, 0, kMaxGlideMs);
     cleanMap (lib.generals, numGeneralKeys);
     cleanMap (lib.divisionals, numDivisionalKeys);
     lib.sequence.erase (std::remove_if (lib.sequence.begin(), lib.sequence.end(), [] (int k) { return k < 0 || k >= numGeneralKeys; }), lib.sequence.end());
@@ -191,6 +192,7 @@ std::string toJson (const Library& in)
         }
         doc["capture"] = std::move (cap);
     }
+    if (lib.glideMs != 0) doc["glide_ms"] = lib.glideMs;
     doc["generals"] = std::move (generals);
     doc["divisionals"] = std::move (divisionals);
     doc["sequence"] = std::move (sequence);
@@ -215,6 +217,10 @@ Library fromJson (std::string_view text)
         double f = 0.0, s = 0.0;
         if (numberOf (*it, "families", f) && f >= 0.0) lib.capture.families = static_cast<unsigned> (f);
         if (numberOf (*it, "scopes", s) && s >= 0.0) lib.capture.scopes = static_cast<unsigned> (s);
+    }
+    {
+        double g = 0.0;
+        if (numberOf (doc, "glide_ms", g)) lib.glideMs = std::clamp (static_cast<int> (g), 0, kMaxGlideMs);
     }
     if (const auto it = doc.find ("generals"); it != doc.end() && it->is_array())
         for (const auto& o : *it)

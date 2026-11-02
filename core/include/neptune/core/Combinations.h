@@ -90,17 +90,20 @@ struct CaptureSpec
 const char* templateKey (Template) noexcept;                  // « organ_console »... (JSON)
 bool templateFromKey (const std::string&, Template& out);
 
+constexpr int kMaxGlideMs = 5000;
+
 struct Library
 {
     CaptureSpec capture;                  // le modèle d'enregistrement courant (dans le projet)
+    int glideMs = 0;                      // durée du glissement des valeurs continues au rappel (0 = instantané, au plus kMaxGlideMs)
     std::map<int, Memory> generals;       // generalKey
     std::map<int, Memory> divisionals;    // divisionalKey
     std::vector<int> sequence;            // clefs de généraux
 
     const Memory* general (int bank, int piston) const;
     const Memory* divisional (int track, int bank, int piston) const;
-    bool empty() const noexcept { return generals.empty() && divisionals.empty() && sequence.empty() && capture == CaptureSpec {}; }
-    bool operator== (const Library& o) const noexcept { return generals == o.generals && divisionals == o.divisionals && sequence == o.sequence && capture == o.capture; }
+    bool empty() const noexcept { return generals.empty() && divisionals.empty() && sequence.empty() && capture == CaptureSpec {} && glideMs == 0; }
+    bool operator== (const Library& o) const noexcept { return generals == o.generals && divisionals == o.divisionals && sequence == o.sequence && capture == o.capture && glideMs == o.glideMs; }
     bool operator!= (const Library& o) const noexcept { return ! (*this == o); }
 };
 

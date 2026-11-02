@@ -868,3 +868,16 @@ TEST_CASE ("scenes: insert types and values survive the JSON round trip")
     REQUIRE (g->values.size() == 1);
     CHECK (g->values[0].first == insertParam (0, 0, 1));
 }
+
+TEST_CASE ("scenes: the glide time is saved, bounded, and absent when instantaneous")
+{
+    Library lib;
+    CHECK (lib.empty());
+    lib.glideMs = 250;
+    CHECK_FALSE (lib.empty());
+    CHECK (fromJson (toJson (lib)).glideMs == 250);
+    CHECK (toJson (Library {}).find ("glide_ms") == std::string::npos);
+    lib.glideMs = 999999;
+    CHECK (sanitised (lib).glideMs == kMaxGlideMs);
+    CHECK (fromJson ("{\"glide_ms\": -5}").glideMs == 0);
+}

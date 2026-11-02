@@ -411,6 +411,8 @@ const Entry kEntries[] = {
     { "comb.title", { "Scenes", "Scènes" } },
     { "comb.hint", { "A scene stores the values of the parameters picked by the Record model (below), whatever they are: organ stops and couplers, the mixer, everything. To record: set up Neptune, press Set (on a Facade or with the Set action), then a piston. Here you recall, rename and erase scenes and build the stepper list that Next / Prev walk through. MIDI program change: 0-9 scene, 10-19 track scene of the keyboard on that channel, 20-29 bank.", "Une scène mémorise les valeurs des paramètres choisis par le modèle d'enregistrement (ci-dessous), quels qu'ils soient : jeux et accouplements d'orgue, mixeur, tout. Pour enregistrer : réglez Neptune, appuyez sur Set (sur une Façade ou avec l'action Set), puis sur un piston. Ici vous rappelez, renommez et effacez les scènes et vous construisez la liste du pas à pas que Suivant / Précédent parcourent. Changement de programme MIDI : 0-9 scène, 10-19 scène de piste du clavier de ce canal, 20-29 banque." } },
     { "comb.capture", { "Record:", "Enregistrer :" } },
+    { "comb.glide", { "Glide:", "Glissement :" } },
+    { "comb.glide_0", { "Instant", "Instantané" } },
     { "comb.tpl_organ_console", { "Organ combination (stops, couplers, transpositions)", "Combinaison d'orgue (jeux, accouplements, transpositions)" } },
     { "comb.tpl_organ_stops", { "Organ stops only", "Jeux d'orgue seulement" } },
     { "comb.tpl_mixer", { "Mixer (faders, pans, mutes, solos, sends)", "Mixeur (faders, pans, mutes, solos, envois)" } },

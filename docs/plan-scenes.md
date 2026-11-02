@@ -26,8 +26,8 @@ Les paramètres des inserts entrent dans les scènes par un identifiant composé
 - Les paramètres cachés des modules et le paramètre local 4 ne sont pas mémorisés.
 - Tests : 3 nouveaux cas (« scenes: insert ... », faux accès), 913 cas passent.
 
-## Étape 3 : à faire — glissement au rappel
-Rappeler un mixeur en direct fait sauter les faders. Proposition : un glissement réglable (0 = instantané, valeur par défaut pour les jeux d'orgue ; 100 à 300 ms pour le mixeur) appliqué par petits pas aux valeurs continues, les valeurs à choix et les interrupteurs changeant au début. Le moteur lisse déjà les faders à l'intérieur d'un bloc ; le glissement se ferait côté processeur, par pas de 30 Hz.
+## Étape 3 : faite (2026-11-02, regardée sur le Standalone : fader de 0,6 dB à -49,4 dB en passant par -25,8 dB ; pas dans Reaper)
+Un réglage « Glissement » dans l'écran Scènes (Instantané, 50, 100, 200, 300, 500, 1000, 2000 ms), enregistré avec les scènes du projet (`glide_ms`, absent à 0 : les anciens projets restent instantanés). Au rappel (et à l'annulation générale), les valeurs **continues** (faders, pans, envois, réglages d'insert) glissent en ligne droite de leur valeur actuelle à la cible, par pas de 33 ms (`controlTick`) ; les interrupteurs, choix et valeurs entières (jeux d'orgue, mutes, solos) changent tout de suite. Un nouveau rappel remplace le glissement en cours du même paramètre. L'historique reçoit une entrée par paramètre (valeur de départ -> cible) comme avant ; l'hôte reçoit les changements en geste continu. Le réglage est global à la bibliothèque de scènes (pas par scène). Pas de test automatique du glissement lui-même (il vit dans le processeur) ; un test du cœur couvre le fichier.
 
 ## Plus tard
 Commandes « Insérer le pas » et « Supprimer le pas » pour la Façade et la couche de contrôle (aujourd'hui seulement dans l'écran) ; noms de modèles personnalisés enregistrés ; sélection par piste dans « Au choix ».

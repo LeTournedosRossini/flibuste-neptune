@@ -601,7 +601,7 @@ NeptuneProcessor::CombiStatus NeptuneProcessor::combiStatus() const
 class NeptuneProcessor::SceneInserts : public neptune::core::combi::InsertAccess
 {
 public:
-    explicit SceneInserts (NeptuneProcessor& p) : owner_ (p) {}
+    SceneInserts (NeptuneProcessor& p, int glideMs) : owner_ (p), glideMs_ (glideMs) {}
 
     std::vector<neptune::core::combi::InsertSlotInfo> slots() override
     {
@@ -638,7 +638,15 @@ public:
     {
         const auto inst = find (id);
         if (inst == nullptr) return false;
-        return owner_.undo_.setParameter (inst->runner.params(), neptune::core::combi::insertLocal (id), value);
+        auto& params = inst->runner.params();
+        const auto local = neptune::core::combi::insertLocal (id);
+        const auto index = params.indexOf (local);
+        if (glideMs_ > 0 && index != neptune::core::ParameterSet::npos && params.spec (index).kind == neptune::core::Kind::Continuous)
+        {
+            owner_.startGlide (params, inst, index, value, glideMs_, nullptr);
+            return true;
+        }
+        return owner_.undo_.setParameter (params, local, value);
     }
 
     bool defaultOf (neptune::core::ParamId id, double& value) override
@@ -661,6 +669,7 @@ private:
         return owner_.insertInstances_[strip][slot];
     }
     NeptuneProcessor& owner_;
+    int glideMs_;
 };
 
 neptune::core::combi::Result NeptuneProcessor::combiExecute (const std::function<neptune::core::combi::Outcome (neptune::core::combi::Library&)>& action)
@@ -668,11 +677,17 @@ neptune::core::combi::Result NeptuneProcessor::combiExecute (const std::function
     using namespace neptune::core;
     auto lib = combinations();
     // Les paramètres réglés par un rappel passent par la pile d'annulation et préviennent l'hôte ; le tout forme une seule entrée d'historique.
-    combi_.setWriter ([this] (ParamId id, double real)
+    const int glideMs = lib.glideMs;
+    combi_.setWriter ([this, glideMs] (ParamId id, double real)
     {
         const auto index = params_.indexOf (id);
         if (index == ParameterSet::npos) return;
         auto* hp = hostParam (index);
+        if (glideMs > 0 && params_.spec (index).kind == Kind::Continuous)
+        {
+            startGlide (params_, nullptr, index, real, glideMs, hp);
+            return;
+        }
         if (hp != nullptr) hp->beginChangeGesture();
         undo_.setParameter (params_, id, real);
         if (hp != nullptr)
@@ -681,7 +696,7 @@ neptune::core::combi::Result NeptuneProcessor::combiExecute (const std::function
             hp->endChangeGesture();
         }
     });
-    SceneInserts inserts (*this);
+    SceneInserts inserts (*this, lib.glideMs);
     combi_.setInsertAccess (&inserts);
     undo_.beginTransaction ("Scene");
     const auto outcome = action (lib);
@@ -690,6 +705,51 @@ neptune::core::combi::Result NeptuneProcessor::combiExecute (const std::function
     if (outcome.result == combi::Result::Stored) uiEditCombinations (std::move (lib), "Scene: store");
     undo_.endTransaction();
     return outcome.result;
+}
+
+void NeptuneProcessor::startGlide (neptune::core::ParameterSet& set, std::shared_ptr<neptune::core::InsertInstance> keep, std::size_t index, double target,
+                                   int milliseconds, juce::AudioProcessorParameter* host)
+{
+    target = set.spec (index).clamp (target);
+    for (auto it = glides_.begin(); it != glides_.end();)   // une nouvelle scène remplace un glissement en cours du même paramètre
+    {
+        if (it->set == &set && it->index == index)
+        {
+            if (it->host != nullptr) it->host->endChangeGesture();
+            it = glides_.erase (it);
+        }
+        else ++it;
+    }
+    const double start = set.getAt (index);
+    if (start == target) return;
+    // L'historique garde le point de départ et la cible ; la valeur, elle, part de son point de départ et glisse.
+    undo_.setParameter (set, set.spec (index).id, target);
+    set.setAt (index, start);
+    if (host != nullptr) host->beginChangeGesture();
+    glides_.push_back ({ &set, std::move (keep), index, start, target, juce::Time::getMillisecondCounterHiRes(), static_cast<double> (std::max (1, milliseconds)), host });
+}
+
+void NeptuneProcessor::glideTick()
+{
+    if (glides_.empty()) return;
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    bool finished = false;
+    for (auto it = glides_.begin(); it != glides_.end();)
+    {
+        const double t = juce::jlimit (0.0, 1.0, (now - it->startMs) / it->durationMs);
+        const double value = t >= 1.0 ? it->target : it->start + (it->target - it->start) * t;
+        it->set->setAt (it->index, value);
+        if (it->host != nullptr) it->host->setValueNotifyingHost (static_cast<float> (it->set->getNormalizedAt (it->index)));
+        if (t >= 1.0)
+        {
+            if (it->host != nullptr) it->host->endChangeGesture();
+            it = glides_.erase (it);
+            finished = true;
+        }
+        else ++it;
+    }
+    ++revision_;
+    if (finished) notifyStateChanged();
 }
 
 neptune::core::combi::Result NeptuneProcessor::uiCombiCommand (int command, int track)
@@ -758,7 +818,7 @@ bool NeptuneProcessor::combiLit (int command, int track) const
     const auto lib = combinations();
     const auto* memory = command < combi::kCommandDivisional ? lib.general (combi_.bank(), command - combi::kCommandGeneral)
                                                               : lib.divisional (track, combi_.bank(), command - combi::kCommandDivisional);
-    SceneInserts inserts (const_cast<NeptuneProcessor&> (*this));
+    SceneInserts inserts (const_cast<NeptuneProcessor&> (*this), 0);
     return memory != nullptr && combi::matches (params_, *memory, &inserts);
 }
 
@@ -2166,6 +2226,7 @@ void NeptuneProcessor::controlTick()
 {
     using neptune::core::control::Action;
     control_.collectGarbage();
+    glideTick();
     if (++latencyTicks_ >= 6)   // environ 5 fois par seconde : le plan de compensation suit les inserts, le routage et le profil
     {
         latencyTicks_ = 0;
