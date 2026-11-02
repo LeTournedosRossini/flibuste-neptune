@@ -849,6 +849,26 @@ void LookAndFeel::drawPopupMenuBackground (juce::Graphics& g, int w, int h)
 
 juce::Font LookAndFeel::getPopupMenuFont() { return juce::Font (skin_.font (13.0f * popupScale_)); }
 
+void LookAndFeel::drawAlertBox (juce::Graphics& g, juce::AlertWindow& alert, const juce::Rectangle<int>& textArea, juce::TextLayout& layout)
+{
+    g.fillAll (alert.findColour (juce::AlertWindow::backgroundColourId));
+    if (alert.getAlertType() != juce::MessageBoxIconType::NoIcon)
+    {
+        const char* glyph = alert.getAlertType() == juce::MessageBoxIconType::WarningIcon ? "!" : alert.getAlertType() == juce::MessageBoxIconType::InfoIcon ? "i" : "?";
+        const auto badge = juce::Rectangle<float> (22.0f, static_cast<float> (textArea.getY()) + 2.0f, 40.0f, 40.0f);
+        g.setColour (skin_.colour (Token::Accent, 0.22f));
+        g.fillEllipse (badge);
+        g.setColour (skin_.colour (Token::Accent));
+        g.drawEllipse (badge.reduced (0.5f), 1.5f);
+        g.setFont (juce::FontOptions (24.0f, juce::Font::bold));
+        g.drawText (glyph, badge, juce::Justification::centred);
+    }
+    g.setColour (alert.findColour (juce::AlertWindow::textColourId));
+    layout.draw (g, textArea.toFloat());
+    g.setColour (alert.findColour (juce::AlertWindow::outlineColourId));
+    g.drawRect (0, 0, alert.getWidth(), alert.getHeight());
+}
+
 // Bulle ancrée (routage, etc.) : carte NOVA avec sa flèche, au lieu du cadre JUCE d'origine
 void LookAndFeel::drawCallOutBoxBackground (juce::CallOutBox&, juce::Graphics& g, const juce::Path& path, juce::Image&)
 {

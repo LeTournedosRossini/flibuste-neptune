@@ -151,7 +151,7 @@ struct Widget
     int hue = 30;
     int vivid = 55;
     int header = 1;
-    int nameSize = 100, noteSize = 100;   // Grille de scènes : taille du nom et des deux lignes de texte, en pour cent de la taille automatique (50..300)
+    int nameSize = 150, noteSize = 250;   // Grille de scènes : taille du nom (50..400) et des deux lignes de texte (50..500), en pour cent de la taille de base
     int setPill = 0;                       // Grille de scènes : 1, un bouton SET dans la barre de banque
 
     bool operator== (const Widget& o) const noexcept

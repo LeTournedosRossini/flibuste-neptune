@@ -287,8 +287,8 @@ Facade sanitisedPage (Facade f)
         w.hue = ((w.hue % 360) + 360) % 360;
         w.vivid = std::clamp (w.vivid, 0, 100);
         w.header = w.header != 0 ? 1 : 0;
-        w.nameSize = std::clamp (w.nameSize, 50, 300);
-        w.noteSize = std::clamp (w.noteSize, 50, 300);
+        w.nameSize = std::clamp (w.nameSize, 50, 400);
+        w.noteSize = std::clamp (w.noteSize, 50, 500);
         w.setPill = w.setPill != 0 ? 1 : 0;
         w.channel = std::clamp (w.channel, 1, 16);
         w.firstNote = std::clamp (w.firstNote, 0, 120);
@@ -872,8 +872,8 @@ Facade pageFromJson (const json& o)
             w.hue = intOf (e, "hue", 30);
             w.vivid = intOf (e, "vivid", 55);
             w.header = intOf (e, "header", 1);
-            w.nameSize = intOf (e, "nsize", 100);
-            w.noteSize = intOf (e, "tsize", 100);
+            w.nameSize = intOf (e, "nsize", 150);
+            w.noteSize = intOf (e, "tsize", 250);
             w.setPill = intOf (e, "setpill", 0);
             w.style = intOf (e, "style", 0);
             w.stepMode = intOf (e, "steps", 0);

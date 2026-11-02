@@ -123,6 +123,27 @@ juce::Colour sceneColour (const neptune::core::facade::Widget& w, bool lit)
 
 juce::Colour readableOn (juce::Colour fill) { return fill.getPerceivedBrightness() > 0.55f ? juce::Colours::black.withAlpha (0.88f) : juce::Colours::white.withAlpha (0.95f); }
 
+
+// Texte dans un cadre : la taille voulue, réduite au besoin pour que tout tienne (nombre de lignes et hauteur) ; le haut du texte colle au haut du cadre quand `top` est vrai.
+void drawAutoFit (juce::Graphics& g, const juce::String& text, juce::Rectangle<float> area, float wantedSize, bool bold, int maxLines, bool top, juce::Colour colour)
+{
+    if (text.isEmpty() || area.getWidth() < 4.0f || area.getHeight() < 4.0f) return;
+    for (float size = std::min (wantedSize, area.getHeight()); size >= 7.0f; size *= 0.93f)
+    {
+        juce::AttributedString as;
+        as.setJustification (juce::Justification::centredTop);
+        as.setWordWrap (juce::AttributedString::byWord);
+        as.append (text, juce::Font (juce::FontOptions (size, bold ? juce::Font::bold : juce::Font::plain)), colour);
+        juce::TextLayout layout;
+        layout.createLayout (as, area.getWidth());
+        if (layout.getNumLines() > maxLines || layout.getHeight() > area.getHeight() || layout.getWidth() > area.getWidth() + 1.0f)
+            if (size > 7.5f) continue;
+        const float y = top ? area.getY() : area.getY() + (area.getHeight() - layout.getHeight()) * 0.5f;
+        layout.draw (g, juce::Rectangle<float> (area.getX(), y, area.getWidth(), layout.getHeight() + 2.0f));
+        return;
+    }
+}
+
 constexpr float curveTitleHeight = 24.0f;   // hauteur (dans le canevas) de la légende d'un widget Courbe
 
 int snapped (int v) { return (v + 2) / 4 * 4; } // aimantation sur une grille de 4
@@ -254,11 +275,16 @@ public:
                                                                { "hot", Token::KnobHot }, { "face", Token::KnobFace } };
         for (const auto& [name, token] : table)
             svgVars_[name] = "#" + hex (token);
-        bankHold_.fire = [this]   // appui long sur une flèche de banque : la banque change, et continue de défiler tant que l'appui dure
+        bankHold_.fire = [this]   // appui long sur une flèche de banque : au bout d'une demi-seconde la banque change, puis elle continue de défiler tant que l'appui dure
         {
             if (bankDir_ == 0) { bankHold_.stopTimer(); return; }
-            namespace cb = neptune::core::combi;
-            owner_.processor_.uiCombiCommand (bankDir_ < 0 ? cb::kCommandBankPrevious : cb::kCommandBankNext, combiTrack());
+            const double now = juce::Time::getMillisecondCounterHiRes();
+            if (now - bankHoldStartMs_ >= 500.0)
+            {
+                namespace cb = neptune::core::combi;
+                owner_.processor_.uiCombiCommand (bankDir_ < 0 ? cb::kCommandBankPrevious : cb::kCommandBankNext, combiTrack());
+                bankHoldStartMs_ = now;
+            }
             repaint();
         };
     }
@@ -1065,7 +1091,8 @@ private:
             {
                 bankDir_ = geo.prev.contains (p) ? -1 : 1;
                 bankHoldId_ = w.id;
-                bankHold_.startTimer (500);
+                bankHoldStartMs_ = juce::Time::getMillisecondCounterHiRes();
+                bankHold_.startTimer (30);
                 repaint();
                 return;
             }
@@ -1398,8 +1425,18 @@ private:
                     auto arrow = [&] (juce::Rectangle<float> r, bool left)
                     {
                         const bool held = bankDir_ == (left ? -1 : 1) && bankHoldId_ == w.id;
-                        g.setColour (held ? o.colour (Token::Accent) : o.colour (Token::Pb));
+                        g.setColour (o.colour (Token::Pb));
                         g.fillRoundedRectangle (r, 6.0f);
+                        if (held)   // une barre qui se remplit pendant l'appui : la banque change quand elle est pleine
+                        {
+                            const float progress = static_cast<float> (juce::jlimit (0.0, 1.0, (juce::Time::getMillisecondCounterHiRes() - bankHoldStartMs_) / 500.0));
+                            juce::Graphics::ScopedSaveState keep (g);
+                            juce::Path shape;
+                            shape.addRoundedRectangle (r, 6.0f);
+                            g.reduceClipRegion (shape);
+                            g.setColour (o.colour (Token::Accent));
+                            g.fillRect (r.withWidth (r.getWidth() * progress));
+                        }
                         g.setColour (o.colour (Token::Text));
                         juce::Path tri;
                         const auto c = r.getCentre();
@@ -1410,7 +1447,10 @@ private:
                     arrow (geo.next, false);
                     g.setColour (o.colour (Token::Text));
                     g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
-                    g.drawText (juce::String::fromUTF8 (o.tr_.format ("facade.grid_bank", { std::to_string (status.bank + 1), std::to_string (cb::kBanks) }).c_str()), geo.label, juce::Justification::centred);
+                    g.drawText (juce::String::fromUTF8 (o.tr_.format ("facade.grid_bank", { std::to_string (status.bank + 1), std::to_string (cb::kBanks) }).c_str()), geo.label.withTrimmedBottom (9.0f), juce::Justification::centred);
+                    g.setColour (o.colour (Token::TextDim2));
+                    g.setFont (juce::FontOptions (10.0f));
+                    g.drawText (o.text ("facade.grid_long_press"), geo.label.withTrimmedTop (22.0f), juce::Justification::centredTop);
                     if (w.setPill != 0)
                     {
                         const bool armed = status.setArmed;
@@ -1432,24 +1472,21 @@ private:
                     g.setColour (isLit ? juce::Colours::white : (used ? fill.brighter (0.25f) : o.colour (Token::Border)));
                     g.drawRoundedRectangle (c.reduced (0.5f), 8.0f, isLit ? 3.0f : 1.0f);
                     const auto ink = used ? readableOn (fill) : o.colour (Token::TextDim2);
-                    auto inner = c.reduced (6.0f, 4.0f);
+                    auto inner = c.reduced (6.0f, 3.0f);
                     g.setColour (ink.withAlpha (0.65f));
                     g.setFont (juce::FontOptions (juce::jlimit (10.0f, 14.0f, c.getHeight() * 0.16f)));
-                    g.drawText (juce::String (static_cast<int> (i) + 1), inner.removeFromTop (c.getHeight() * 0.2f), juce::Justification::topLeft);
+                    g.drawText (juce::String (static_cast<int> (i) + 1), inner.withHeight (c.getHeight() * 0.18f), juce::Justification::topLeft);   // le numéro, dans le coin
                     if (! used) continue;
                     const auto& sc = scenes[i];
-                    // le nom en haut, puis une ou deux lignes de texte dessous (le nom reste centré dans la place qui lui reste)
+                    // le nom commence tout en haut de la case, à la hauteur du numéro ; une ou deux lignes de texte dessous
                     const int lines = (sc.note.empty() ? 0 : 1) + (sc.note2.empty() ? 0 : 1);
                     const float noteScale = static_cast<float> (w.noteSize) / 100.0f, nameScale = static_cast<float> (w.nameSize) / 100.0f;
-                    const float lineH = lines > 0 ? std::min (std::max (12.0f, inner.getHeight() * 0.24f * noteScale), inner.getHeight() * 0.55f / static_cast<float> (lines)) : 0.0f;
+                    const float lineH = lines > 0 ? std::min (inner.getHeight() * 0.2f * noteScale, inner.getHeight() * 0.56f / static_cast<float> (lines)) : 0.0f;
                     auto notesArea = lines > 0 ? inner.removeFromBottom (lineH * static_cast<float> (lines)) : juce::Rectangle<float>();
-                    g.setColour (ink);
-                    g.setFont (juce::FontOptions (juce::jlimit (10.0f, 120.0f, c.getHeight() * (lines > 0 ? 0.2f : 0.24f) * nameScale), juce::Font::bold));
-                    g.drawFittedText (utf8 (sc.name), inner.toNearestInt(), lines > 0 ? juce::Justification::centredTop : juce::Justification::centred, 2, 0.7f);
-                    g.setColour (ink.withAlpha (0.85f));
-                    g.setFont (juce::FontOptions (juce::jlimit (10.0f, 90.0f, lineH * 0.76f)));
+                    auto nameArea = inner.reduced (std::min (18.0f, inner.getWidth() * 0.12f), 0.0f);   // à l'écart du numéro, en haut à gauche
+                    drawAutoFit (g, utf8 (sc.name), lines > 0 ? nameArea : nameArea.withTrimmedTop (0.0f), c.getHeight() * 0.2f * nameScale, true, 2, true, ink);
                     for (const auto* line : { &sc.note, &sc.note2 })
-                        if (! line->empty()) g.drawFittedText (utf8 (*line), notesArea.removeFromTop (lineH).toNearestInt(), juce::Justification::centred, 1, 0.6f);
+                        if (! line->empty()) drawAutoFit (g, utf8 (*line), notesArea.removeFromTop (lineH), lineH * 0.8f, false, 1, false, ink.withAlpha (0.88f));
                 }
                 break;
             }
@@ -1657,6 +1694,7 @@ private:
     std::map<int, int> midiLast_;             // dernière valeur envoyée par chaque curseur MIDI
     std::map<int, double> midiFader_;         // position affichée de chaque curseur MIDI (0..1)
     int pistonId_ = 0;           // piston en cours d'appui (rappel au relâchement, mémorisation si l'appui est long)
+    double bankHoldStartMs_ = 0.0;
     int bankDir_ = 0, bankHoldId_ = 0;   // grille de scènes : flèche de banque tenue (-1 précédente, +1 suivante) et son widget
     struct BankHold : juce::Timer
     {
@@ -3323,7 +3361,7 @@ void FacadeView::resized()
         if (collapsed)
         {
             for (auto* b : sideItems) b->setBounds ({});
-            sideShowButton_.setBounds (whole.getX() + 6, whole.getY() + 6, 36, rowH);
+            sideShowButton_.setBounds (whole.getX() + 1, whole.getY() + 1, 26, 24);   // un petit carré collé en haut à gauche, sous le sigle Neptune
             sideShowButton_.toFront (false);
             toolbarRect_ = {};
             canvas_->setBounds (whole);
@@ -3495,14 +3533,14 @@ void FacadeView::writeBook (fc::Facade book, const char* undoName)
     book_ = book;
     page_ = std::clamp (page_, 0, fc::pageCount (book_) - 1);
     facade_ = fc::pageOf (book_, page_);
-    if (global_) processor_.uiEditGlobalFacade (book_, undoName);
+    if (global_) processor_.uiEditGlobalFacade (book_, undoName, liveMergeKey_);
     else
     {
         auto s = processor_.trackSettings (track_);
         if (s.facade != book_)
         {
             s.facade = book_;
-            processor_.uiEditTrack (track_, std::move (s), undoName);
+            processor_.uiEditTrack (track_, std::move (s), undoName, liveMergeKey_);
         }
     }
     revision_ = processor_.instrumentRevision();
@@ -3707,33 +3745,63 @@ void FacadeView::showGridMenu()
     menu.addSubMenu (text ("facade.grid_rows"), rows);
     menu.addSubMenu (text ("facade.grid_colour"), colour);
     menu.addSubMenu (text ("facade.grid_vivid"), vivid);
-    const int sizes[5] = { 70, 100, 130, 170, 220 };
-    juce::PopupMenu nameSizes, noteSizes;
-    for (int i = 0; i < 5; ++i)
-    {
-        nameSizes.addItem (600 + i, juce::String (sizes[i]) + " %", true, g->nameSize == sizes[i]);
-        noteSizes.addItem (700 + i, juce::String (sizes[i]) + " %", true, g->noteSize == sizes[i]);
-    }
-    menu.addSubMenu (text ("facade.grid_name_size"), nameSizes);
-    menu.addSubMenu (text ("facade.grid_note_size"), noteSizes);
+    menu.addItem (600, text ("facade.grid_name_size"));
+    menu.addItem (700, text ("facade.grid_note_size"));
     menu.addItem (500, text ("facade.grid_header"), true, g->header != 0);
     menu.addItem (501, text ("facade.grid_set"), g->header != 0, g->setPill != 0);
     menu.setLookAndFeel (&getLookAndFeel());
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&gridOptionsButton_), [safe = juce::Component::SafePointer<FacadeView> (this), levels, sizes] (int choice)
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&gridOptionsButton_), [safe = juce::Component::SafePointer<FacadeView> (this), levels] (int choice)
     {
         if (safe == nullptr || choice <= 0) return;
-        safe->applySingle ([choice, levels, sizes] (fc::Widget& w)
+        if (choice == 600 || choice == 700) { safe->showGridSizePanel (choice == 600); return; }
+        safe->applySingle ([choice, levels] (fc::Widget& w)
         {
             if (choice >= 100 && choice < 200) w.columns = choice - 100;
             else if (choice >= 200 && choice < 300) w.rows = choice - 200;
             else if (choice >= 300 && choice < 400) w.hue = (choice - 300) * 30;
             else if (choice >= 400 && choice < 500) w.vivid = levels[choice - 400];
-            else if (choice >= 600 && choice < 700) w.nameSize = sizes[choice - 600];
-            else if (choice >= 700 && choice < 800) w.noteSize = sizes[choice - 700];
             else if (choice == 501) w.setPill = w.setPill != 0 ? 0 : 1;
             else if (choice == 500) w.header = w.header != 0 ? 0 : 1;
         }, "Facade: scene grid");
     });
+}
+
+void FacadeView::showGridSizePanel (bool forName)
+{
+    const auto* g = facade_.find (single());
+    if (g == nullptr || g->type != fc::WidgetType::SceneGrid) return;
+    // un petit panneau avec un curseur : la grille se redessine à mesure qu'on le tire
+    struct Panel : juce::Component
+    {
+        Panel (FacadeView& view, bool name, int value) : owner (&view), forName (name)
+        {
+            title.setText (view.text (name ? "facade.grid_name_size" : "facade.grid_note_size"), juce::dontSendNotification);
+            title.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+            slider.setSliderStyle (juce::Slider::LinearHorizontal);
+            slider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 64, 24);
+            slider.setRange (50.0, name ? 400.0 : 500.0, 1.0);
+            slider.setTextValueSuffix (" %");
+            slider.setValue (value, juce::dontSendNotification);
+            slider.onValueChange = [this]
+            {
+                if (owner == nullptr) return;
+                const int v = static_cast<int> (std::lround (slider.getValue()));
+                owner->liveMergeKey_ = forName ? "grid-name-size" : "grid-note-size";
+                owner->applySingle ([v, this] (fc::Widget& w) { (forName ? w.nameSize : w.noteSize) = v; }, "Facade: scene grid text size");
+            };
+            addAndMakeVisible (title);
+            addAndMakeVisible (slider);
+            setSize (360, 78);
+        }
+        ~Panel() override { if (owner != nullptr) owner->liveMergeKey_.clear(); }
+        void resized() override { auto r = getLocalBounds().reduced (12, 8); title.setBounds (r.removeFromTop (24)); slider.setBounds (r); }
+        juce::Component::SafePointer<FacadeView> owner;
+        bool forName;
+        juce::Label title;
+        juce::Slider slider;
+    };
+    auto panel = std::make_unique<Panel> (*this, forName, forName ? g->nameSize : g->noteSize);
+    juce::CallOutBox::launchAsynchronously (std::move (panel), gridOptionsButton_.getScreenBounds(), nullptr);
 }
 
 void FacadeView::editSceneText (int piston)

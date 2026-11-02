@@ -68,6 +68,7 @@ private:
     void showLampSourceMenu();
     void showActionModeMenu();
     void showMeterSourceMenu();
+    void showGridSizePanel (bool forName);      // curseur de taille du nom ou des textes, mise à jour en direct
     void showGridMenu();                       // grille de scènes : colonnes, lignes, couleur, tempérament, barre de banque
     void editSceneText (int piston);           // nom et texte en plus de la scène `piston` de la banque courante
     void openMidiEditor();
@@ -114,6 +115,7 @@ private:
     juce::TextButton sideHideButton_, sideShowButton_, gridButton_, gridOptionsButton_, editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, zoneButton_, keyboardButton_, lampButton_, lampSourceButton_, setKeyButton_, actionModeButton_, midiButton_, midiEditButton_, meterButton_, meterSourceButton_, sliderButton_, stylesButton_, styleButton_, orientButton_, notchesButton_, scaleButton_, invertButton_, saveFacadeButton_, loadFacadeButton_, relocateButton_, imageButton_, fitButton_, clearImageButton_;
     juce::TextButton linkButton_, textButton_, duplicateButton_, deleteButton_, captureButton_, alignButton_, helpButton_, sameSizeButton_, layoutButton_, zoneAlignButton_, zoneGapButton_, kbChannelButton_, kbFirstButton_, kbHoldButton_, kbWheelsButton_, kbVelocityButton_;
     std::unique_ptr<Canvas> canvas_;
+    std::string liveMergeKey_;                 // non vide pendant un réglage en direct : une seule entrée d'annulation pour tout le geste
     bool sideHidden_ = false;                  // jeu : la barre d'onglets (à gauche) est repliée, la Façade prend toute la place
     juce::Rectangle<int> toolbarRect_;   // conteneur arrondi des rangées d'onglets et de boutons
     std::unique_ptr<Picker> picker_;
