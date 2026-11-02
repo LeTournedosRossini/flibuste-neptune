@@ -761,3 +761,54 @@ target_link_libraries(NovaGallery
   PUBLIC
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags)
+
+# ---- Neptune Standalone (application autonome) : cible À PART, désactivée par défaut -----------------------------------------------------------------
+# Les plugins ne sont pas touchés : cette cible ne modifie ni les sources ni les réglages de compilation des autres cibles ; elle reprend la liste des sources
+# de la cible Neptune (le .clap) et construit sa propre copie, avec ses propres options (ASIO sous Windows, sortie MIDI). Activer avec -DNEPTUNE_BUILD_STANDALONE=ON.
+#  ASIO (Windows) : kit Steinberg sous licence GPLv3 (le projet est sous AGPLv3), à télécharger sur https://www.steinberg.net/developers/asiosdk-open/ ;
+#  passer le dossier du kit (celui qui contient « common ») avec -DNEPTUNE_ASIO_SDK_DIR=...
+option(NEPTUNE_BUILD_STANDALONE "Construire Neptune en application autonome (Windows, macOS, Linux)" OFF)
+set(NEPTUNE_ASIO_SDK_DIR "" CACHE PATH "Dossier du kit ASIO de Steinberg (Windows) ; vide : pas d'ASIO")
+if(NEPTUNE_BUILD_STANDALONE)
+  get_target_property(NEPTUNE_APP_SOURCES Neptune INTERFACE_SOURCES)
+  if(NOT NEPTUNE_APP_SOURCES)
+    get_target_property(NEPTUNE_APP_SOURCES Neptune SOURCES)
+  endif()
+  if(NOT NEPTUNE_APP_SOURCES)
+    message(FATAL_ERROR "NEPTUNE_BUILD_STANDALONE : impossible de lire les sources de la cible Neptune")
+  endif()
+
+  juce_add_plugin(NeptuneApp
+    COMPANY_NAME                "Le Tournedos Rossini"
+    PRODUCT_NAME                "Neptune"
+    PLUGIN_MANUFACTURER_CODE    Trss
+    PLUGIN_CODE                 Nept
+    IS_SYNTH                    TRUE
+    NEEDS_MIDI_INPUT            TRUE
+    NEEDS_MIDI_OUTPUT           TRUE
+    FORMATS                     Standalone)
+
+  target_sources(NeptuneApp PRIVATE ${NEPTUNE_APP_SOURCES})
+  target_include_directories(NeptuneApp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_compile_definitions(NeptuneApp PUBLIC
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_VST3_CAN_REPLACE_VST2=0
+    NEPTUNE_STANDALONE_APP=1
+    NEPTUNE_PROBE_TRACKS=${NEPTUNE_PROBE_TRACKS}
+    NEPTUNE_PROBE_OUTPUTS=${NEPTUNE_PROBE_OUTPUTS})
+  if(WIN32 AND NEPTUNE_ASIO_SDK_DIR)
+    target_compile_definitions(NeptuneApp PUBLIC JUCE_ASIO=1)
+    target_include_directories(NeptuneApp PRIVATE "${NEPTUNE_ASIO_SDK_DIR}/common")
+  endif()
+  target_link_libraries(NeptuneApp
+    PRIVATE
+      neptune_core
+      juce::juce_audio_utils
+      juce::juce_audio_plugin_client
+      clap_juce_extensions   # seulement ses en-têtes : le processeur de Neptune dérive de ses classes ; aucun .clap n'est produit
+    PUBLIC
+      juce::juce_recommended_config_flags
+      juce::juce_recommended_lto_flags
+      juce::juce_recommended_warning_flags)
+endif()
