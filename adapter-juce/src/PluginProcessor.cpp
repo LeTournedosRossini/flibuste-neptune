@@ -1896,8 +1896,14 @@ NeptuneProcessor::BusesProperties NeptuneProcessor::makeBuses (int numOutputs)
 {
     BusesProperties props;
     props = props.withInput ("Input", juce::AudioChannelSet::stereo(), true);   // alimente les pistes « Entrée audio » (réglage par piste)
+#ifdef NEPTUNE_STANDALONE_APP
+    // Application autonome : la fenêtre d'options de JUCE limite les sorties choisissables à la taille de la première sortie ; une seule sortie large (toutes les paires, dans l'ordre :
+    // Out 1 = canaux 1-2, Out 2 = canaux 3-4...) laisse choisir autant de sorties de la carte son que Neptune en offre. Le moteur travaille par numéro de canal : rien d'autre ne change.
+    props = props.withOutput ("Out", juce::AudioChannelSet::discreteChannels (juce::jmax (2, 2 * numOutputs)), true);
+#else
     for (int i = 0; i < numOutputs; ++i)
         props = props.withOutput ("Out " + juce::String (i + 1), juce::AudioChannelSet::stereo(), true);
+#endif
     return props;
 }
 
