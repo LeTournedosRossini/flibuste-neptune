@@ -603,3 +603,165 @@ TEST_CASE ("combinations: divisionals can be renamed and erased like generals")
     CHECK (lib.divisional (2, 1, 4) == nullptr);
     CHECK (lib.divisionals.empty());
 }
+
+// ---- scènes : modèles de capture, annulation selon le modèle, pas du séquenceur
+
+#include "neptune/core/ProbePool.h"
+#include "neptune/core/SamplerParams.h"
+
+namespace
+{
+ParameterSet makeFullSet()
+{
+    ParameterSet set;
+    REQUIRE (sampler::addParams (set));
+    REQUIRE (probe::buildPool (set, mixer::numTracks));
+    REQUIRE (mixer::addParams (set, mixer::numTracks, mixer::numBuses));
+    return set;
+}
+}
+
+TEST_CASE ("scenes: the capture templates pick the parameters they promise")
+{
+    auto set = makeFullSet();
+    const ParamId volume0 = probe::trackParam (0, probe::kVolume), volume1 = probe::trackParam (1, probe::kVolume);
+    CaptureSpec organ;   // modèle d'origine : la console d'orgue
+    CHECK (contains (captureParams (set, organ, -1), mixer::modulatorParam (0, 0)));
+    CHECK_FALSE (contains (captureParams (set, organ, -1), volume0));
+
+    CaptureSpec mixerTemplate;
+    mixerTemplate.tpl = Template::Mixer;
+    const auto mix = captureParams (set, mixerTemplate, -1);
+    CHECK (contains (mix, volume0));
+    CHECK (contains (mix, volume1));
+    CHECK_FALSE (contains (mix, mixer::modulatorParam (0, 0)));   // pas les jeux d'orgue
+
+    const auto track1 = captureParams (set, mixerTemplate, 1);     // une scène de piste : seulement la piste 2
+    CHECK (contains (track1, volume1));
+    CHECK_FALSE (contains (track1, volume0));
+
+    CaptureSpec everything;
+    everything.tpl = Template::Everything;
+    const auto all = captureParams (set, everything, -1);
+    CHECK (all.size() > mix.size());
+    CHECK (contains (all, volume0));
+    CHECK (contains (all, mixer::modulatorParam (0, 0)));
+
+    CaptureSpec custom;   // un choix libre : seulement les modulateurs, toutes portées
+    custom.tpl = Template::Custom;
+    custom.families = 1u << static_cast<unsigned> (paramgroups::Family::Modulators);
+    custom.scopes = 1u << static_cast<unsigned> (paramgroups::Scope::Track);
+    const auto stops = captureParams (set, custom, -1);
+    CHECK_FALSE (stops.empty());
+    CHECK (contains (stops, mixer::modulatorParam (0, 0)));
+    CHECK_FALSE (contains (stops, volume0));
+}
+
+TEST_CASE ("scenes: a scene can hold more than a thousand values")
+{
+    auto set = makeFullSet();
+    CaptureSpec everything;
+    everything.tpl = Template::Everything;
+    const auto ids = captureParams (set, everything, -1);
+    REQUIRE (ids.size() > 1024);
+    Library lib;
+    lib.capture = everything;
+    lib.generals[generalKey (0, 0)] = capture (set, ids);
+    const auto back = fromJson (toJson (lib));
+    REQUIRE (back.general (0, 0) != nullptr);
+    CHECK (back.general (0, 0)->values.size() == ids.size());   // la limite précédente (1024) les aurait tronquées
+    CHECK (back.capture == everything);
+}
+
+TEST_CASE ("scenes: the capture template is saved with the project, and absent for the original organ template")
+{
+    Library lib;
+    lib.generals[generalKey (0, 0)] = Memory { true, "A", { { 1, 1.0 } } };
+    CHECK (toJson (lib).find ("capture") == std::string::npos);   // anciens projets : inchangés
+    lib.capture.tpl = Template::Mixer;
+    CHECK (fromJson (toJson (lib)).capture.tpl == Template::Mixer);
+    lib.capture.tpl = Template::Custom;
+    lib.capture.families = 5u;
+    lib.capture.scopes = 3u;
+    const auto back = fromJson (toJson (lib));
+    CHECK (back.capture == lib.capture);
+    CHECK (back.capture.families == 5u);
+    CHECK (fromJson ("{\"capture\":{\"template\":\"nonsense\"}}").capture.tpl == Template::OrganConsole);   // inconnu : modèle d'origine
+}
+
+TEST_CASE ("scenes: the general cancel returns the template's parameters to their defaults, organ templates to zero")
+{
+    auto set = makeFullSet();
+    const ParamId volume0 = probe::trackParam (0, probe::kVolume);
+    const auto* spec = set.find (volume0);
+    REQUIRE (spec != nullptr);
+    const double defaultVolume = spec->defaultValue;
+    set.set (volume0, -9.0);
+    set.set (mixer::modulatorParam (0, 0), 40.0);
+
+    Library lib;
+    Controller c;
+    lib.capture.tpl = Template::Mixer;
+    c.cancel (lib, set);
+    CHECK (set.get (volume0) == defaultVolume);                  // modèle Mixeur : retour au défaut
+    CHECK (set.get (mixer::modulatorParam (0, 0)) == 40.0);      // les jeux ne sont pas dans ce modèle : intacts
+
+    set.set (volume0, -9.0);
+    lib.capture.tpl = Template::OrganStops;
+    c.cancel (lib, set);
+    CHECK (set.get (mixer::modulatorParam (0, 0)) == 0.0);       // modèle d'orgue : repoussé à 0, comme avant
+    CHECK (set.get (volume0) == -9.0);                           // le mixeur n'est pas touché
+}
+
+TEST_CASE ("scenes: recording follows the chosen template, a scene of one track follows it too")
+{
+    auto set = makeFullSet();
+    const ParamId volume0 = probe::trackParam (0, probe::kVolume), volume1 = probe::trackParam (1, probe::kVolume);
+    set.set (volume0, -3.0);
+    set.set (volume1, -6.0);
+    Library lib;
+    lib.capture.tpl = Template::Mixer;
+    Controller c;
+    c.arm (true);
+    CHECK (c.general (lib, set, 0).result == Result::Stored);
+    c.arm (true);
+    CHECK (c.divisional (lib, set, 1, 0).result == Result::Stored);
+    const auto* general = lib.general (0, 0);
+    const auto* divisional = lib.divisional (1, 0, 0);
+    REQUIRE (general != nullptr);
+    REQUIRE (divisional != nullptr);
+    auto has = [] (const Memory& m, ParamId id) { return std::any_of (m.values.begin(), m.values.end(), [id] (const auto& v) { return v.first == id; }); };
+    CHECK (has (*general, volume0));
+    CHECK (has (*general, volume1));
+    CHECK (has (*divisional, volume1));
+    CHECK_FALSE (has (*divisional, volume0));   // la scène de la piste 2 ne contient pas la piste 1
+    set.set (volume0, 0.0);
+    set.set (volume1, 0.0);
+    c.general (lib, set, 0);   // rappel
+    CHECK (set.get (volume0) == -3.0);
+    CHECK (set.get (volume1) == -6.0);
+}
+
+TEST_CASE ("scenes: the stepper inserts after the current step and deletes the current one")
+{
+    Library lib;
+    Controller c;
+    CHECK_FALSE (c.sequenceDeleteCurrent (lib));       // rien à supprimer
+    CHECK (c.sequenceInsert (lib, generalKey (0, 0)));  // liste vide : en tête
+    CHECK (lib.sequence == std::vector<int> { generalKey (0, 0) });
+    CHECK (c.sequencePosition() == 0);
+    CHECK (c.sequenceInsert (lib, generalKey (0, 1)));  // après le pas courant
+    CHECK (c.sequenceInsert (lib, generalKey (0, 2)));
+    CHECK (lib.sequence == std::vector<int> { generalKey (0, 0), generalKey (0, 1), generalKey (0, 2) });
+    CHECK (c.sequencePosition() == 2);
+    c.resetSequence();
+    CHECK (c.sequenceInsert (lib, generalKey (0, 9)));  // pas de position : en tête
+    CHECK (lib.sequence.front() == generalKey (0, 9));
+    CHECK (c.sequenceDeleteCurrent (lib));
+    CHECK (lib.sequence == std::vector<int> { generalKey (0, 0), generalKey (0, 1), generalKey (0, 2) });
+    CHECK (c.sequencePosition() == 0);                  // reste sur le pas suivant
+    CHECK_FALSE (c.sequenceInsert (lib, -1));            // clef invalide
+    while (c.sequenceDeleteCurrent (lib)) {}
+    CHECK (lib.sequence.empty());
+    CHECK (c.sequencePosition() == -1);
+}

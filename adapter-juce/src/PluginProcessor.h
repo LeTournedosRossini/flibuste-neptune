@@ -231,6 +231,8 @@ public:
     CombiStatus combiStatus() const;
     bool combiArmed() const noexcept { return combi_.armed(); }   // touche Set armée : le prochain piston mémorise (aussi pour les pistons « instantané » de la Façade)
     void uiCombiArm (bool armed) noexcept { combi_.arm (armed); }
+    bool uiCombiSequenceInsert (int generalKeyValue);   // insère le général après le pas courant du pas à pas (annulable)
+    bool uiCombiSequenceDeleteCurrent();                // supprime le pas courant
     void uiCombiSetBank (int bank) noexcept { combi_.setBank (bank); }   // banque courante 0..9 (commune aux généraux et aux divisionnels)
     // Exécute une commande 1..26 (voir Combinations.h). `track` : le clavier visé par un divisionnel. Un rappel est une seule entrée d'annulation.
     neptune::core::combi::Result uiCombiCommand (int command, int track);

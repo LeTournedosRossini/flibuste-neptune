@@ -615,9 +615,9 @@ neptune::core::combi::Result NeptuneProcessor::combiExecute (const std::function
             hp->endChangeGesture();
         }
     });
-    undo_.beginTransaction ("Combination");
+    undo_.beginTransaction ("Scene");
     const auto outcome = action (lib);
-    if (outcome.result == combi::Result::Stored) uiEditCombinations (std::move (lib), "Combination: store");
+    if (outcome.result == combi::Result::Stored) uiEditCombinations (std::move (lib), "Scene: store");
     undo_.endTransaction();
     return outcome.result;
 }
@@ -627,6 +627,22 @@ neptune::core::combi::Result NeptuneProcessor::uiCombiCommand (int command, int 
     using namespace neptune::core;
     const int t = juce::jlimit (0, mixer::numTracks - 1, track);
     return combiExecute ([this, command, t] (combi::Library& lib) { return combi_.run (command, lib, params_, t); });
+}
+
+bool NeptuneProcessor::uiCombiSequenceInsert (int generalKeyValue)
+{
+    auto lib = combinations();
+    if (! combi_.sequenceInsert (lib, generalKeyValue)) return false;
+    uiEditCombinations (std::move (lib), "Scene: insert step");
+    return true;
+}
+
+bool NeptuneProcessor::uiCombiSequenceDeleteCurrent()
+{
+    auto lib = combinations();
+    if (! combi_.sequenceDeleteCurrent (lib)) return false;
+    uiEditCombinations (std::move (lib), "Scene: delete step");
+    return true;
 }
 
 neptune::core::combi::Result NeptuneProcessor::uiCombiProgramChange (int program, int track)

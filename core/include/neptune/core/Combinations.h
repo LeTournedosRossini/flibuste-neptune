@@ -1,5 +1,6 @@
 #pragma once
-// Combinaisons d'orgue (palier 7, voir docs/specification-combinaisons.md) : des mémoires qui rappellent d'un coup l'état de la console.
+// Scènes (ex-combinaisons d'orgue, palier 7, voir docs/specification-combinaisons.md et docs/plan-scenes.md) : des mémoires qui rappellent d'un coup un état de Neptune.
+// Ce qu'une scène enregistre dépend du MODÈLE DE CAPTURE choisi au moment d'enregistrer (CaptureSpec) : les jeux d'orgue, la console d'orgue complète, le mixeur, tout, ou un choix libre.
 //  - Général : jeux (modulateurs des pistes), tirants d'accouplement du routeur et transpositions de règles, toute la console.
 //  - Divisionnel : les jeux d'un seul clavier (une piste).
 //  - Annulation générale : repousse tout (jeux, tirants, transpositions à 0).
@@ -14,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "neptune/core/ParamGroups.h"
 #include "neptune/core/Parameter.h"
 
 namespace neptune::core::combi
@@ -23,7 +25,7 @@ constexpr int kPistons = 10;             // pistons par banque (numérotés 1 à
 constexpr int kTracks = 16;              // claviers (pistes) qui ont des divisionnels
 constexpr int kMaxSequence = 64;         // pas du séquenceur
 constexpr std::size_t kMaxName = 64;
-constexpr std::size_t kMaxValues = 1024; // valeurs d'une mémoire
+constexpr std::size_t kMaxValues = 8192; // valeurs d'une mémoire (1024 avant les scènes : un modèle « Tout » en demande davantage)
 
 // Clefs de stockage (clairsemé : seules les mémoires enregistrées existent).
 constexpr int generalKey (int bank, int piston) noexcept { return bank * kPistons + piston; }
@@ -39,16 +41,31 @@ struct Memory
     bool operator== (const Memory& o) const noexcept { return used == o.used && name == o.name && values == o.values; }
 };
 
+// Modèle de capture : ce qu'un enregistrement (Set + piston) mémorise. Les mémoires déjà enregistrées gardent leurs propres valeurs : le modèle ne sert qu'à enregistrer
+// et à l'annulation générale (qui remet à leur défaut les paramètres du modèle ; pour les modèles d'orgue, à 0 comme avant).
+enum class Template : int { OrganConsole = 0, OrganStops, Mixer, Everything, Custom, kCount };
+struct CaptureSpec
+{
+    Template tpl = Template::OrganConsole;   // le modèle des combinaisons d'orgue d'origine
+    unsigned families = 0;                   // Custom : un bit par paramgroups::Family
+    unsigned scopes = 0;                     // Custom : un bit par paramgroups::Scope
+    bool operator== (const CaptureSpec& o) const noexcept { return tpl == o.tpl && (tpl != Template::Custom || (families == o.families && scopes == o.scopes)); }
+    bool operator!= (const CaptureSpec& o) const noexcept { return ! (*this == o); }
+};
+const char* templateKey (Template) noexcept;                  // « organ_console »... (JSON)
+bool templateFromKey (const std::string&, Template& out);
+
 struct Library
 {
+    CaptureSpec capture;                  // le modèle d'enregistrement courant (dans le projet)
     std::map<int, Memory> generals;       // generalKey
     std::map<int, Memory> divisionals;    // divisionalKey
     std::vector<int> sequence;            // clefs de généraux
 
     const Memory* general (int bank, int piston) const;
     const Memory* divisional (int track, int bank, int piston) const;
-    bool empty() const noexcept { return generals.empty() && divisionals.empty() && sequence.empty(); }
-    bool operator== (const Library& o) const noexcept { return generals == o.generals && divisionals == o.divisionals && sequence == o.sequence; }
+    bool empty() const noexcept { return generals.empty() && divisionals.empty() && sequence.empty() && capture == CaptureSpec {}; }
+    bool operator== (const Library& o) const noexcept { return generals == o.generals && divisionals == o.divisionals && sequence == o.sequence && capture == o.capture; }
     bool operator!= (const Library& o) const noexcept { return ! (*this == o); }
 };
 
@@ -70,6 +87,8 @@ bool renameDivisional (Library&, int divisionalKeyValue, std::string name);
 //  consoleParams : les jeux de tous les claviers, les 32 tirants du routeur et les transpositions de règles.
 std::vector<ParamId> stopParams (const ParameterSet&, int track);
 std::vector<ParamId> consoleParams (const ParameterSet&);
+// Les paramètres qu'enregistre un modèle. `track` < 0 : toute la console (une scène) ; 0..15 : ceux d'une seule piste (un divisionnel, une scène de piste).
+std::vector<ParamId> captureParams (const ParameterSet&, const CaptureSpec&, int track = -1);
 
 // Commandes (boutons de Façade : Widget::actionMode = 1 + commande ; actions de la couche de contrôle : CC, notes, OSC).
 //  1..10 : piston général 1..10 de la banque courante ; 11..20 : piston divisionnel 1..10 du clavier courant ;
@@ -104,6 +123,8 @@ Memory capture (const ParameterSet&, const std::vector<ParamId>& ids);
 std::vector<Change> recall (ParameterSet&, const Memory&, const Writer& write = {});
 // Annulation générale : tout repousser (valeur 0 de chaque paramètre de la console).
 std::vector<Change> cancelAll (ParameterSet&, const Writer& write = {});
+// Idem pour un modèle : les modèles d'orgue repoussent tout à 0 (jeux, tirants, transpositions) ; les autres remettent les paramètres du modèle à leur valeur par défaut (celle de l'ouverture du logiciel).
+std::vector<Change> cancelAll (ParameterSet&, const CaptureSpec&, const Writer& write = {});
 
 enum class Result { Ignored, Empty, Recalled, Stored, Done };   // Done : changement d'état de jeu seul (touche Set, banque)
 struct Outcome
@@ -133,10 +154,15 @@ public:
     // Piston `piston` (0..kPistons-1) de la banque courante. Set actif : enregistre l'état courant (le nom existant est conservé).
     Outcome general (Library&, ParameterSet&, int piston);
     Outcome divisional (Library&, ParameterSet&, int track, int piston);
-    Outcome cancel (ParameterSet&);
+    Outcome cancel (ParameterSet&);                     // modèle d'orgue d'origine
+    Outcome cancel (const Library&, ParameterSet&);     // selon le modèle de capture de la bibliothèque
 
     // Séquenceur : -1 avant le premier pas. Aux extrémités la position reste en place (Ignored). Un général rappelé directement
     // qui figure dans la liste cale la position sur lui.
+    // Séquenceur : insère un pas (le général `key`) juste après la position courante (au début s'il n'y en a pas encore), qui devient la position courante ;
+    // supprime le pas courant (la position reste sur le suivant, ou sur le dernier). Faux sans effet.
+    bool sequenceInsert (Library&, int generalKeyValue);
+    bool sequenceDeleteCurrent (Library&);
     int sequencePosition() const noexcept { return seq_; }
     void clampSequence (int length) noexcept { if (seq_ >= length) seq_ = length - 1; }   // après un changement de la liste
     void resetSequence() noexcept { seq_ = -1; }

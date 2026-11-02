@@ -8,7 +8,7 @@
 #include "neptune/core/I18n.h"
 #include "neptune/core/Theme.h"
 
-// Écran des combinaisons d'orgue (voir docs/specification-combinaisons.md) : à gauche les 10 généraux de la banque courante (rappeler, renommer, effacer,
+// Écran des scènes, ex-combinaisons d'orgue (voir docs/specification-combinaisons.md et docs/plan-scenes.md) : en haut le modèle d'enregistrement (ce qu'un Set + piston mémorise) ; à gauche les 10 généraux de la banque courante (rappeler, renommer, effacer,
 // les mettre dans la séquence) ou, dans l'onglet DIVISIONNELS, les 10 divisionnels du clavier choisi ; à droite la séquence des généraux (monter,
 // descendre, retirer, vider) avec le pas courant marqué. Chaque changement est un
 // geste annulable (la bibliothèque est dans le projet). On enregistre un général depuis la Façade (touche Set puis un piston) ou par un CC, pas ici.
@@ -70,6 +70,8 @@ public:
         nextBank_.setButtonText (">");
         prevBank_.onClick = [this] { processor_.uiCombiSetBank (processor_.combiStatus().bank - 1); refresh (true); };
         nextBank_.onClick = [this] { processor_.uiCombiSetBank (processor_.combiStatus().bank + 1); refresh (true); };
+        store_.setButtonText (text ("comb.store"));
+        store_.onClick = [this] { storeSelected(); };
         recall_.setButtonText (text ("comb.recall"));
         recall_.onClick = [this] { recallSelected(); };
         rename_.setButtonText (text ("comb.rename"));
@@ -88,7 +90,34 @@ public:
         clear_.onClick = [this] { clearSequence(); };
         close_.setButtonText (text ("modal.close"));
         close_.onClick = [this] { if (onClose) onClose(); };
-        for (auto* b : { &prevBank_, &nextBank_, &recall_, &rename_, &erase_, &addToSequence_, &up_, &down_, &remove_, &clear_, &close_ }) addAndMakeVisible (*b);
+        for (auto* b : { &prevBank_, &nextBank_, &store_, &recall_, &rename_, &erase_, &addToSequence_, &up_, &down_, &remove_, &clear_, &close_ }) addAndMakeVisible (*b);
+
+        captureLabel_.setText (text ("comb.capture"), juce::dontSendNotification);
+        captureLabel_.setColour (juce::Label::textColourId, colour (neptune::core::theme::Token::Text));
+        static const char* const templateKeys[] = { "comb.tpl_organ_console", "comb.tpl_organ_stops", "comb.tpl_mixer", "comb.tpl_everything", "comb.tpl_custom" };
+        for (int i = 0; i < 5; ++i) captureBox_.addItem (text (templateKeys[i]), i + 1);
+        captureBox_.onChange = [this]
+        {
+            auto lib = lib_;
+            lib.capture.tpl = static_cast<neptune::core::combi::Template> (captureBox_.getSelectedId() - 1);
+            if (lib.capture.tpl == neptune::core::combi::Template::Custom && lib.capture.families == 0 && lib.capture.scopes == 0)
+            {
+                // première fois : un point de départ utile (les jeux d'orgue et les tirants du routeur)
+                lib.capture.families = (1u << static_cast<unsigned> (neptune::core::paramgroups::Family::Modulators)) | (1u << static_cast<unsigned> (neptune::core::paramgroups::Family::Router));
+                lib.capture.scopes = (1u << static_cast<unsigned> (neptune::core::paramgroups::Scope::Track)) | (1u << static_cast<unsigned> (neptune::core::paramgroups::Scope::Global));
+            }
+            edit (std::move (lib), "Scene: record model");
+        };
+        captureEdit_.setButtonText (text ("comb.custom_edit"));
+        captureEdit_.onClick = [this] { showCustomMenu(); };
+        insertStep_.setButtonText (text ("comb.insert_step"));
+        insertStep_.onClick = [this] { insertStep(); };
+        deleteStep_.setButtonText (text ("comb.delete_step"));
+        deleteStep_.onClick = [this] { processor_.uiCombiSequenceDeleteCurrent(); refresh (true); };
+        stepLabel_.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+        stepLabel_.setColour (juce::Label::textColourId, colour (neptune::core::theme::Token::Accent));
+        stepLabel_.setJustificationType (juce::Justification::centredRight);
+        for (auto* c : std::initializer_list<juce::Component*> { &captureLabel_, &captureBox_, &captureEdit_, &insertStep_, &deleteStep_, &stepLabel_ }) addAndMakeVisible (*c);
 
         generals_.setModel (&generalsModel_);
         generals_.setRowHeight (30);
@@ -122,7 +151,15 @@ public:
     {
         auto r = panel().reduced (18);
         title_.setBounds (r.removeFromTop (32));
-        hint_.setBounds (r.removeFromTop (60));
+        hint_.setBounds (r.removeFromTop (74));
+        {
+            auto row = r.removeFromTop (34);
+            captureLabel_.setBounds (row.removeFromLeft (100));
+            captureBox_.setBounds (row.removeFromLeft (470));
+            row.removeFromLeft (8);
+            captureEdit_.setBounds (row.removeFromLeft (120));
+        }
+        r.removeFromTop (6);
         auto bank = r.removeFromTop (34);
         prevBank_.setBounds (bank.removeFromLeft (48));
         bankLabel_.setBounds (bank.removeFromLeft (200));
@@ -144,17 +181,28 @@ public:
         auto right = r;
         generalsTitle_.setBounds (left.removeFromTop (26));
         auto leftButtons = left.removeFromBottom (36);
+        left.removeFromBottom (4);
+        auto storeRow = left.removeFromBottom (36);
         left.removeFromBottom (6);
         generals_.setBounds (left);
+        store_.setBounds (storeRow.reduced (2, 0));
         const int lw = leftButtons.getWidth() / 4;
         recall_.setBounds (leftButtons.removeFromLeft (lw).reduced (2, 0));
         rename_.setBounds (leftButtons.removeFromLeft (lw).reduced (2, 0));
         erase_.setBounds (leftButtons.removeFromLeft (lw).reduced (2, 0));
         addToSequence_.setBounds (leftButtons.reduced (2, 0));
-        sequenceTitle_.setBounds (right.removeFromTop (26));
+        {
+            auto titleRow = right.removeFromTop (26);
+            stepLabel_.setBounds (titleRow.removeFromRight (120));
+            sequenceTitle_.setBounds (titleRow);
+        }
+        auto stepButtons = right.removeFromBottom (36);
+        right.removeFromBottom (4);
         auto rightButtons = right.removeFromBottom (36);
         right.removeFromBottom (6);
         sequence_.setBounds (right);
+        insertStep_.setBounds (stepButtons.removeFromLeft (stepButtons.getWidth() / 2).reduced (2, 0));
+        deleteStep_.setBounds (stepButtons.reduced (2, 0));
         const int rw = rightButtons.getWidth() / 4;
         up_.setBounds (rightButtons.removeFromLeft (rw).reduced (2, 0));
         down_.setBounds (rightButtons.removeFromLeft (rw).reduced (2, 0));
@@ -175,7 +223,7 @@ private:
         const auto& c = palette_.color (t);
         return juce::Colour (c.r, c.g, c.b, static_cast<float> (c.a));
     }
-    juce::Rectangle<int> panel() const { return juce::Rectangle<int> (940, juce::jmin (620, getHeight() - 20)).withCentre (getLocalBounds().getCentre()); }
+    juce::Rectangle<int> panel() const { return juce::Rectangle<int> (940, juce::jmin (700, getHeight() - 20)).withCentre (getLocalBounds().getCentre()); }
 
     static juce::String utf8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
 
@@ -254,7 +302,7 @@ private:
             if (result != 1 || safe == nullptr) return;
             auto lib = safe->lib_;
             const auto typed = w->getTextEditorContents ("name").toStdString();
-            if (divisional ? cb::renameDivisional (lib, key, typed) : cb::renameGeneral (lib, key, typed)) safe->edit (std::move (lib), "Combination: rename");
+            if (divisional ? cb::renameDivisional (lib, key, typed) : cb::renameGeneral (lib, key, typed)) safe->edit (std::move (lib), "Scene: rename");
         }), true);
     }
 
@@ -263,7 +311,7 @@ private:
         const int key = selectedKey();
         if (key < 0) return;
         auto lib = lib_;
-        if (divisional_ ? neptune::core::combi::eraseDivisional (lib, key) : neptune::core::combi::eraseGeneral (lib, key)) edit (std::move (lib), "Combination: erase");
+        if (divisional_ ? neptune::core::combi::eraseDivisional (lib, key) : neptune::core::combi::eraseGeneral (lib, key)) edit (std::move (lib), "Scene: erase");
     }
 
     void addSelectedToSequence()
@@ -273,8 +321,62 @@ private:
         auto lib = lib_;
         if (! neptune::core::combi::sequenceAdd (lib, key)) return;
         const int last = static_cast<int> (lib.sequence.size()) - 1;
-        edit (std::move (lib), "Combination: sequence");
+        edit (std::move (lib), "Scene: sequence");
         sequence_.selectRow (last);
+    }
+
+    // Mémorise l'état actuel de Neptune, selon le modèle d'enregistrement, dans la scène choisie (comme Set puis le piston, sans quitter l'écran) ; demande avant d'écraser.
+    void storeSelected()
+    {
+        const int row = generals_.getSelectedRow();
+        if (row < 0) return;
+        const auto doStore = [safe = juce::Component::SafePointer<CombinationsPanel> (this), row]
+        {
+            if (safe == nullptr) return;
+            namespace cb = neptune::core::combi;
+            if (! safe->processor_.combiStatus().setArmed) safe->processor_.uiCombiCommand (cb::kCommandSet, safe->track_);   // arme Set (s'il ne l'est pas déjà)
+            safe->processor_.uiCombiCommand ((safe->divisional_ ? cb::kCommandDivisional : cb::kCommandGeneral) + row, safe->track_);   // le piston enregistre
+            safe->refresh (true);
+        };
+        if (memoryAt (row) == nullptr) { doStore(); return; }
+        juce::AlertWindow::showAsync (juce::MessageBoxOptions::makeOptionsOkCancel (juce::MessageBoxIconType::QuestionIcon, text ("comb.title"), text ("comb.store_confirm"),
+                                                                                    text ("grp.ok"), text ("mix.cancel"), this),
+                                      [doStore] (int result) { if (result == 1) doStore(); });
+    }
+
+    void insertStep()
+    {
+        const int key = selectedKey();
+        if (key < 0 || divisional_) return;
+        processor_.uiCombiSequenceInsert (key);
+        refresh (true);
+        sequence_.selectRow (processor_.combiStatus().sequencePosition);
+    }
+
+    // Choix libre de ce qu'un enregistrement mémorise : des familles de paramètres et des portées (pistes, pistes parallèles, bus, Master, global). Le menu se rouvre après chaque case pour pouvoir en cocher plusieurs.
+    void showCustomMenu()
+    {
+        namespace cb = neptune::core::combi;
+        namespace pg = neptune::core::paramgroups;
+        juce::PopupMenu menu;
+        menu.addSectionHeader (text ("comb.custom_families"));
+        for (int f = 0; f < pg::numFamilies - 1; ++f)   // sans « Autre »
+            menu.addItem (100 + f, text (pg::familyKey (static_cast<pg::Family> (f))), true, (lib_.capture.families & (1u << static_cast<unsigned> (f))) != 0);
+        menu.addSeparator();
+        menu.addSectionHeader (text ("comb.custom_scopes"));
+        static const char* const scopeKeys[] = { "pfilter.track", "pfilter.parallels", "pfilter.buses", "pfilter.master", "pfilter.global" };
+        for (int s = 0; s < 5; ++s) menu.addItem (200 + s, text (scopeKeys[s]), true, (lib_.capture.scopes & (1u << static_cast<unsigned> (s))) != 0);
+        menu.setLookAndFeel (&getLookAndFeel());
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&captureEdit_), [safe = juce::Component::SafePointer<CombinationsPanel> (this)] (int chosen)
+        {
+            if (safe == nullptr || chosen <= 0) return;
+            auto lib = safe->lib_;
+            lib.capture.tpl = cb::Template::Custom;
+            if (chosen >= 100 && chosen < 200) lib.capture.families ^= 1u << static_cast<unsigned> (chosen - 100);
+            else if (chosen >= 200) lib.capture.scopes ^= 1u << static_cast<unsigned> (chosen - 200);
+            safe->edit (std::move (lib), "Scene: record model");
+            juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->showCustomMenu(); });
+        });
     }
 
     void moveStep (int delta)
@@ -282,7 +384,7 @@ private:
         const int row = sequence_.getSelectedRow();
         auto lib = lib_;
         if (! neptune::core::combi::sequenceMove (lib, row, delta)) return;
-        edit (std::move (lib), "Combination: sequence");
+        edit (std::move (lib), "Scene: sequence");
         sequence_.selectRow (row + delta);
     }
 
@@ -291,7 +393,7 @@ private:
         const int row = sequence_.getSelectedRow();
         auto lib = lib_;
         if (! neptune::core::combi::sequenceRemove (lib, row)) return;
-        edit (std::move (lib), "Combination: sequence");
+        edit (std::move (lib), "Scene: sequence");
         sequence_.selectRow (juce::jmin (row, static_cast<int> (lib_.sequence.size()) - 1));
     }
 
@@ -300,7 +402,7 @@ private:
         if (lib_.sequence.empty()) return;
         auto lib = lib_;
         lib.sequence.clear();
-        edit (std::move (lib), "Combination: sequence");
+        edit (std::move (lib), "Scene: sequence");
     }
 
     void updateButtons()
@@ -308,6 +410,7 @@ private:
         namespace cb = neptune::core::combi;
         const int row = generals_.getSelectedRow();
         const bool filled = row >= 0 && memoryAt (row) != nullptr;
+        store_.setEnabled (row >= 0);
         recall_.setEnabled (filled);
         rename_.setEnabled (filled);
         erase_.setEnabled (filled);
@@ -318,6 +421,8 @@ private:
         down_.setEnabled (step >= 0 && step < n - 1);
         remove_.setEnabled (step >= 0 && step < n);
         clear_.setEnabled (n > 0);
+        insertStep_.setEnabled (! divisional_ && filled && n < cb::kMaxSequence);
+        deleteStep_.setEnabled (status_.sequencePosition >= 0 && status_.sequencePosition < n);
         prevBank_.setEnabled (status_.bank > 0);
         nextBank_.setEnabled (status_.bank < cb::kBanks - 1);
     }
@@ -333,6 +438,9 @@ private:
         if (! changed) return;
         bankLabel_.setText (juce::String::fromUTF8 (tr_.format ("comb.bank", { std::to_string (status_.bank + 1), std::to_string (neptune::core::combi::kBanks) }).c_str()),
                             juce::dontSendNotification);
+        captureBox_.setSelectedId (static_cast<int> (lib_.capture.tpl) + 1, juce::dontSendNotification);
+        captureEdit_.setVisible (lib_.capture.tpl == neptune::core::combi::Template::Custom);
+        stepLabel_.setText (juce::String::fromUTF8 (tr_.format ("comb.step", { std::to_string (status_.sequencePosition + 1), std::to_string (lib_.sequence.size()) }).c_str()), juce::dontSendNotification);
         generals_.updateContent();
         sequence_.updateContent();
         generals_.repaint();
@@ -387,8 +495,9 @@ private:
     bool divisional_ = false;      // onglet DIVISIONNELS : les mémoires montrées sont celles du clavier `track_`
     int track_ = 0;
     juce::TextButton generalsTab_, divisionalsTab_;
-    juce::Label keyboardLabel_;
-    juce::ComboBox keyboardBox_;
+    juce::Label keyboardLabel_, captureLabel_, stepLabel_;
+    juce::ComboBox keyboardBox_, captureBox_;
+    juce::TextButton captureEdit_, insertStep_, deleteStep_, store_;
     juce::Label title_, hint_, bankLabel_, generalsTitle_, sequenceTitle_;
     juce::TextButton prevBank_, nextBank_, recall_, rename_, erase_, addToSequence_, up_, down_, remove_, clear_, close_;
     juce::ListBox generals_, sequence_;

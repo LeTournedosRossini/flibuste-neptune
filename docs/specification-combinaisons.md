@@ -1,5 +1,7 @@
 # Combinaisons d'orgue (palier 7) — spécification
 
+> **Mise à jour du 2026-11-02 : les combinaisons d'orgue sont devenues les « scènes », avec des modèles d'enregistrement.** La combinaison d'orgue décrite ci-dessous est le modèle d'origine, toujours le modèle par défaut. Voir `plan-scenes.md`.
+
 Statut : **cœur écrit et testé** (`core/include/neptune/core/Combinations.h`, `core/src/Combinations.cpp`, `tests/test_combinations.cpp`) ; **branché** dans le plugin (2026-10-26, à valider dans Reaper) : processeur, couche de contrôle (CC, notes, OSC), boutons de la Façade. Pas encore fait : écran de gestion, changement de programme MIDI, divisionnels par piste via CC (voir « Étapes suivantes »).
 
 Décisions de l'utilisateur (2026-10-26, par questions à choix) : voir « Décisions ». Ce qui suit les complète par des choix de détail, signalés « à confirmer » quand ils ne viennent pas de l'utilisateur.

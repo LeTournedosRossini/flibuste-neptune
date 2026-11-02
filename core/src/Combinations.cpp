@@ -81,6 +81,26 @@ Memory memoryFromJson (const json& o)
 }
 } // namespace
 
+const char* templateKey (Template t) noexcept
+{
+    switch (t)
+    {
+        case Template::OrganConsole: return "organ_console";
+        case Template::OrganStops: return "organ_stops";
+        case Template::Mixer: return "mixer";
+        case Template::Everything: return "everything";
+        case Template::Custom: return "custom";
+        default: return "organ_console";
+    }
+}
+
+bool templateFromKey (const std::string& key, Template& out)
+{
+    for (int i = 0; i < static_cast<int> (Template::kCount); ++i)
+        if (key == templateKey (static_cast<Template> (i))) { out = static_cast<Template> (i); return true; }
+    return false;
+}
+
 Library sanitised (Library lib)
 {
     cleanMap (lib.generals, numGeneralKeys);
@@ -111,6 +131,17 @@ std::string toJson (const Library& in)
     }
     for (const int key : lib.sequence) sequence.push_back ({ { "bank", key / kPistons }, { "piston", key % kPistons } });
     json doc;
+    if (lib.capture != CaptureSpec {})
+    {
+        json cap;
+        cap["template"] = templateKey (lib.capture.tpl);
+        if (lib.capture.tpl == Template::Custom)
+        {
+            cap["families"] = lib.capture.families;
+            cap["scopes"] = lib.capture.scopes;
+        }
+        doc["capture"] = std::move (cap);
+    }
     doc["generals"] = std::move (generals);
     doc["divisionals"] = std::move (divisionals);
     doc["sequence"] = std::move (sequence);
@@ -129,6 +160,13 @@ Library fromJson (std::string_view text)
         out = static_cast<int> (d);
         return true;
     };
+    if (const auto it = doc.find ("capture"); it != doc.end() && it->is_object())
+    {
+        if (const auto t = it->find ("template"); t != it->end() && t->is_string()) templateFromKey (t->get<std::string>(), lib.capture.tpl);
+        double f = 0.0, s = 0.0;
+        if (numberOf (*it, "families", f) && f >= 0.0) lib.capture.families = static_cast<unsigned> (f);
+        if (numberOf (*it, "scopes", s) && s >= 0.0) lib.capture.scopes = static_cast<unsigned> (s);
+    }
     if (const auto it = doc.find ("generals"); it != doc.end() && it->is_array())
         for (const auto& o : *it)
         {
@@ -226,6 +264,53 @@ std::vector<ParamId> consoleParams (const ParameterSet& set)
     return ids;
 }
 
+std::vector<ParamId> captureParams (const ParameterSet& set, const CaptureSpec& spec, int track)
+{
+    using paramgroups::Family;
+    using paramgroups::Scope;
+    const bool oneTrack = track >= 0 && track < kTracks;
+    if (spec.tpl == Template::OrganConsole) return oneTrack ? stopParams (set, track) : consoleParams (set);
+    if (spec.tpl == Template::OrganStops)
+    {
+        if (oneTrack) return stopParams (set, track);
+        std::vector<ParamId> ids;
+        for (int t = 0; t < kTracks; ++t)
+        {
+            const auto stops = stopParams (set, t);
+            ids.insert (ids.end(), stops.begin(), stops.end());
+        }
+        return ids;
+    }
+    unsigned families = 0, scopes = 0;
+    auto bit = [] (auto e) { return 1u << static_cast<unsigned> (e); };
+    switch (spec.tpl)
+    {
+        case Template::Mixer:
+            families = bit (Family::Strip) | bit (Family::Sends);
+            scopes = bit (Scope::Track) | bit (Scope::Parallel) | bit (Scope::Bus) | bit (Scope::Master);
+            break;
+        case Template::Everything:
+            for (int f = 0; f < paramgroups::numFamilies; ++f) if (static_cast<Family> (f) != Family::Other) families |= 1u << static_cast<unsigned> (f);
+            for (int s = 0; s <= static_cast<int> (Scope::Global); ++s) scopes |= 1u << static_cast<unsigned> (s);
+            break;
+        default:
+            families = spec.families;
+            scopes = spec.scopes;
+            break;
+    }
+    std::vector<ParamId> ids;
+    for (std::size_t i = 0; i < set.size(); ++i)
+    {
+        const auto& ps = set.spec (i);
+        if (ps.hidden) continue;
+        const auto g = paramgroups::classify (ps.name);
+        if ((families & (1u << static_cast<unsigned> (g.family))) == 0 || (scopes & (1u << static_cast<unsigned> (g.scope))) == 0) continue;
+        if (oneTrack && ! (g.scope == Scope::Track && g.index == track)) continue;   // une scène de piste : seulement les paramètres de cette piste
+        if (ids.size() < kMaxValues) ids.push_back (ps.id);
+    }
+    return ids;
+}
+
 Memory capture (const ParameterSet& set, const std::vector<ParamId>& ids)
 {
     Memory m;
@@ -265,6 +350,23 @@ std::vector<Change> cancelAll (ParameterSet& set, const Writer& write)
 {
     std::vector<Change> changes;
     for (const ParamId id : consoleParams (set)) apply (set, id, 0.0, changes, write);
+    return changes;
+}
+
+std::vector<Change> cancelAll (ParameterSet& set, const CaptureSpec& spec, const Writer& write)
+{
+    if (spec.tpl == Template::OrganConsole || spec.tpl == Template::OrganStops)
+    {
+        std::vector<Change> changes;
+        for (const ParamId id : captureParams (set, spec, -1)) apply (set, id, 0.0, changes, write);
+        return changes;
+    }
+    std::vector<Change> changes;
+    for (const ParamId id : captureParams (set, spec, -1))
+    {
+        const auto index = set.indexOf (id);
+        if (index != ParameterSet::npos) apply (set, id, set.spec (index).defaultValue, changes, write);   // comme à l'ouverture du logiciel
+    }
     return changes;
 }
 
@@ -360,7 +462,7 @@ Outcome Controller::general (Library& lib, ParameterSet& set, int piston)
     if (setActive())
     {
         armed_ = false;
-        return storeInto (lib.generals[generalKey (bank_, piston)], capture (set, consoleParams (set)));
+        return storeInto (lib.generals[generalKey (bank_, piston)], capture (set, captureParams (set, lib.capture, -1)));
     }
     const int key = generalKey (bank_, piston);
     const auto it = std::find (lib.sequence.begin(), lib.sequence.end(), key);
@@ -374,7 +476,7 @@ Outcome Controller::divisional (Library& lib, ParameterSet& set, int track, int 
     if (setActive())
     {
         armed_ = false;
-        return storeInto (lib.divisionals[divisionalKey (track, bank_, piston)], capture (set, stopParams (set, track)));
+        return storeInto (lib.divisionals[divisionalKey (track, bank_, piston)], capture (set, captureParams (set, lib.capture, track)));
     }
     return recallMemory (lib.divisional (track, bank_, piston), set, writer_);
 }
@@ -385,6 +487,32 @@ Outcome Controller::cancel (ParameterSet& set)
     out.result = Result::Recalled;
     out.changes = cancelAll (set, writer_);
     return out;
+}
+
+Outcome Controller::cancel (const Library& lib, ParameterSet& set)
+{
+    Outcome out;
+    out.result = Result::Recalled;
+    out.changes = cancelAll (set, lib.capture, writer_);
+    return out;
+}
+
+bool Controller::sequenceInsert (Library& lib, int key)
+{
+    if (key < 0 || key >= numGeneralKeys || lib.sequence.size() >= static_cast<std::size_t> (kMaxSequence)) return false;
+    const int at = std::min (seq_ + 1, static_cast<int> (lib.sequence.size()));
+    lib.sequence.insert (lib.sequence.begin() + at, key);
+    seq_ = at;
+    return true;
+}
+
+bool Controller::sequenceDeleteCurrent (Library& lib)
+{
+    if (seq_ < 0 || seq_ >= static_cast<int> (lib.sequence.size())) return false;
+    lib.sequence.erase (lib.sequence.begin() + seq_);
+    if (lib.sequence.empty()) seq_ = -1;
+    else seq_ = std::min (seq_, static_cast<int> (lib.sequence.size()) - 1);
+    return true;
 }
 
 Outcome Controller::recallKey (const Library& lib, ParameterSet& set, int key)
@@ -413,7 +541,7 @@ Outcome Controller::run (int command, Library& lib, ParameterSet& set, int track
     Outcome done;
     switch (command)
     {
-        case kCommandCancel: return cancel (set);
+        case kCommandCancel: return cancel (lib, set);
         case kCommandSet: armed_ = ! armed_; done.result = Result::Done; return done;
         case kCommandNext: return sequenceNext (lib, set);
         case kCommandPrevious: return sequencePrevious (lib, set);
