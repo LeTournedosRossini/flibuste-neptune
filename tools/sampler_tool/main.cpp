@@ -2,7 +2,9 @@
 //   import-sfz  in.sfz out.json [--fade N] [--linear]   convertit un SFZ avec l'import de Neptune (mêmes zones qu'à l'ouverture dans le Sampler) ;
 //                                                        --fade N : largeur du fondu entre couches de vélocité, --linear : fondu linéaire (sinon puissance constante)
 //   validate    instrument.json                          charge l'instrument comme le plugin, liste les avertissements, la couverture notes x vélocités et les trous
-//   sweep       instrument.json --note N [--step S] [--window MS] [--out sweep.wav]
+//   measure     fichier.wav [--window MS] [--search S]   niveau d'un sample : maximum de la sonie momentanée (LUFS pondéré K, fenêtre de 400 ms par défaut) cherché dans les S secondes (3 par défaut)
+//                                                        qui suivent le début du son, avec le RMS non pondéré et la crête sur la même fenêtre ; une ligne clé=valeur par mesure
+//   sweep       instrument.json --note N [--step S] [--window MS] [--search S] [--mesure lufs|rms|crete] [--out sweep.wav]
 //                                                        joue la note N à toutes les vélocités (1, 1+S, ... 127) avec le vrai moteur et mesure le niveau de l'attaque :
 //                                                        un tableau en dB et la liste des marches (variation brusque d'une vélocité à la suivante)
 // Le rendu utilise le moteur même du Sampler : ce qu'il mesure est ce qu'on entend dans Neptune et dans Moussaillon.
@@ -18,6 +20,7 @@
 #include <vector>
 
 #include <sndfile.h>
+#include <ebur128.h>
 
 #include "neptune/core/Instrument.h"
 #include "neptune/core/SamplerVoices.h"
@@ -122,7 +125,85 @@ int cmdValidate (int argc, char** argv)
     return inst != nullptr ? 0 : 1;
 }
 
-struct Level { double peakDb = -180.0, rmsDb = -180.0; };
+
+// Niveau d'un signal stéréo : maximum, sur les instants situés dans [début du son, début du son + searchSec], de la sonie momentanée (LUFS, pondération K, libebur128 :
+// la même mesure que le compteur du Master de Neptune), du RMS non pondéré sur la même fenêtre et de la crête. Le début du son est le premier échantillon à moins
+// de 40 dB sous la crête du fichier : un silence en tête ou en queue ne change donc pas le résultat.
+struct Measures
+{
+    double lufs = -180.0, rmsDb = -180.0, peakDb = -180.0, lufsAt = 0.0, onset = 0.0;
+};
+
+Measures measureSignal (const std::vector<float>& l, const std::vector<float>& r, double rate, double windowMs, double searchSec)
+{
+    Measures m;
+    const std::size_t n = l.size();
+    double peak = 0.0;
+    for (std::size_t i = 0; i < n; ++i) peak = std::max (peak, std::max (std::fabs (static_cast<double> (l[i])), std::fabs (static_cast<double> (r[i]))));
+    if (peak <= 0.0 || n == 0) return m;
+    std::size_t onset = 0;
+    const double thr = peak * std::pow (10.0, -40.0 / 20.0);
+    while (onset < n && std::max (std::fabs (static_cast<double> (l[onset])), std::fabs (static_cast<double> (r[onset]))) < thr) ++onset;
+    m.onset = static_cast<double> (onset) / rate;
+    const std::size_t end = std::min (n, onset + static_cast<std::size_t> (searchSec * rate));
+    const std::size_t hop = std::max<std::size_t> (1, static_cast<std::size_t> (rate * 0.010));
+    const std::size_t win = static_cast<std::size_t> (windowMs * 0.001 * rate);
+
+    ebur128_state* st = ebur128_init (2, static_cast<unsigned long> (rate), EBUR128_MODE_M);
+    if (st != nullptr) ebur128_set_max_window (st, static_cast<unsigned long> (std::max (windowMs, 100.0)));
+    std::vector<float> inter (hop * 2);
+    double peakSeen = 0.0;
+    for (std::size_t pos = 0; pos < end; pos += hop)
+    {
+        const std::size_t cnt = std::min (hop, end - pos);
+        for (std::size_t i = 0; i < cnt; ++i) { inter[2 * i] = l[pos + i]; inter[2 * i + 1] = r[pos + i]; }
+        if (st != nullptr) ebur128_add_frames_float (st, inter.data(), cnt);
+        const std::size_t t = pos + cnt;   // instant de fin de la fenêtre
+        if (t < onset) continue;
+        // crête depuis le début du son
+        for (std::size_t i = std::max (pos, onset); i < pos + cnt; ++i)
+            peakSeen = std::max (peakSeen, std::max (std::fabs (static_cast<double> (l[i])), std::fabs (static_cast<double> (r[i]))));
+        double lu = 0.0;
+        if (st != nullptr && ebur128_loudness_window (st, static_cast<unsigned long> (windowMs), &lu) == EBUR128_SUCCESS && std::isfinite (lu) && lu > m.lufs)
+        {
+            m.lufs = lu;
+            m.lufsAt = static_cast<double> (t) / rate;
+        }
+        // RMS non pondéré sur la même fenêtre
+        const std::size_t from = t > win ? t - win : 0;
+        double sum = 0.0;
+        for (std::size_t i = from; i < t; ++i) sum += 0.5 * (static_cast<double> (l[i]) * l[i] + static_cast<double> (r[i]) * r[i]);
+        m.rmsDb = std::max (m.rmsDb, toDb (std::sqrt (sum / static_cast<double> (std::max<std::size_t> (1, win)))));
+    }
+    m.peakDb = toDb (peakSeen);
+    if (st != nullptr) ebur128_destroy (&st);
+    return m;
+}
+
+int cmdMeasure (int argc, char** argv)
+{
+    if (argc < 3) { std::fprintf (stderr, "usage: measure fichier.wav [--window MS] [--search S]\n"); return 2; }
+    SF_INFO info {};
+    SNDFILE* f = sf_open (argv[2], SFM_READ, &info);
+    if (f == nullptr) { std::fprintf (stderr, "lecture impossible : %s\n", argv[2]); return 1; }
+    std::vector<float> raw (static_cast<std::size_t> (info.frames) * static_cast<std::size_t> (info.channels));
+    sf_readf_float (f, raw.data(), info.frames);
+    sf_close (f);
+    std::vector<float> l (static_cast<std::size_t> (info.frames)), r (l);
+    for (sf_count_t i = 0; i < info.frames; ++i)
+    {
+        l[static_cast<std::size_t> (i)] = raw[static_cast<std::size_t> (i * info.channels)];
+        r[static_cast<std::size_t> (i)] = info.channels > 1 ? raw[static_cast<std::size_t> (i * info.channels + 1)] : l[static_cast<std::size_t> (i)];
+    }
+    const double windowMs = std::atof (optValue (argc, argv, "--window", "400").c_str());
+    const double searchSec = std::atof (optValue (argc, argv, "--search", "3").c_str());
+    const auto m = measureSignal (l, r, static_cast<double> (info.samplerate), windowMs, searchSec);
+    std::printf ("lufs=%.3f\nlufs_at=%.3f\nrms_db=%.3f\npeak_db=%.3f\nonset=%.4f\nduration=%.3f\n", m.lufs, m.lufsAt, m.rmsDb, m.peakDb, m.onset,
+                 static_cast<double> (info.frames) / static_cast<double> (info.samplerate));
+    return 0;
+}
+
+struct Level { double peakDb = -180.0, rmsDb = -180.0, lufs = -180.0, sel = -180.0; };
 
 int cmdSweep (int argc, char** argv)
 {
@@ -134,10 +215,11 @@ int cmdSweep (int argc, char** argv)
     for (const auto& w : warnings) std::printf ("avertissement : %s\n", w.c_str());
     const int note = std::atoi (optValue (argc, argv, "--note", "60").c_str());
     const int step = std::max (1, std::atoi (optValue (argc, argv, "--step", "1").c_str()));
-    const double windowMs = std::atof (optValue (argc, argv, "--window", "300").c_str());
+    const double windowMs = std::atof (optValue (argc, argv, "--window", "400").c_str());
+    const double searchSec = std::atof (optValue (argc, argv, "--search", "3").c_str());
+    const std::string metric = optValue (argc, argv, "--mesure", "lufs");   // lufs | rms | crete
     const std::string outPath = optValue (argc, argv, "--out");
-    const int holdFrames = static_cast<int> (1.5 * kRate), tailFrames = static_cast<int> (0.4 * kRate);
-    const int winFrames = std::clamp (static_cast<int> (windowMs * 0.001 * kRate), 64, holdFrames);
+    const int holdFrames = static_cast<int> (std::max (1.5, searchSec + 0.5) * kRate), tailFrames = static_cast<int> (0.4 * kRate);
 
     std::vector<int> vels;
     for (int v = 1; v <= 127; v += step) vels.push_back (v);
@@ -158,15 +240,9 @@ int cmdSweep (int argc, char** argv)
         for (int pos = holdFrames; pos < holdFrames + tailFrames; pos += 256)
             voices.render (l.data() + pos, r.data() + pos, std::min (256, holdFrames + tailFrames - pos), 1.0f, 1.0f, 0.0);
         Level lv;
-        double sum = 0.0, peak = 0.0;
-        for (int i = 0; i < winFrames; ++i)
-        {
-            const double a = l[static_cast<std::size_t> (i)], b = r[static_cast<std::size_t> (i)];
-            sum += 0.5 * (a * a + b * b);
-            peak = std::max (peak, std::max (std::fabs (a), std::fabs (b)));
-        }
-        lv.rmsDb = toDb (std::sqrt (sum / winFrames));
-        lv.peakDb = toDb (peak);
+        const auto m = measureSignal (l, r, kRate, windowMs, searchSec);
+        lv.lufs = m.lufs; lv.rmsDb = m.rmsDb; lv.peakDb = m.peakDb;
+        lv.sel = metric == "rms" ? m.rmsDb : metric == "crete" ? m.peakDb : m.lufs;
         levels.push_back (lv);
         allL.insert (allL.end(), l.begin(), l.end());
         allR.insert (allR.end(), r.begin(), r.end());
@@ -179,19 +255,20 @@ int cmdSweep (int argc, char** argv)
     {
         const double lawDb = 20.0 * std::log10 (static_cast<double> (vels[i]) / static_cast<double> (vels[i - 1]));
         expected.push_back (lawDb);
-        ratio.push_back ((levels[i].rmsDb - levels[i - 1].rmsDb) / lawDb);
+        ratio.push_back ((levels[i].sel - levels[i - 1].sel) / lawDb);
     }
     std::vector<double> sorted = ratio;
     std::sort (sorted.begin(), sorted.end());
     const double exponent = sorted.empty() ? 1.0 : sorted[sorted.size() / 2];
-    std::printf ("note %d, fenêtre de mesure %.0f ms (niveau RMS de l'attaque)\n  vél.   RMS dB   crête dB   écart à la loi (dB)\n", note, windowMs);
+    std::printf ("note %d, mesure retenue : %s (maximum sur %.0f ms, dans les %.1f s après le début du son)\n  vél.   LUFS   RMS dB   crête dB   écart à la loi (dB, mesure retenue)\n", note,
+                 metric == "rms" ? "RMS" : metric == "crete" ? "crête" : "LUFS momentané", windowMs, searchSec);
     int steps = 0;
     std::vector<std::string> notes;
     for (std::size_t i = 0; i < levels.size(); ++i)
     {
         double dev = 0.0;
-        if (i > 0) dev = (levels[i].rmsDb - levels[i - 1].rmsDb) - exponent * expected[i - 1];
-        std::printf ("  %3d  %7.2f  %8.2f   %s\n", vels[i], levels[i].rmsDb, levels[i].peakDb, i == 0 ? "" : (std::string (dev >= 0 ? "+" : "") + std::to_string (dev).substr (0, 5)).c_str());
+        if (i > 0) dev = (levels[i].sel - levels[i - 1].sel) - exponent * expected[i - 1];
+        std::printf ("  %3d  %7.2f  %7.2f  %8.2f   %s\n", vels[i], levels[i].lufs, levels[i].rmsDb, levels[i].peakDb, i == 0 ? "" : (std::string (dev >= 0 ? "+" : "") + std::to_string (dev).substr (0, 5)).c_str());
         if (i > 0 && std::fabs (dev) > 1.0)
         {
             char buf[160];
@@ -210,10 +287,11 @@ int cmdSweep (int argc, char** argv)
 
 int main (int argc, char** argv)
 {
-    if (argc < 2) { std::fprintf (stderr, "commandes : import-sfz, validate, sweep\n"); return 2; }
+    if (argc < 2) { std::fprintf (stderr, "commandes : import-sfz, validate, measure, sweep\n"); return 2; }
     const std::string cmd = argv[1];
     if (cmd == "import-sfz") return cmdImportSfz (argc, argv);
     if (cmd == "validate") return cmdValidate (argc, argv);
+    if (cmd == "measure") return cmdMeasure (argc, argv);
     if (cmd == "sweep") return cmdSweep (argc, argv);
     std::fprintf (stderr, "commande inconnue : %s\n", cmd.c_str());
     return 2;

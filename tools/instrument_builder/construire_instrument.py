@@ -6,13 +6,15 @@
 Puis  neptune_sampler_tool import-sfz  le convertit en instrument JSON, et  neptune_sampler_tool sweep  vérifie le résultat avec le vrai moteur.
 
 Méthode (voir docs/construire-un-instrument.md) :
- 1. Niveau : RMS de l'attaque (par défaut les 300 ms qui suivent le début du son), en dB.
+ 1. Niveau : maximum de la sonie MOMENTANÉE (LUFS pondéré K, fenêtre de 400 ms, libebur128 : la mesure du compteur du Master de Neptune), cherché dans les 3 s qui
+    suivent le début du son. Un silence avant ou après le sample ne change pas le résultat. Autres mesures possibles : --mesure rms | crete.
  2. Gain : chaque sample est ramené au même niveau de référence ; c'est la loi de vélocité du Sampler qui fait ensuite les nuances. Aux frontières
     entre couches, le niveau est alors continu quelle que soit la loi (aucune marche).
  3. Justesse : hauteur mesurée sur les harmoniques (médiane), écart à la note nominale ; l'accord de la zone le corrige (désactivable). Une mesure peu sûre est signalée
     et n'est pas appliquée.
-Options : --raw (aucune correction, pour comparer avant / après), --ref-db X, --window MS, --no-tune, --max-tune CENTS (défaut 50)"""
-import sys, os, re, math, argparse
+Options : --raw (aucune correction, pour comparer avant / après), --mesure lufs|rms|crete (défaut lufs), --window MS (400), --search S (3), --ref-db X, --no-tune,
+--max-tune CENTS (50), --max-spread CENTS (6), --tool chemin de neptune_sampler_tool"""
+import sys, os, re, math, argparse, subprocess
 import numpy as np
 import soundfile as sf
 
@@ -47,9 +49,20 @@ def onset_index(x):
     return int(idx[0]) if len(idx) else 0
 
 
-def attack_level_db(x, rate, onset, window_ms):
-    seg = x[onset: onset + max(64, int(window_ms * 0.001 * rate))]
-    return 20 * math.log10(max(1e-9, float(np.sqrt(np.mean(seg ** 2)))))
+def find_tool(explicit):
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in [explicit, os.environ.get("NEPTUNE_SAMPLER_TOOL"),
+                 os.path.join(here, "..", "..", "..", "build-core", "tools", "neptune_sampler_tool"),
+                 os.path.join(here, "..", "..", "build-core", "tools", "neptune_sampler_tool")]:
+        if cand and os.path.isfile(cand):
+            return os.path.abspath(cand)
+    sys.exit("neptune_sampler_tool introuvable : le construire (cible CMake neptune_sampler_tool) ou passer --tool")
+
+
+def measure_levels(tool, path, window_ms, search_s):
+    """Niveaux du sample par l'outil : dict lufs, rms_db, peak_db (maximum sur la fenêtre, dans la plage de recherche), lufs_at, onset."""
+    out = subprocess.run([tool, "measure", path, "--window", str(window_ms), "--search", str(search_s)], capture_output=True, text=True, check=True).stdout
+    return {k: float(v) for k, v in (line.split("=") for line in out.split())}
 
 
 def estimate_cents(x, rate, onset, midi):
@@ -87,12 +100,16 @@ def main():
     ap.add_argument("folder")
     ap.add_argument("--raw", action="store_true")
     ap.add_argument("--ref-db", type=float, default=None)
-    ap.add_argument("--window", type=float, default=300.0)
+    ap.add_argument("--window", type=float, default=400.0, help="fenêtre de mesure en ms (400 = sonie momentanée)")
+    ap.add_argument("--search", type=float, default=3.0, help="durée (s) cherchée après le début du son")
+    ap.add_argument("--mesure", choices=["lufs", "rms", "crete"], default="lufs")
+    ap.add_argument("--tool", default=None)
     ap.add_argument("--no-tune", action="store_true")
     ap.add_argument("--max-tune", type=float, default=50.0)
     ap.add_argument("--max-spread", type=float, default=6.0, help="dispersion maximale (cents) pour appliquer une correction de justesse")
     args = ap.parse_args()
 
+    tool = find_tool(args.tool)
     found, skipped = {}, []
     for fn in sorted(os.listdir(args.folder)):
         if not fn.lower().endswith((".wav", ".flac")):
@@ -114,9 +131,10 @@ def main():
                 x, rate = sf.read(os.path.join(args.folder, fn), always_2d=True)
                 x = x.mean(axis=1)
                 on = onset_index(x)
-                lvl = attack_level_db(x, rate, on, args.window)
+                meas = measure_levels(tool, os.path.join(args.folder, fn), args.window, args.search)
+                lvl = {"lufs": meas["lufs"], "rms": meas["rms_db"], "crete": meas["peak_db"]}[args.mesure]
                 cents, spread = estimate_cents(x, rate, on, note)
-                rows.append(dict(note=note, dyn=dyn, file=fn, level=lvl, cents=cents, spread=spread))
+                rows.append(dict(note=note, dyn=dyn, file=fn, level=lvl, cents=cents, spread=spread, meas=meas))
         top = [max((r for r in rows if r["note"] == n), key=lambda r: r["level"])["level"] for n in notes]
         ref = args.ref_db if args.ref_db is not None else float(np.median(top))
 
@@ -127,10 +145,10 @@ def main():
             lo = 0 if i == 0 else (keys[i - 1] + k) // 2 + 1
             hi = 127 if i == len(keys) - 1 else (k + keys[i + 1]) // 2
             key_ranges[k] = (lo, hi)
-        report = [f"Instrument {inst} : {len(rows)} samples, {len(keys)} notes. Niveau de référence {ref:.2f} dB RMS (attaque {args.window:.0f} ms)."]
+        report = [f"Instrument {inst} : {len(rows)} samples, {len(keys)} notes. Mesure : {args.mesure} (maximum sur {args.window:.0f} ms, dans les {args.search:.1f} s après le début du son). Niveau de référence {ref:.2f}."]
         if args.raw:
             report.append("MODE BRUT : aucun gain ni accord corrigé.")
-        report.append(f"{'fichier':28s} {'niveau':>8s} {'gain':>7s} {'écart cents':>12s} {'fiab.':>7s}  accord")
+        report.append(f"{'fichier':28s} {'niveau':>8s} {'LUFS':>7s} {'RMS':>7s} {'crête':>7s} {'max à':>6s} {'gain':>7s} {'écart cents':>12s} {'fiab.':>7s}  accord")
         sfz = ["// " + inst + " : construit par construire_instrument.py (gain et accord mesurés)", "<global>", "loop_mode=no_loop", ""]
         for note in keys:
             layers = [r for r in rows if r["note"] == note]
@@ -155,7 +173,8 @@ def main():
                         tune = 0.0
                 c = "-" if r["cents"] is None else f"{r['cents']:+.1f}"
                 s = "-" if r["spread"] is None else f"{r['spread']:.1f}"
-                report.append(f"{r['file']:28s} {r['level']:8.2f} {gain:+7.2f} {c:>12s} {s:>7s}  {why}")
+                m = r["meas"]
+                report.append(f"{r['file']:28s} {r['level']:8.2f} {m['lufs']:7.2f} {m['rms_db']:7.2f} {m['peak_db']:7.2f} {m['lufs_at']:6.2f} {gain:+7.2f} {c:>12s} {s:>7s}  {why}")
                 lo, hi = key_ranges[note]
                 sfz.append(f"<region> sample={r['file']} pitch_keycenter={note} lokey={lo} hikey={hi} lovel={vlo} hivel={vhi} volume={gain} tune={tune}")
         for fn in skipped:
