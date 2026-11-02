@@ -46,7 +46,8 @@ Nouveau type de widget de Façade (`WidgetType::SceneGrid`, bouton « + Scènes 
 
 ### Retouches de la grille et de la barre de la Façade (2026-11-02)
 - Deux lignes de texte sous le nom (`Memory::note`, `note2`) ; le nom en haut de la case. Tailles réglables dans « Grille... » : taille du nom et des textes (70 à 220 %). Bouton SET de la grille facultatif (désactivé par défaut).
-- Flèches de banque : appui long (0,5 s, puis défilement tant que l'appui dure) ; un clic court ne change rien.
+- Flèches de banque : appui long (0,5 s, puis défilement tant que l'appui dure) ; un clic court ne change rien. Une barre se remplit pendant l'appui et la grille affiche « appui long sur les flèches pour changer de banque » (vérifié sous Xvfb le 2026-11-02).
+- Réglages de taille revus (2026-11-02 soir) : nom 150 % et textes 250 % par défaut, plages 50-400 % et 50-500 %, réglés par un curseur en direct (« Taille du nom... », « Taille des deux lignes de texte... », un seul pas d'annulation par geste) ; texte réduit automatiquement s'il ne tient pas dans la case (`drawAutoFit`) ; bouton de dépliage de la barre réduit à un petit carré en haut à gauche. Vérifié à l'écran : grille, numéro en haut, barre d'appui long, menu « Grille... », bouton replié. **Non vérifié à l'écran** : les curseurs eux-mêmes et le texte réduit sur une scène nommée.
 - Façade en jeu : la barre d'onglets passe dans une colonne à gauche quand l'écran est assez large pour que la Façade n'y perde pas, sinon elle reste en haut ; « Masquer la barre » la replie (la Façade prend toute la place disponible dans la fenêtre ; pour masquer aussi l'en-tête et le pied de Neptune : mode Console).
 
 ## Plus tard
