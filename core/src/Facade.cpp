@@ -287,6 +287,9 @@ Facade sanitisedPage (Facade f)
         w.hue = ((w.hue % 360) + 360) % 360;
         w.vivid = std::clamp (w.vivid, 0, 100);
         w.header = w.header != 0 ? 1 : 0;
+        w.nameSize = std::clamp (w.nameSize, 50, 300);
+        w.noteSize = std::clamp (w.noteSize, 50, 300);
+        w.setPill = w.setPill != 0 ? 1 : 0;
         w.channel = std::clamp (w.channel, 1, 16);
         w.firstNote = std::clamp (w.firstNote, 0, 120);
         w.hold = w.hold != 0 ? 1 : 0;
@@ -714,7 +717,7 @@ json pageJson (const Facade& f)
         if (w.type == WidgetType::Lamp) { e["source"] = w.source; e["ch"] = w.channel; }
         if (w.type == WidgetType::Meter) e["source"] = w.source;
         if (w.type == WidgetType::Action && w.actionMode != 0) e["mode"] = w.actionMode;
-        if (w.type == WidgetType::SceneGrid) { e["cols"] = w.columns; e["rows"] = w.rows; e["hue"] = w.hue; e["vivid"] = w.vivid; e["header"] = w.header; }
+        if (w.type == WidgetType::SceneGrid) { e["cols"] = w.columns; e["rows"] = w.rows; e["hue"] = w.hue; e["vivid"] = w.vivid; e["header"] = w.header; e["nsize"] = w.nameSize; e["tsize"] = w.noteSize; e["setpill"] = w.setPill; }
         if (! w.mirror.empty()) e["mirror"] = w.mirror;
         if (w.type == WidgetType::Midi)
         {
@@ -869,6 +872,9 @@ Facade pageFromJson (const json& o)
             w.hue = intOf (e, "hue", 30);
             w.vivid = intOf (e, "vivid", 55);
             w.header = intOf (e, "header", 1);
+            w.nameSize = intOf (e, "nsize", 100);
+            w.noteSize = intOf (e, "tsize", 100);
+            w.setPill = intOf (e, "setpill", 0);
             w.style = intOf (e, "style", 0);
             w.stepMode = intOf (e, "steps", 0);
             w.invert = intOf (e, "invert", 0);

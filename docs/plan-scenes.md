@@ -44,5 +44,10 @@ Quand un rappel ignore des inserts (un autre module ou un emplacement vide à la
 ## Grille de scènes dans la Façade (2026-11-02)
 Nouveau type de widget de Façade (`WidgetType::SceneGrid`, bouton « + Scènes ») : une grille de 4 à 8 colonnes et de 4 à 8 lignes (réglables par « Grille... »), une case par scène de la banque courante, avec le numéro, le nom et un **texte en plus** (`Memory::note`, enregistré dans le projet ; nom de l'élève, morceau...). Barre de banque (flèches, « Banque n / 32 ») et bouton SET dans le widget. Un clic rappelle la scène (avec le glissement choisi) ou l'enregistre quand SET est armé ; la dernière scène rappelée est allumée (`Controller::lastRecalled`). Clic droit : « Nom et texte... » ou effacer. Une couleur par grille (12 teintes) et un tempérament (doux, calme, vif, très vif pour la scène). Exemple : `docs/exemple-facade/Concert-scenes.neptunefacade` (script `generer-concert.py`) : grille 6 x 4, volumes Master et pistes 1 à 4, muets, muet général, Set, Précédent, Suivant, Annulation générale ; à charger dans la Façade **globale**.
 
+### Retouches de la grille et de la barre de la Façade (2026-11-02)
+- Deux lignes de texte sous le nom (`Memory::note`, `note2`) ; le nom en haut de la case. Tailles réglables dans « Grille... » : taille du nom et des textes (70 à 220 %). Bouton SET de la grille facultatif (désactivé par défaut).
+- Flèches de banque : appui long (0,5 s, puis défilement tant que l'appui dure) ; un clic court ne change rien.
+- Façade en jeu : la barre d'onglets passe dans une colonne à gauche quand l'écran est assez large pour que la Façade n'y perde pas, sinon elle reste en haut ; « Masquer la barre » la replie (la Façade prend toute la place disponible dans la fenêtre ; pour masquer aussi l'en-tête et le pied de Neptune : mode Console).
+
 ## Plus tard
 Commandes « Insérer le pas » et « Supprimer le pas » pour la Façade et la couche de contrôle (aujourd'hui seulement dans l'écran) ; noms de modèles personnalisés enregistrés ; sélection par piste dans « Au choix ».

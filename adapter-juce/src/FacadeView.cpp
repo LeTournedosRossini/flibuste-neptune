@@ -97,9 +97,9 @@ SceneGridGeometry sceneGridGeometry (const neptune::core::facade::Widget& w)
     {
         auto bar = area.removeFromTop (34.0f);
         area.removeFromTop (6.0f);
-        g.prev = bar.removeFromLeft (44.0f);
-        g.setPill = bar.removeFromRight (76.0f);
-        g.next = bar.removeFromRight (44.0f);
+        g.prev = bar.removeFromLeft (52.0f);
+        if (w.setPill != 0) g.setPill = bar.removeFromRight (76.0f);
+        g.next = bar.removeFromRight (52.0f);
         g.label = bar;
     }
     const int cols = std::clamp (w.columns, 4, 8), rows = std::clamp (w.rows, 4, 8);
@@ -254,8 +254,15 @@ public:
                                                                { "hot", Token::KnobHot }, { "face", Token::KnobFace } };
         for (const auto& [name, token] : table)
             svgVars_[name] = "#" + hex (token);
+        bankHold_.fire = [this]   // appui long sur une flèche de banque : la banque change, et continue de défiler tant que l'appui dure
+        {
+            if (bankDir_ == 0) { bankHold_.stopTimer(); return; }
+            namespace cb = neptune::core::combi;
+            owner_.processor_.uiCombiCommand (bankDir_ < 0 ? cb::kCommandBankPrevious : cb::kCommandBankNext, combiTrack());
+            repaint();
+        };
     }
-    ~Canvas() override { releaseKeys(); }
+    ~Canvas() override { bankHold_.stopTimer(); releaseKeys(); }
 
     bool dragging() const noexcept { return mode_ != Mode::None; }
 
@@ -586,6 +593,7 @@ public:
     void mouseUp (const juce::MouseEvent& e) override
     {
         auto& o = owner_;
+        if (bankDir_ != 0) { bankHold_.stopTimer(); bankDir_ = 0; bankHoldId_ = 0; repaint(); }
         if (pistonId_ != 0)
         {
             stopTimer();
@@ -1052,9 +1060,16 @@ private:
         const auto geo = sceneGridGeometry (w);
         if (w.header != 0 && ! e.mods.isPopupMenu())
         {
-            if (geo.prev.contains (p)) { o.processor_.uiCombiCommand (cb::kCommandBankPrevious, combiTrack()); repaint(); return; }
-            if (geo.next.contains (p)) { o.processor_.uiCombiCommand (cb::kCommandBankNext, combiTrack()); repaint(); return; }
-            if (geo.setPill.contains (p)) { o.processor_.uiCombiArm (! o.processor_.combiArmed()); repaint(); return; }
+            // les flèches de banque demandent un appui long (un doigt qui frôle l'écran en concert ne change pas de banque) ; maintenu, le défilement continue
+            if (geo.prev.contains (p) || geo.next.contains (p))
+            {
+                bankDir_ = geo.prev.contains (p) ? -1 : 1;
+                bankHoldId_ = w.id;
+                bankHold_.startTimer (500);
+                repaint();
+                return;
+            }
+            if (w.setPill != 0 && geo.setPill.contains (p)) { o.processor_.uiCombiArm (! o.processor_.combiArmed()); repaint(); return; }
         }
         for (std::size_t i = 0; i < geo.cells.size(); ++i)
         {
@@ -1382,7 +1397,8 @@ private:
                 {
                     auto arrow = [&] (juce::Rectangle<float> r, bool left)
                     {
-                        g.setColour (o.colour (Token::Pb));
+                        const bool held = bankDir_ == (left ? -1 : 1) && bankHoldId_ == w.id;
+                        g.setColour (held ? o.colour (Token::Accent) : o.colour (Token::Pb));
                         g.fillRoundedRectangle (r, 6.0f);
                         g.setColour (o.colour (Token::Text));
                         juce::Path tri;
@@ -1395,12 +1411,15 @@ private:
                     g.setColour (o.colour (Token::Text));
                     g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
                     g.drawText (juce::String::fromUTF8 (o.tr_.format ("facade.grid_bank", { std::to_string (status.bank + 1), std::to_string (cb::kBanks) }).c_str()), geo.label, juce::Justification::centred);
-                    const bool armed = status.setArmed;
-                    g.setColour (armed ? o.colour (Token::KnobHot) : o.colour (Token::Pb));
-                    g.fillRoundedRectangle (geo.setPill, 6.0f);
-                    g.setColour (armed ? juce::Colours::white : o.colour (Token::TextDim));
-                    g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
-                    g.drawText ("SET", geo.setPill, juce::Justification::centred);
+                    if (w.setPill != 0)
+                    {
+                        const bool armed = status.setArmed;
+                        g.setColour (armed ? o.colour (Token::KnobHot) : o.colour (Token::Pb));
+                        g.fillRoundedRectangle (geo.setPill, 6.0f);
+                        g.setColour (armed ? juce::Colours::white : o.colour (Token::TextDim));
+                        g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+                        g.drawText ("SET", geo.setPill, juce::Justification::centred);
+                    }
                 }
                 for (std::size_t i = 0; i < geo.cells.size(); ++i)
                 {
@@ -1421,13 +1440,14 @@ private:
                     const auto& sc = scenes[i];
                     // le nom en haut, puis une ou deux lignes de texte dessous (le nom reste centré dans la place qui lui reste)
                     const int lines = (sc.note.empty() ? 0 : 1) + (sc.note2.empty() ? 0 : 1);
-                    const float lineH = std::max (12.0f, inner.getHeight() * 0.2f);
+                    const float noteScale = static_cast<float> (w.noteSize) / 100.0f, nameScale = static_cast<float> (w.nameSize) / 100.0f;
+                    const float lineH = lines > 0 ? std::min (std::max (12.0f, inner.getHeight() * 0.24f * noteScale), inner.getHeight() * 0.55f / static_cast<float> (lines)) : 0.0f;
                     auto notesArea = lines > 0 ? inner.removeFromBottom (lineH * static_cast<float> (lines)) : juce::Rectangle<float>();
                     g.setColour (ink);
-                    g.setFont (juce::FontOptions (juce::jlimit (11.0f, 26.0f, c.getHeight() * (lines > 0 ? 0.2f : 0.24f)), juce::Font::bold));
+                    g.setFont (juce::FontOptions (juce::jlimit (10.0f, 120.0f, c.getHeight() * (lines > 0 ? 0.2f : 0.24f) * nameScale), juce::Font::bold));
                     g.drawFittedText (utf8 (sc.name), inner.toNearestInt(), lines > 0 ? juce::Justification::centredTop : juce::Justification::centred, 2, 0.7f);
                     g.setColour (ink.withAlpha (0.85f));
-                    g.setFont (juce::FontOptions (juce::jlimit (10.0f, 17.0f, lineH * 0.72f)));
+                    g.setFont (juce::FontOptions (juce::jlimit (10.0f, 90.0f, lineH * 0.76f)));
                     for (const auto* line : { &sc.note, &sc.note2 })
                         if (! line->empty()) g.drawFittedText (utf8 (*line), notesArea.removeFromTop (lineH).toNearestInt(), juce::Justification::centred, 1, 0.6f);
                 }
@@ -1637,6 +1657,12 @@ private:
     std::map<int, int> midiLast_;             // dernière valeur envoyée par chaque curseur MIDI
     std::map<int, double> midiFader_;         // position affichée de chaque curseur MIDI (0..1)
     int pistonId_ = 0;           // piston en cours d'appui (rappel au relâchement, mémorisation si l'appui est long)
+    int bankDir_ = 0, bankHoldId_ = 0;   // grille de scènes : flèche de banque tenue (-1 précédente, +1 suivante) et son widget
+    struct BankHold : juce::Timer
+    {
+        std::function<void()> fire;
+        void timerCallback() override { if (fire) fire(); }
+    } bankHold_;
     bool longPress_ = false;
     std::map<int, std::unique_ptr<VelocityPanel>> panels_;
     std::uint32_t panelRevision_ = 0xFFFFFFFFu;
@@ -3066,6 +3092,14 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     gridOptionsButton_.setButtonText (text ("facade.grid_options"));
     gridOptionsButton_.setTooltip (text ("facade.tip_grid_options"));
     gridOptionsButton_.onClick = [this] { showGridMenu(); };
+    sideHideButton_.setButtonText (text ("facade.hide_bar"));
+    sideHideButton_.setTooltip (text ("facade.tip_hide_bar"));
+    sideHideButton_.onClick = [this] { sideHidden_ = true; resized(); repaint(); };
+    sideShowButton_.setButtonText (">");
+    sideShowButton_.setTooltip (text ("facade.tip_show_bar"));
+    sideShowButton_.onClick = [this] { sideHidden_ = false; resized(); repaint(); };
+    addChildComponent (sideHideButton_);
+    addChildComponent (sideShowButton_);
     meterSourceButton_.setButtonText (text ("facade.meter_source"));
     meterSourceButton_.setTooltip (text ("facade.tip_meter_source"));
     meterSourceButton_.onClick = [this] { showMeterSourceMenu(); };
@@ -3257,6 +3291,59 @@ void FacadeView::resized()
         return juce::roundToInt (std::ceil (getLookAndFeel().getTextButtonFont (const_cast<juce::TextButton&> (b), rowH).getStringWidthFloat (b.getButtonText()))) + pad;
     };
     const auto whole = getLocalBounds();
+    // Jeu : la barre d'onglets passe dans une colonne à gauche quand la Façade y gagne (écran large : la hauteur compte), sinon elle reste en haut ; elle peut se replier.
+    std::vector<juce::TextButton*> sideItems;
+    for (auto* b : { &scopeTrackButton_, &scopeGlobalButton_ }) sideItems.push_back (b);
+    for (auto& tab : pageTabs_) sideItems.push_back (tab.get());
+    for (auto* b : { &editButton_, &relocateButton_, &helpButton_, &sideHideButton_ }) sideItems.push_back (b);
+    bool sideLayout = false;
+    int sideW = 120;
+    if (! editMode_)
+    {
+        sideHideButton_.setVisible (! sideHidden_);
+        sideShowButton_.setVisible (sideHidden_);
+        for (auto* b : sideItems)
+            if (b->isVisible() && ! sideHidden_) sideW = std::max (sideW, std::min (230, fit (*b)));
+        const float ratio = static_cast<float> (fc::canvasWidth) / static_cast<float> (fc::canvasHeight);
+        const float topBarH = static_cast<float> (2 * (rowH + gap) + 24);
+        const float canvasWithColumn = std::min (static_cast<float> (whole.getWidth() - sideW - 28), ratio * static_cast<float> (whole.getHeight() - 12));
+        const float canvasWithTopBar = std::min (static_cast<float> (whole.getWidth()), ratio * (static_cast<float> (whole.getHeight()) - topBarH));
+        sideLayout = canvasWithColumn >= canvasWithTopBar;
+    }
+    const bool collapsed = ! editMode_ && sideHidden_;
+    if (collapsed || sideLayout)
+    {
+        int y = whole.getY() + 12;
+        for (auto* b : sideItems)
+        {
+            if (collapsed || ! b->isVisible()) { if (b != &sideHideButton_) b->setBounds ({}); continue; }
+            b->setBounds (whole.getX() + 12, y, sideW, rowH);
+            y += rowH + gap;
+        }
+        if (collapsed)
+        {
+            for (auto* b : sideItems) b->setBounds ({});
+            sideShowButton_.setBounds (whole.getX() + 6, whole.getY() + 6, 36, rowH);
+            sideShowButton_.toFront (false);
+            toolbarRect_ = {};
+            canvas_->setBounds (whole);
+        }
+        else
+        {
+            toolbarRect_ = juce::Rectangle<int> (whole.getX() + 6, whole.getY() + 6, sideW + 12, y - whole.getY());
+            canvas_->setBounds (whole.withTrimmedLeft (toolbarRect_.getRight() + 4));
+        }
+        if (picker_ != nullptr) picker_->setBounds (getLocalBounds());
+        if (prompt_ != nullptr) prompt_->setBounds (getLocalBounds());
+        if (help_ != nullptr) help_->setBounds (getLocalBounds());
+        if (stylePanel_ != nullptr) stylePanel_->setBounds (getLocalBounds());
+        if (notchPanel_ != nullptr) notchPanel_->setBounds (getLocalBounds());
+        if (scalePanel_ != nullptr) scalePanel_->setBounds (getLocalBounds());
+        if (midiPanel_ != nullptr) midiPanel_->setBounds (getLocalBounds());
+        return;
+    }
+    sideShowButton_.setVisible (false);
+    sideHideButton_.setVisible (! editMode_);   // en haut aussi, on peut replier la barre
     auto area = whole.reduced (12, 8);   // barre d'outils dans un conteneur arrondi
     auto layoutRow = [&] (juce::Rectangle<int> row, std::initializer_list<juce::TextButton*> buttons)
     {
@@ -3308,7 +3395,7 @@ void FacadeView::resized()
     {
         auto top = area.removeFromTop (rowH);
         helpButton_.setBounds (top.removeFromRight (rowH + 8));   // « ? » à droite de la première rangée
-        layoutRow (top, { &editButton_, &imageButton_, &fitButton_, &clearImageButton_, &stylesButton_, &saveFacadeButton_, &loadFacadeButton_, &relocateButton_ });
+        layoutRow (top, { &editButton_, &sideHideButton_, &imageButton_, &fitButton_, &clearImageButton_, &stylesButton_, &saveFacadeButton_, &loadFacadeButton_, &relocateButton_ });
     }
     area.removeFromTop (gap);
     if (editMode_)
@@ -3620,17 +3707,30 @@ void FacadeView::showGridMenu()
     menu.addSubMenu (text ("facade.grid_rows"), rows);
     menu.addSubMenu (text ("facade.grid_colour"), colour);
     menu.addSubMenu (text ("facade.grid_vivid"), vivid);
+    const int sizes[5] = { 70, 100, 130, 170, 220 };
+    juce::PopupMenu nameSizes, noteSizes;
+    for (int i = 0; i < 5; ++i)
+    {
+        nameSizes.addItem (600 + i, juce::String (sizes[i]) + " %", true, g->nameSize == sizes[i]);
+        noteSizes.addItem (700 + i, juce::String (sizes[i]) + " %", true, g->noteSize == sizes[i]);
+    }
+    menu.addSubMenu (text ("facade.grid_name_size"), nameSizes);
+    menu.addSubMenu (text ("facade.grid_note_size"), noteSizes);
     menu.addItem (500, text ("facade.grid_header"), true, g->header != 0);
+    menu.addItem (501, text ("facade.grid_set"), g->header != 0, g->setPill != 0);
     menu.setLookAndFeel (&getLookAndFeel());
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&gridOptionsButton_), [safe = juce::Component::SafePointer<FacadeView> (this), levels] (int choice)
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&gridOptionsButton_), [safe = juce::Component::SafePointer<FacadeView> (this), levels, sizes] (int choice)
     {
         if (safe == nullptr || choice <= 0) return;
-        safe->applySingle ([choice, levels] (fc::Widget& w)
+        safe->applySingle ([choice, levels, sizes] (fc::Widget& w)
         {
             if (choice >= 100 && choice < 200) w.columns = choice - 100;
             else if (choice >= 200 && choice < 300) w.rows = choice - 200;
             else if (choice >= 300 && choice < 400) w.hue = (choice - 300) * 30;
             else if (choice >= 400 && choice < 500) w.vivid = levels[choice - 400];
+            else if (choice >= 600 && choice < 700) w.nameSize = sizes[choice - 600];
+            else if (choice >= 700 && choice < 800) w.noteSize = sizes[choice - 700];
+            else if (choice == 501) w.setPill = w.setPill != 0 ? 0 : 1;
             else if (choice == 500) w.header = w.header != 0 ? 0 : 1;
         }, "Facade: scene grid");
     });

@@ -151,6 +151,8 @@ struct Widget
     int hue = 30;
     int vivid = 55;
     int header = 1;
+    int nameSize = 100, noteSize = 100;   // Grille de scènes : taille du nom et des deux lignes de texte, en pour cent de la taille automatique (50..300)
+    int setPill = 0;                       // Grille de scènes : 1, un bouton SET dans la barre de banque
 
     bool operator== (const Widget& o) const noexcept
     {
@@ -158,7 +160,7 @@ struct Widget
             && parent == o.parent && layout == o.layout && align == o.align && justify == o.justify && gap == o.gap && columns == o.columns
             && channel == o.channel && firstNote == o.firstNote && hold == o.hold && velocity == o.velocity && wheels == o.wheels
             && midi == o.midi && midiTarget == o.midiTarget && midiFader == o.midiFader && actionMode == o.actionMode && source == o.source && style == o.style && vertical == o.vertical && mirror == o.mirror && stepMode == o.stepMode && invert == o.invert && scale == o.scale && response == o.response && notches == o.notches
-            && rows == o.rows && hue == o.hue && vivid == o.vivid && header == o.header;
+            && rows == o.rows && hue == o.hue && vivid == o.vivid && header == o.header && nameSize == o.nameSize && noteSize == o.noteSize && setPill == o.setPill;
     }
 };
 

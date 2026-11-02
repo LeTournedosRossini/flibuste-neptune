@@ -111,9 +111,10 @@ private:
     int missing_ = 0;                            // images de la Façade introuvables (fond, styles)
     int missingTick_ = 0;
 
-    juce::TextButton gridButton_, gridOptionsButton_, editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, zoneButton_, keyboardButton_, lampButton_, lampSourceButton_, setKeyButton_, actionModeButton_, midiButton_, midiEditButton_, meterButton_, meterSourceButton_, sliderButton_, stylesButton_, styleButton_, orientButton_, notchesButton_, scaleButton_, invertButton_, saveFacadeButton_, loadFacadeButton_, relocateButton_, imageButton_, fitButton_, clearImageButton_;
+    juce::TextButton sideHideButton_, sideShowButton_, gridButton_, gridOptionsButton_, editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, zoneButton_, keyboardButton_, lampButton_, lampSourceButton_, setKeyButton_, actionModeButton_, midiButton_, midiEditButton_, meterButton_, meterSourceButton_, sliderButton_, stylesButton_, styleButton_, orientButton_, notchesButton_, scaleButton_, invertButton_, saveFacadeButton_, loadFacadeButton_, relocateButton_, imageButton_, fitButton_, clearImageButton_;
     juce::TextButton linkButton_, textButton_, duplicateButton_, deleteButton_, captureButton_, alignButton_, helpButton_, sameSizeButton_, layoutButton_, zoneAlignButton_, zoneGapButton_, kbChannelButton_, kbFirstButton_, kbHoldButton_, kbWheelsButton_, kbVelocityButton_;
     std::unique_ptr<Canvas> canvas_;
+    bool sideHidden_ = false;                  // jeu : la barre d'onglets (à gauche) est repliée, la Façade prend toute la place
     juce::Rectangle<int> toolbarRect_;   // conteneur arrondi des rangées d'onglets et de boutons
     std::unique_ptr<Picker> picker_;
     std::unique_ptr<TextPrompt> prompt_;
