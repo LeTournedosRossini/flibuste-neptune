@@ -597,6 +597,72 @@ NeptuneProcessor::CombiStatus NeptuneProcessor::combiStatus() const
     return s;
 }
 
+// Les scènes lisent et écrivent les paramètres locaux des inserts par un identifiant composé (voir combi::insertParam) ; les écritures passent par la pile d'annulation.
+class NeptuneProcessor::SceneInserts : public neptune::core::combi::InsertAccess
+{
+public:
+    explicit SceneInserts (NeptuneProcessor& p) : owner_ (p) {}
+
+    std::vector<neptune::core::combi::InsertSlotInfo> slots() override
+    {
+        std::vector<neptune::core::combi::InsertSlotInfo> out;
+        const juce::ScopedLock lock (owner_.instrumentLock_);
+        for (std::size_t strip = 0; strip < owner_.insertInstances_.size(); ++strip)
+            for (std::size_t slot = 0; slot < owner_.insertInstances_[strip].size(); ++slot)
+            {
+                const auto& inst = owner_.insertInstances_[strip][slot];
+                if (inst == nullptr) continue;
+                neptune::core::combi::InsertSlotInfo info;
+                info.strip = static_cast<int> (strip);
+                info.slot = static_cast<int> (slot);
+                info.type = inst->type;
+                const auto& ps = inst->runner.params();
+                for (std::size_t i = 0; i < ps.size(); ++i)
+                    if (! ps.spec (i).hidden && ps.spec (i).id != 4) info.locals.push_back (ps.spec (i).id);
+                out.push_back (std::move (info));
+            }
+        return out;
+    }
+
+    bool read (neptune::core::ParamId id, double& value) override
+    {
+        const auto inst = find (id);
+        if (inst == nullptr) return false;
+        const auto index = inst->runner.params().indexOf (neptune::core::combi::insertLocal (id));
+        if (index == neptune::core::ParameterSet::npos) return false;
+        value = inst->runner.params().getAt (index);
+        return true;
+    }
+
+    bool write (neptune::core::ParamId id, double value) override
+    {
+        const auto inst = find (id);
+        if (inst == nullptr) return false;
+        return owner_.undo_.setParameter (inst->runner.params(), neptune::core::combi::insertLocal (id), value);
+    }
+
+    bool defaultOf (neptune::core::ParamId id, double& value) override
+    {
+        const auto inst = find (id);
+        if (inst == nullptr) return false;
+        const auto index = inst->runner.params().indexOf (neptune::core::combi::insertLocal (id));
+        if (index == neptune::core::ParameterSet::npos) return false;
+        value = inst->runner.params().spec (index).defaultValue;
+        return true;
+    }
+
+private:
+    std::shared_ptr<neptune::core::InsertInstance> find (neptune::core::ParamId id) const
+    {
+        const auto strip = static_cast<std::size_t> (neptune::core::combi::insertStrip (id));
+        const auto slot = static_cast<std::size_t> (neptune::core::combi::insertSlot (id));
+        const juce::ScopedLock lock (owner_.instrumentLock_);
+        if (strip >= owner_.insertInstances_.size() || slot >= owner_.insertInstances_[strip].size()) return nullptr;
+        return owner_.insertInstances_[strip][slot];
+    }
+    NeptuneProcessor& owner_;
+};
+
 neptune::core::combi::Result NeptuneProcessor::combiExecute (const std::function<neptune::core::combi::Outcome (neptune::core::combi::Library&)>& action)
 {
     using namespace neptune::core;
@@ -615,8 +681,12 @@ neptune::core::combi::Result NeptuneProcessor::combiExecute (const std::function
             hp->endChangeGesture();
         }
     });
+    SceneInserts inserts (*this);
+    combi_.setInsertAccess (&inserts);
     undo_.beginTransaction ("Scene");
     const auto outcome = action (lib);
+    combi_.setInsertAccess (nullptr);
+    if (! outcome.changes.empty()) { ++revision_; notifyStateChanged(); }
     if (outcome.result == combi::Result::Stored) uiEditCombinations (std::move (lib), "Scene: store");
     undo_.endTransaction();
     return outcome.result;
@@ -688,7 +758,8 @@ bool NeptuneProcessor::combiLit (int command, int track) const
     const auto lib = combinations();
     const auto* memory = command < combi::kCommandDivisional ? lib.general (combi_.bank(), command - combi::kCommandGeneral)
                                                               : lib.divisional (track, combi_.bank(), command - combi::kCommandDivisional);
-    return memory != nullptr && combi::matches (params_, *memory);
+    SceneInserts inserts (const_cast<NeptuneProcessor&> (*this));
+    return memory != nullptr && combi::matches (params_, *memory, &inserts);
 }
 
 neptune::core::trackexport::Bundle NeptuneProcessor::exportTrackBundle (int track) const

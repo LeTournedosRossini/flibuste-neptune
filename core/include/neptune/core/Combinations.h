@@ -33,12 +33,47 @@ constexpr int divisionalKey (int track, int bank, int piston) noexcept { return 
 constexpr int numGeneralKeys = kBanks * kPistons;
 constexpr int numDivisionalKeys = kTracks * kBanks * kPistons;
 
+// ---- Paramètres des modules en insert
+// Ils ne sont pas dans le jeu de paramètres que voit le moteur de scènes : chaque insert a le sien. Une scène les désigne par un identifiant composé (bit 31 levé) :
+// bande (numérotation à plat du processeur : pistes 0..15, bus 16..31, Master 32, pistes parallèles 33..64) sur 7 bits, emplacement (0..7) sur 3 bits, paramètre local du module sur 21 bits.
+constexpr ParamId kInsertFlag = 0x80000000u;
+constexpr ParamId insertParam (int strip, int slot, ParamId local) noexcept
+{
+    return kInsertFlag | ((static_cast<ParamId> (strip) & 0x7Fu) << 24) | ((static_cast<ParamId> (slot) & 0x7u) << 21) | (local & 0x1FFFFFu);
+}
+constexpr bool isInsertParam (ParamId id) noexcept { return (id & kInsertFlag) != 0; }
+constexpr int insertStrip (ParamId id) noexcept { return static_cast<int> ((id >> 24) & 0x7Fu); }
+constexpr int insertSlot (ParamId id) noexcept { return static_cast<int> ((id >> 21) & 0x7u); }
+constexpr ParamId insertLocal (ParamId id) noexcept { return id & 0x1FFFFFu; }
+constexpr int insertSlotKey (int strip, int slot) noexcept { return strip * 8 + slot; }
+// Portée d'une bande de la numérotation à plat (et son numéro dans cette portée).
+paramgroups::Scope insertStripScope (int strip, int& indexInScope) noexcept;
+
+struct InsertSlotInfo
+{
+    int strip = 0, slot = 0;
+    std::string type;                      // module posé (« limiter »...)
+    std::vector<ParamId> locals;           // ses paramètres locaux que les scènes peuvent mémoriser
+};
+
+// Accès aux paramètres des inserts, fourni par l'adaptateur (le cœur ne connaît pas les instances). Les écritures passent par la pile d'annulation de l'adaptateur.
+class InsertAccess
+{
+public:
+    virtual ~InsertAccess() = default;
+    virtual std::vector<InsertSlotInfo> slots() = 0;                    // les emplacements occupés
+    virtual bool read (ParamId insertId, double& value) = 0;            // faux si l'emplacement n'existe plus
+    virtual bool write (ParamId insertId, double value) = 0;            // valeur bornée au paramètre ; vrai si elle a changé
+    virtual bool defaultOf (ParamId insertId, double& value) = 0;
+};
+
 struct Memory
 {
     bool used = false;                                   // enregistrée (une mémoire sans valeur est valide : console sans jeux)
     std::string name;
-    std::vector<std::pair<ParamId, double>> values;      // valeurs réelles
-    bool operator== (const Memory& o) const noexcept { return used == o.used && name == o.name && values == o.values; }
+    std::vector<std::pair<ParamId, double>> values;      // valeurs réelles (les paramètres d'insert : identifiants composés, voir insertParam)
+    std::map<int, std::string> insertTypes;               // pour chaque emplacement dont la mémoire porte des valeurs : le module qui y était (insertSlotKey) ; au rappel, un autre module ne reçoit rien
+    bool operator== (const Memory& o) const noexcept { return used == o.used && name == o.name && values == o.values && insertTypes == o.insertTypes; }
 };
 
 // Modèle de capture : ce qu'un enregistrement (Set + piston) mémorise. Les mémoires déjà enregistrées gardent leurs propres valeurs : le modèle ne sert qu'à enregistrer
@@ -89,6 +124,8 @@ std::vector<ParamId> stopParams (const ParameterSet&, int track);
 std::vector<ParamId> consoleParams (const ParameterSet&);
 // Les paramètres qu'enregistre un modèle. `track` < 0 : toute la console (une scène) ; 0..15 : ceux d'une seule piste (un divisionnel, une scène de piste).
 std::vector<ParamId> captureParams (const ParameterSet&, const CaptureSpec&, int track = -1);
+// Les paramètres d'insert que le modèle mémorise (famille « Inserts » : Tout Neptune, ou Au choix avec cette famille ; vides pour les autres modèles).
+std::vector<ParamId> captureInsertParams (InsertAccess&, const CaptureSpec&, int track = -1);
 
 // Commandes (boutons de Façade : Widget::actionMode = 1 + commande ; actions de la couche de contrôle : CC, notes, OSC).
 //  1..10 : piston général 1..10 de la banque courante ; 11..20 : piston divisionnel 1..10 du clavier courant ;
@@ -115,16 +152,16 @@ struct Change
 using Writer = std::function<void (ParamId, double)>;
 
 // Vrai si le jeu a déjà, pour chaque valeur connue de la mémoire, la valeur qu'elle porte (voyant d'un piston allumé). Une mémoire sans valeur connue : faux.
-bool matches (const ParameterSet&, const Memory&);
+bool matches (const ParameterSet&, const Memory&, InsertAccess* inserts = nullptr);
 
 // Mémorise les valeurs courantes de `ids` (ceux que le jeu ne connaît pas sont ignorés). Le nom est laissé vide.
-Memory capture (const ParameterSet&, const std::vector<ParamId>& ids);
+Memory capture (const ParameterSet&, const std::vector<ParamId>& ids, InsertAccess* inserts = nullptr);   // `ids` peut contenir des identifiants d'insert (lus par `inserts`)
 // Règle les paramètres de la mémoire ; rend ce qui a réellement changé (valeur bornée au paramètre ; id inconnu : ignoré).
-std::vector<Change> recall (ParameterSet&, const Memory&, const Writer& write = {});
+std::vector<Change> recall (ParameterSet&, const Memory&, const Writer& write = {}, InsertAccess* inserts = nullptr);
 // Annulation générale : tout repousser (valeur 0 de chaque paramètre de la console).
 std::vector<Change> cancelAll (ParameterSet&, const Writer& write = {});
 // Idem pour un modèle : les modèles d'orgue repoussent tout à 0 (jeux, tirants, transpositions) ; les autres remettent les paramètres du modèle à leur valeur par défaut (celle de l'ouverture du logiciel).
-std::vector<Change> cancelAll (ParameterSet&, const CaptureSpec&, const Writer& write = {});
+std::vector<Change> cancelAll (ParameterSet&, const CaptureSpec&, const Writer& write = {}, InsertAccess* inserts = nullptr);
 
 enum class Result { Ignored, Empty, Recalled, Stored, Done };   // Done : changement d'état de jeu seul (touche Set, banque)
 struct Outcome
@@ -136,7 +173,8 @@ struct Outcome
 class Controller
 {
 public:
-    void setWriter (Writer w) { writer_ = std::move (w); }   // utilisé par recall et l'annulation générale
+    void setWriter (Writer w) { writer_ = std::move (w); }
+    void setInsertAccess (InsertAccess* access) noexcept { inserts_ = access; }   // paramètres des inserts (l'adaptateur) ; nul : les scènes ne les touchent pas   // utilisé par recall et l'annulation générale
 
     int bank() const noexcept { return bank_; }
     void setBank (int bank) noexcept;                 // bornée 0..kBanks-1
@@ -182,6 +220,7 @@ public:
 private:
     Outcome recallKey (const Library&, ParameterSet&, int generalKeyValue);
     Writer writer_;
+    InsertAccess* inserts_ = nullptr;
     int bank_ = 0;
     bool held_ = false, armed_ = false;
     int seq_ = -1;

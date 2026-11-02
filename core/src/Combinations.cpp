@@ -64,6 +64,12 @@ json memoryToJson (const Memory& m)
     json values = json::array();
     for (const auto& [id, v] : m.values) values.push_back (json::array ({ id, v }));
     o["values"] = std::move (values);
+    if (! m.insertTypes.empty())
+    {
+        json types = json::array();
+        for (const auto& [key, type] : m.insertTypes) types.push_back (json::array ({ key, type }));
+        o["insert_types"] = std::move (types);
+    }
     return o;
 }
 
@@ -76,10 +82,53 @@ Memory memoryFromJson (const json& o)
         for (const auto& v : *f)
             if (v.is_array() && v.size() == 2 && v[0].is_number_unsigned() && v[1].is_number() && m.values.size() < kMaxValues)
                 m.values.emplace_back (v[0].get<ParamId>(), v[1].get<double>());
+    if (const auto f = o.find ("insert_types"); f != o.end() && f->is_array())
+        for (const auto& t : *f)
+            if (t.is_array() && t.size() == 2 && t[0].is_number_integer() && t[1].is_string()) m.insertTypes[t[0].get<int>()] = t[1].get<std::string>();
     cleanMemory (m);
     return m;
 }
 } // namespace
+
+paramgroups::Scope insertStripScope (int strip, int& indexInScope) noexcept
+{
+    using paramgroups::Scope;
+    if (strip < kTracks) { indexInScope = strip; return Scope::Track; }
+    if (strip < kTracks + 16) { indexInScope = strip - kTracks; return Scope::Bus; }
+    if (strip == kTracks + 16) { indexInScope = 0; return Scope::Master; }
+    indexInScope = strip - kTracks - 17;
+    return Scope::Parallel;
+}
+
+std::vector<ParamId> captureInsertParams (InsertAccess& access, const CaptureSpec& spec, int track)
+{
+    using paramgroups::Family;
+    using paramgroups::Scope;
+    unsigned families = 0, scopes = 0;
+    if (spec.tpl == Template::Everything)
+    {
+        families = 1u << static_cast<unsigned> (Family::Inserts);
+        scopes = 0x1Fu;
+    }
+    else if (spec.tpl == Template::Custom)
+    {
+        families = spec.families;
+        scopes = spec.scopes;
+    }
+    std::vector<ParamId> ids;
+    if ((families & (1u << static_cast<unsigned> (Family::Inserts))) == 0) return ids;
+    const bool oneTrack = track >= 0 && track < kTracks;
+    for (const auto& s : access.slots())
+    {
+        int index = 0;
+        const auto scope = insertStripScope (s.strip, index);
+        if ((scopes & (1u << static_cast<unsigned> (scope))) == 0) continue;
+        if (oneTrack && ! (scope == Scope::Track && index == track)) continue;
+        for (const ParamId local : s.locals)
+            if (ids.size() < kMaxValues) ids.push_back (insertParam (s.strip, s.slot, local));
+    }
+    return ids;
+}
 
 const char* templateKey (Template t) noexcept
 {
@@ -311,14 +360,27 @@ std::vector<ParamId> captureParams (const ParameterSet& set, const CaptureSpec& 
     return ids;
 }
 
-Memory capture (const ParameterSet& set, const std::vector<ParamId>& ids)
+Memory capture (const ParameterSet& set, const std::vector<ParamId>& ids, InsertAccess* inserts)
 {
     Memory m;
     m.used = true;
+    std::map<int, std::string> types;
+    if (inserts != nullptr)
+        for (const auto& s : inserts->slots()) types[insertSlotKey (s.strip, s.slot)] = s.type;
     for (const ParamId id : ids)
     {
+        if (m.values.size() >= kMaxValues) break;
+        if (isInsertParam (id))
+        {
+            double v = 0.0;
+            if (inserts == nullptr || ! inserts->read (id, v)) continue;
+            const int key = insertSlotKey (insertStrip (id), insertSlot (id));
+            m.insertTypes[key] = types[key];
+            m.values.emplace_back (id, v);
+            continue;
+        }
         const auto index = set.indexOf (id);
-        if (index != ParameterSet::npos && m.values.size() < kMaxValues) m.values.emplace_back (id, set.getAt (index));
+        if (index != ParameterSet::npos) m.values.emplace_back (id, set.getAt (index));
     }
     return m;
 }
@@ -339,10 +401,45 @@ void apply (ParameterSet& set, ParamId id, double value, std::vector<Change>& ch
 }
 } // namespace
 
-std::vector<Change> recall (ParameterSet& set, const Memory& m, const Writer& write)
+namespace
+{
+// Le module posé sur l'emplacement est-il celui que la mémoire a enregistré ? (sinon les paramètres locaux ne veulent rien dire)
+bool sameInsert (const Memory& m, ParamId id, const std::map<int, std::string>& current)
+{
+    const int key = insertSlotKey (insertStrip (id), insertSlot (id));
+    const auto recorded = m.insertTypes.find (key);
+    const auto now = current.find (key);
+    return recorded != m.insertTypes.end() && now != current.end() && recorded->second == now->second;
+}
+
+std::map<int, std::string> currentTypes (InsertAccess* inserts)
+{
+    std::map<int, std::string> types;
+    if (inserts != nullptr)
+        for (const auto& s : inserts->slots()) types[insertSlotKey (s.strip, s.slot)] = s.type;
+    return types;
+}
+
+void applyInsert (InsertAccess& access, ParamId id, double value, std::vector<Change>& changes)
+{
+    double before = 0.0;
+    if (! access.read (id, before)) return;
+    if (! access.write (id, value)) return;
+    double after = before;
+    access.read (id, after);
+    if (after != before) changes.push_back ({ id, before, after });
+}
+} // namespace
+
+std::vector<Change> recall (ParameterSet& set, const Memory& m, const Writer& write, InsertAccess* inserts)
 {
     std::vector<Change> changes;
-    for (const auto& [id, value] : m.values) apply (set, id, value, changes, write);
+    const auto types = currentTypes (inserts);
+    for (const auto& [id, value] : m.values)
+    {
+        if (! isInsertParam (id)) { apply (set, id, value, changes, write); continue; }
+        if (inserts != nullptr && sameInsert (m, id, types)) applyInsert (*inserts, id, value, changes);
+    }
     return changes;
 }
 
@@ -353,7 +450,7 @@ std::vector<Change> cancelAll (ParameterSet& set, const Writer& write)
     return changes;
 }
 
-std::vector<Change> cancelAll (ParameterSet& set, const CaptureSpec& spec, const Writer& write)
+std::vector<Change> cancelAll (ParameterSet& set, const CaptureSpec& spec, const Writer& write, InsertAccess* inserts)
 {
     if (spec.tpl == Template::OrganConsole || spec.tpl == Template::OrganStops)
     {
@@ -367,14 +464,29 @@ std::vector<Change> cancelAll (ParameterSet& set, const CaptureSpec& spec, const
         const auto index = set.indexOf (id);
         if (index != ParameterSet::npos) apply (set, id, set.spec (index).defaultValue, changes, write);   // comme à l'ouverture du logiciel
     }
+    if (inserts != nullptr)
+        for (const ParamId id : captureInsertParams (*inserts, spec, -1))
+        {
+            double def = 0.0;
+            if (inserts->defaultOf (id, def)) applyInsert (*inserts, id, def, changes);
+        }
     return changes;
 }
 
-bool matches (const ParameterSet& set, const Memory& m)
+bool matches (const ParameterSet& set, const Memory& m, InsertAccess* inserts)
 {
     bool any = false;
+    const auto types = currentTypes (inserts);
     for (const auto& [id, value] : m.values)
     {
+        if (isInsertParam (id))
+        {
+            double now = 0.0;
+            if (inserts == nullptr || ! sameInsert (m, id, types) || ! inserts->read (id, now)) continue;
+            any = true;
+            if (now != value) return false;
+            continue;
+        }
         const auto index = set.indexOf (id);
         if (index == ParameterSet::npos) continue;
         any = true;
@@ -433,6 +545,17 @@ bool Controller::previousBank() noexcept
 
 namespace
 {
+Memory captureWithInserts (const ParameterSet& set, const CaptureSpec& spec, int track, InsertAccess* inserts)
+{
+    auto ids = captureParams (set, spec, track);
+    if (inserts != nullptr)
+    {
+        const auto more = captureInsertParams (*inserts, spec, track);
+        for (const ParamId id : more) if (ids.size() < kMaxValues) ids.push_back (id);
+    }
+    return capture (set, ids, inserts);
+}
+
 Outcome storeInto (Memory& slot, Memory fresh)
 {
     fresh.name = slot.name;   // l'enregistrement garde le nom existant
@@ -442,7 +565,7 @@ Outcome storeInto (Memory& slot, Memory fresh)
     return out;
 }
 
-Outcome recallMemory (const Memory* m, ParameterSet& set, const Writer& write)
+Outcome recallMemory (const Memory* m, ParameterSet& set, const Writer& write, InsertAccess* inserts)
 {
     Outcome out;
     if (m == nullptr)
@@ -451,7 +574,7 @@ Outcome recallMemory (const Memory* m, ParameterSet& set, const Writer& write)
         return out;
     }
     out.result = Result::Recalled;
-    out.changes = recall (set, *m, write);
+    out.changes = recall (set, *m, write, inserts);
     return out;
 }
 } // namespace
@@ -462,12 +585,12 @@ Outcome Controller::general (Library& lib, ParameterSet& set, int piston)
     if (setActive())
     {
         armed_ = false;
-        return storeInto (lib.generals[generalKey (bank_, piston)], capture (set, captureParams (set, lib.capture, -1)));
+        return storeInto (lib.generals[generalKey (bank_, piston)], captureWithInserts (set, lib.capture, -1, inserts_));
     }
     const int key = generalKey (bank_, piston);
     const auto it = std::find (lib.sequence.begin(), lib.sequence.end(), key);
     if (it != lib.sequence.end() && lib.general (bank_, piston) != nullptr) seq_ = static_cast<int> (it - lib.sequence.begin());
-    return recallMemory (lib.general (bank_, piston), set, writer_);
+    return recallMemory (lib.general (bank_, piston), set, writer_, inserts_);
 }
 
 Outcome Controller::divisional (Library& lib, ParameterSet& set, int track, int piston)
@@ -476,9 +599,9 @@ Outcome Controller::divisional (Library& lib, ParameterSet& set, int track, int 
     if (setActive())
     {
         armed_ = false;
-        return storeInto (lib.divisionals[divisionalKey (track, bank_, piston)], capture (set, captureParams (set, lib.capture, track)));
+        return storeInto (lib.divisionals[divisionalKey (track, bank_, piston)], captureWithInserts (set, lib.capture, track, inserts_));
     }
-    return recallMemory (lib.divisional (track, bank_, piston), set, writer_);
+    return recallMemory (lib.divisional (track, bank_, piston), set, writer_, inserts_);
 }
 
 Outcome Controller::cancel (ParameterSet& set)
@@ -493,7 +616,7 @@ Outcome Controller::cancel (const Library& lib, ParameterSet& set)
 {
     Outcome out;
     out.result = Result::Recalled;
-    out.changes = cancelAll (set, lib.capture, writer_);
+    out.changes = cancelAll (set, lib.capture, writer_, inserts_);
     return out;
 }
 
@@ -517,7 +640,7 @@ bool Controller::sequenceDeleteCurrent (Library& lib)
 
 Outcome Controller::recallKey (const Library& lib, ParameterSet& set, int key)
 {
-    return recallMemory (lib.general (key / kPistons, key % kPistons), set, writer_);
+    return recallMemory (lib.general (key / kPistons, key % kPistons), set, writer_, inserts_);
 }
 
 Outcome Controller::sequenceNext (const Library& lib, ParameterSet& set)

@@ -458,6 +458,7 @@ private:
     class InstrumentLoader;
     void adoptMixerFromState (const std::optional<neptune::core::MixerState>&);
     class InsertHost;
+    class SceneInserts;                                         // accès des scènes aux paramètres des inserts
     static int insertFlatIndex (StripKind, int index) noexcept;
     using InsertRow = std::array<std::shared_ptr<neptune::core::InsertInstance>, neptune::core::mixer::numInserts>;
     std::array<InsertRow, neptune::core::mixer::numTracks + neptune::core::mixer::numBuses + 1 + neptune::core::mixer::numParallels> insertInstances_; // protégé par instrumentLock_

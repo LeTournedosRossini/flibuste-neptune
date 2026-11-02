@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -764,4 +765,106 @@ TEST_CASE ("scenes: the stepper inserts after the current step and deletes the c
     while (c.sequenceDeleteCurrent (lib)) {}
     CHECK (lib.sequence.empty());
     CHECK (c.sequencePosition() == -1);
+}
+
+namespace
+{
+// Faux accès aux inserts : un limiteur sur la piste 0 (emplacement 0) et un compresseur sur le Master.
+class FakeInserts : public InsertAccess
+{
+public:
+    struct Slot { int strip, slot; std::string type; std::map<ParamId, double> values; };
+    std::vector<Slot> rows { { 0, 0, "limiter", { { 1, 5.0 }, { 2, 7.0 } } }, { 32, 1, "compressor", { { 1, 3.0 } } } };
+
+    std::vector<InsertSlotInfo> slots() override
+    {
+        std::vector<InsertSlotInfo> out;
+        for (const auto& r : rows)
+        {
+            InsertSlotInfo i;
+            i.strip = r.strip; i.slot = r.slot; i.type = r.type;
+            for (const auto& [id, v] : r.values) i.locals.push_back (id);
+            out.push_back (i);
+        }
+        return out;
+    }
+    Slot* find (ParamId id)
+    {
+        for (auto& r : rows) if (r.strip == insertStrip (id) && r.slot == insertSlot (id)) return &r;
+        return nullptr;
+    }
+    bool read (ParamId id, double& v) override { auto* r = find (id); if (r == nullptr || ! r->values.count (insertLocal (id))) return false; v = r->values[insertLocal (id)]; return true; }
+    bool write (ParamId id, double v) override { auto* r = find (id); if (r == nullptr || ! r->values.count (insertLocal (id))) return false; r->values[insertLocal (id)] = v; return true; }
+    bool defaultOf (ParamId id, double& v) override { v = 1.0; return find (id) != nullptr; }
+};
+}
+
+TEST_CASE ("scenes: insert parameters are captured, recalled and cancelled")
+{
+    auto set = makeFullSet();
+    FakeInserts ins;
+    const ParamId limiterA = insertParam (0, 0, 1), limiterB = insertParam (0, 0, 2), comp = insertParam (32, 1, 1);
+
+    CaptureSpec spec;
+    spec.tpl = Template::Everything;
+    auto m = capture (set, captureParams (set, spec, -1), &ins);
+    for (const ParamId id : captureInsertParams (ins, spec, -1)) { double v; REQUIRE (ins.read (id, v)); m.values.emplace_back (id, v); m.insertTypes[insertSlotKey (insertStrip (id), insertSlot (id))] = ins.find (id)->type; }
+
+    ins.rows[0].values[1] = 9.0; ins.rows[0].values[2] = 9.0; ins.rows[1].values[1] = 9.0;
+    CHECK_FALSE (matches (set, m, &ins));
+    const auto changes = recall (set, m, nullptr, &ins);
+    CHECK (ins.rows[0].values[1] == 5.0);
+    CHECK (ins.rows[0].values[2] == 7.0);
+    CHECK (ins.rows[1].values[1] == 3.0);
+    CHECK (matches (set, m, &ins));
+    CHECK (changes.size() >= 3);
+
+    // un autre module à la même place : la scène ne le touche pas
+    ins.rows[0].type = "delay";
+    ins.rows[0].values[1] = 9.0;
+    recall (set, m, nullptr, &ins);
+    CHECK (ins.rows[0].values[1] == 9.0);
+    CHECK (ins.rows[1].values[1] == 3.0);
+
+    cancelAll (set, spec, nullptr, &ins);
+    CHECK (ins.rows[0].values[1] == 1.0);
+    CHECK (ins.rows[1].values[1] == 1.0);
+    (void) limiterA; (void) limiterB; (void) comp;
+}
+
+TEST_CASE ("scenes: insert capture follows the template, scope and track")
+{
+    FakeInserts ins;
+    CaptureSpec mixerSpec;
+    mixerSpec.tpl = Template::Mixer;
+    CHECK(captureInsertParams (ins, mixerSpec, -1).empty());   // le modèle Mixeur ne prend pas les inserts
+
+    CaptureSpec custom;
+    custom.tpl = Template::Custom;
+    custom.families = 1u << static_cast<unsigned> (paramgroups::Family::Inserts);
+    custom.scopes = 1u << static_cast<unsigned> (paramgroups::Scope::Master);
+    const auto master = captureInsertParams (ins, custom, -1);
+    REQUIRE (master.size() == 1);
+    CHECK (insertStrip (master[0]) == 32);
+
+    custom.scopes = 1u << static_cast<unsigned> (paramgroups::Scope::Track);
+    CHECK (captureInsertParams (ins, custom, -1).size() == 2);
+    CHECK (captureInsertParams (ins, custom, 0).size() == 2);
+    CHECK (captureInsertParams (ins, custom, 1).empty());       // scène d'une autre piste
+}
+
+TEST_CASE ("scenes: insert types and values survive the JSON round trip")
+{
+    Library lib;
+    Memory m;
+    m.used = true;
+    m.values.emplace_back (insertParam (0, 0, 1), 5.0);
+    m.insertTypes[insertSlotKey (0, 0)] = "limiter";
+    lib.generals[0] = m;
+    const auto back = fromJson (toJson (lib));
+    const auto* g = back.general (0, 0);
+    REQUIRE (g != nullptr);
+    CHECK (g->insertTypes.at (insertSlotKey (0, 0)) == "limiter");
+    REQUIRE (g->values.size() == 1);
+    CHECK (g->values[0].first == insertParam (0, 0, 1));
 }
