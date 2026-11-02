@@ -22,7 +22,7 @@ private:
     const neptune::core::LimiterModule* module_;
     nova::Panel *metersPanel_ = nullptr, *navPanel_ = nullptr, *viewPanel_ = nullptr;
     nova::VMeter *inMeter_ = nullptr, *grMeter_ = nullptr, *outMeter_ = nullptr;
-    nova::Pill *inTrimPill_ = nullptr, *modePill_ = nullptr, *hqPill_ = nullptr;
+    nova::Pill *inTrimPill_ = nullptr, *modePill_ = nullptr, *hqPill_ = nullptr, *forcedPill_ = nullptr;   // forcedPill_ : remplace le choix du mode quand le profil Live force Zero Latency
     nova::Text *latencyText_ = nullptr, *latencyWarn_ = nullptr;
     HistoryView* view_ = nullptr;
     struct Column { nova::Panel* card; nova::KnobCard* knob; };

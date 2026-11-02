@@ -115,6 +115,9 @@ NovaDigueEditor::NovaDigueEditor (ParamHost& host, const LimiterModule* module, 
     modePill_ = add<nova::Pill> (0, skin());
     modePill_->bindChoice (host, lm::mode, tx ("lm.mode"), { tx ("lm.quality"), tx ("lm.lowlat"), tx ("lm.zerolat") });
     addInfo (0, modePill_, "hlp.lm_mode");
+    forcedPill_ = add<nova::Pill> (0, skin());
+    forcedPill_->setText (tx ("lm.live_forced"));
+    forcedPill_->setStatic (true);
     hqPill_ = add<nova::Pill> (0, skin());
     hqPill_->setText (tx ("lm.hq"));
     hqPill_->onClick = [this] { applyHighQuality(); };
@@ -175,6 +178,7 @@ void NovaDigueEditor::layout()
     viewPanel_->setBounds (R (204, 72, 942, 456));
     view_->setBounds (R (220, 104, 910, 362));
     modePill_->setBounds (R (220, 480, 200, 32));
+    forcedPill_->setBounds (R (220, 480, 200, 32));
     hqPill_->setBounds (R (440, 480, 170, 32));
     latencyText_->setBounds (R (640, 484, 490, 24));
     latencyWarn_->setBounds (R (640, 484, 490, 24));
@@ -204,5 +208,9 @@ void NovaDigueEditor::tick()
         latencyText_->setText (warn ? juce::String() : plain);
         latencyWarn_->setText (warn ? juce::String::fromUTF8 (translator().format ("nv.latency_insert", { std::to_string (latency) }).c_str()) : juce::String());
     }
-    hqPill_->setOn (isHighQuality());
+    const bool forced = module_ != nullptr && module_->zeroLatencyForced();   // profil Live de Neptune : le mode réglé est ignoré (réglages intacts)
+    modePill_->setVisible (! forced && currentPage() == 0);
+    forcedPill_->setVisible (forced && currentPage() == 0);
+    hqPill_->setOn (! forced && isHighQuality());
+    hqPill_->setDim (forced);
 }

@@ -1009,6 +1009,7 @@ const Entry kEntries[] = {
     { "lm.quality", { "Quality", "Qualité" } },
     { "lm.lowlat", { "Low Latency", "Faible latence" } },
     { "lm.zerolat", { "Zero Latency", "Latence nulle" } },
+    { "lm.live_forced", { "MODE  Zero Latency (Live profile)", "MODE  Latence nulle (profil Live)" } },
     { "lm.hq", { "HIGH QUALITY", "HIGH QUALITY" } },
     { "lm.latency", { "LATENCY", "LATENCE" } },
     { "lm.output", { "OUTPUT", "SORTIE" } },

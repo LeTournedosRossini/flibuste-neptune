@@ -58,6 +58,7 @@ public:
     void process (float* left, float* right, int n, const ParameterSet& params) noexcept override;
     int latencySamples (const ParameterSet&) const noexcept override;
     void setZeroLatency (bool z) noexcept override { zero_.store (z, std::memory_order_relaxed); }
+    bool zeroLatencyForced() const noexcept { return zero_.load (std::memory_order_relaxed); }   // profil Live : le mode réglé est ignoré, Zero Latency s'applique
     int maxLatencySamples (double sampleRate) const noexcept override;
 
     int numMeters() const noexcept override { return limiter::kNumMeters; }
