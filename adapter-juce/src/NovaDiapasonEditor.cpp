@@ -287,10 +287,10 @@ public:
             g.drawRoundedRectangle (m, skin_.px (5.0f), std::max (1.0f, skin_.borderWidth()));
             g.setFont (skin_.font (10.0f, true));
             g.drawText ("M", m, juce::Justification::centred);
-            for (int st = 0; st < gen::kMaxSteps; ++st)
+            for (int st = 0; st < nsteps; ++st)
             {
                 const auto c = cell (d, st);
-                const bool inRange = st < nsteps;
+                const bool inRange = true;
                 const int v = static_cast<int> (std::lround (host_.parameters().get (gen::stepParam (d, st))));
                 if (v == 2) { skin_.fillActive (g, c, skin_.px (6.0f)); g.setColour (skin_.colour (Token::Pink)); g.fillRoundedRectangle (c.reduced (skin_.px (4.0f)), skin_.px (4.0f)); }
                 else if (v == 1) { g.setColour (skin_.colour (Token::Accent, inRange ? 0.85f : 0.3f)); g.fillRoundedRectangle (c.reduced (skin_.px (4.0f), skin_.px (7.0f)), skin_.px (4.0f)); }
@@ -299,8 +299,8 @@ public:
                 if (! inRange) { g.setColour (skin_.colour (Token::StageBg, 0.5f)); g.fillRoundedRectangle (c, skin_.px (6.0f)); }
             }
         }
-        // repères tous les quatre pas
-        for (int st = 4; st < nsteps; st += 4)
+        // repères à chaque temps (4 pas en double-croches, 2 en croches)
+        for (int st = std::max (1, nsteps / 4); st < nsteps; st += std::max (1, nsteps / 4))
         {
             const float x = cell (0, st).getX() - gap() * 0.5f;
             g.setColour (skin_.colour (Token::Grid, 0.8f));
@@ -358,7 +358,7 @@ private:
     }
     juce::Rectangle<float> cell (int d, int st) const
     {
-        const float w = (static_cast<float> (getWidth()) - labelW()) / gen::kMaxSteps;
+        const float w = (static_cast<float> (getWidth()) - labelW()) / static_cast<float> (std::max (1, steps()));   // la grille garde sa largeur : 8 pas, cases deux fois plus larges
         return { labelW() + static_cast<float> (st) * w + gap() * 0.5f, static_cast<float> (d) * rowH() + gap() * 0.5f, w - gap(), rowH() - gap() };
     }
     std::pair<int, int> cellAt (juce::Point<float> p) const
@@ -1045,15 +1045,22 @@ public:
         // métronome : la même zone, autre contenu
         auto m = getLocalBounds();
         m.removeFromTop (h + skin_.ipx (14.0f));
-        auto row = [&] (std::initializer_list<std::pair<nova::Pill*, float>> items)
+        // grille de quatre colonnes égales : 4, 4, puis 3 commandes dont la dernière occupe deux colonnes
+        const int colW = (m.getWidth() - 3 * g) / 4;
+        auto row = [&] (std::initializer_list<std::pair<nova::Pill*, int>> items)
         {
             auto line = m.removeFromTop (h);
-            for (const auto& it : items) { it.first->setBounds (line.removeFromLeft (skin_.ipx (it.second))); line.removeFromLeft (g); }
+            for (const auto& it : items)
+            {
+                const int w = colW * it.second + g * (it.second - 1);
+                it.first->setBounds (line.removeFromLeft (w));
+                line.removeFromLeft (g);
+            }
             m.removeFromTop (g);
         };
-        row ({ { onPill_, 150.0f }, { syncPill_, 250.0f }, { tempoPill_, 230.0f }, { tapPill_, 120.0f } });
-        row ({ { beatsPill_, 190.0f }, { unitPill_, 190.0f }, { subPill_, 230.0f }, { soundPill_, 230.0f } });
-        row ({ { mLevelPill_, 210.0f }, { accentPill_, 210.0f }, { subLevelPill_, 290.0f } });
+        row ({ { onPill_, 1 }, { syncPill_, 1 }, { tempoPill_, 1 }, { tapPill_, 1 } });
+        row ({ { beatsPill_, 1 }, { unitPill_, 1 }, { subPill_, 1 }, { soundPill_, 1 } });
+        row ({ { mLevelPill_, 1 }, { accentPill_, 1 }, { subLevelPill_, 2 } });
         m.removeFromTop (g);
         m.removeFromBottom (skin_.ipx (30.0f));
         beats_->setBounds (m.removeFromTop (skin_.ipx (190.0f)));
@@ -1194,7 +1201,7 @@ void NovaDiapasonEditor::buildDrumsPage()
     tempoPill_ = add<nova::Pill> (1, skin());
     tempoPill_->bindValue (host(), gen::tempo, tx ("dp.tempo"));
     stepsPill_ = add<nova::Pill> (1, skin());
-    stepsPill_->bindValue (host(), gen::steps, tx ("dp.steps"));
+    stepsPill_->setText (tx ("dp.steps"));
     swingPill_ = add<nova::Pill> (1, skin());
     swingPill_->bindValue (host(), gen::swing, tx ("dp.swing"));
     drumsLevelPill_ = add<nova::Pill> (1, skin());
@@ -1208,6 +1215,10 @@ void NovaDiapasonEditor::buildDrumsPage()
         const ParamId id = p == tempoPill_ ? gen::tempo : p == stepsPill_ ? gen::steps : p == swingPill_ ? gen::swing : p == drumsLevelPill_ ? gen::drumLevel : p == masterPill_ ? gen::master : gen::drumNote;
         p->onClick = [this, id] { openModal (id, uistate::Terminal::Pointer); };
     }
+    stepsPill_->onClick = [this]   // un clic bascule entre double-croches (16 pas) et croches (8 pas) ; le swing suit : il retarde un pas sur deux de l'unité choisie
+    {
+        nova::setParam (host(), gen::steps, value (gen::steps) >= 12.0 ? 8.0 : 16.0);
+    };
     demoPill_ = add<nova::Pill> (1, skin());
     demoPill_->setText (tx ("dp.demo"));
     demoPill_->onClick = [this] { demoBeat(); };
@@ -1304,18 +1315,20 @@ void NovaDiapasonEditor::layout()
 
     // ---- page DRUMS
     drumsPanel_->setBounds (R (204, 72, 942, 638));
-    runPill_->setBounds (R (220, 108, 90, 32));
-    syncPill_->setBounds (R (318, 108, 150, 32));
-    tempoPill_->setBounds (R (476, 108, 130, 32));
-    stepsPill_->setBounds (R (614, 108, 110, 32));
-    swingPill_->setBounds (R (732, 108, 120, 32));
-    drumsLevelPill_->setBounds (R (860, 108, 120, 32));
-    notePill_->setBounds (R (988, 108, 142, 32));
-    demoPill_->setBounds (R (220, 150, 140, 30));
-    clearPill_->setBounds (R (368, 150, 100, 30));
-    masterPill_->setBounds (R (476, 150, 150, 30));
-    drumsHint_->setBounds (R (640, 142, 490, 44));
-    grid_->setBounds (R (220, 194, 910, 328));
+    {
+        // deux rangées de cinq commandes de même largeur, puis l'aide
+        const float cw = (910.0f - 4.0f * 8.0f) / 5.0f;
+        auto col = [cw] (int i) { return 220.0f + static_cast<float> (i) * (cw + 8.0f); };
+        nova::Pill* top[5] = { runPill_, syncPill_, tempoPill_, stepsPill_, swingPill_ };
+        nova::Pill* bottom[5] = { drumsLevelPill_, notePill_, demoPill_, clearPill_, masterPill_ };
+        for (int i = 0; i < 5; ++i)
+        {
+            top[i]->setBounds (R (col (i), 106, cw, 32));
+            bottom[i]->setBounds (R (col (i), 146, cw, 32));
+        }
+    }
+    drumsHint_->setBounds (R (220, 184, 910, 28));
+    grid_->setBounds (R (220, 216, 910, 306));
     drumCard_->setBounds (R (220, 536, 910, 160));
     drumCard_->toBack();
     drumsPanel_->toBack();
@@ -1345,6 +1358,15 @@ void NovaDiapasonEditor::tick()
 {
     outMeter_->update (dbOf (engine_.peakLeft()), dbOf (engine_.peakRight()));
     if (currentPage() == 3) toolsView_->update();
+    if (currentPage() == 1)
+    {
+        const int n = static_cast<int> (std::lround (value (gen::steps)));
+        if (n != shownSteps_)
+        {
+            shownSteps_ = n;
+            stepsPill_->setText (tx ("dp.steps") + "  " + (n >= 16 ? tx ("dp.steps_16") : n == 8 ? tx ("dp.steps_8") : juce::String (n)));
+        }
+    }
     if (currentPage() == 0)
     {
         view_->update();

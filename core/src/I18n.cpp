@@ -949,6 +949,8 @@ const Entry kEntries[] = {
     { "nv.page_settings", { "SETTINGS", "RÉGLAGES" } },
     { "module.diapason", { "Diapason", "Diapason" } },
     { "dp.page_signal", { "SIGNAL", "SIGNAL" } },
+    { "dp.steps_16", { "16THS", "DOUBLE-CROCHE" } },
+    { "dp.steps_8", { "8THS", "CROCHE" } },
     { "dp.page_tools", { "TOOLS", "OUTILS" } },
     { "dp.tools_title", { "TUNER AND METRONOME", "ACCORDEUR ET MÉTRONOME" } },
     { "dp.is_french", { "0", "1" } },

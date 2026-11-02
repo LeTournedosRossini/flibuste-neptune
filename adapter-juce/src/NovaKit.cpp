@@ -156,18 +156,18 @@ void paintHeaderBar (juce::Graphics& g, const Skin& skin, juce::Rectangle<float>
     g.setFont (skin.font (8.0f, true));
     g.drawText (sub, juce::Rectangle<float> (logo.getRight() + skin.px (10.0f), r.getCentreY() + skin.px (4.0f), skin.px (260.0f), skin.px (12.0f)),
                 juce::Justification::centredLeft, false);
-    if (style == HeaderStyle::Window) return;
-    // numéro de version de développement, à droite : pour vérifier d'un coup d'œil quelle version tourne
-    g.setColour (skin.colour (Token::TextDim));
-    g.setFont (skin.font (8.0f, false));
-    g.drawText (neptune::core::version::kString, r.withTrimmedLeft (r.getWidth() * 0.5f).withTrimmedRight (skin.px (14.0f)), juce::Justification::centredRight, false);
 }
 
-void paintBottomBar (juce::Graphics& g, const Skin& skin, juce::Rectangle<float> r)
+void paintBottomBar (juce::Graphics& g, const Skin& skin, juce::Rectangle<float> r, const juce::String& version)
 {
     skin.fill (g, Token::BottomBg, r);
     g.setColour (skin.colour (Token::Pb));
     g.fillRect (r.getX(), r.getY(), r.getWidth(), 1.0f);
+    if (version.isEmpty()) return;
+    // numéro de version de développement, en bas à droite : pour vérifier d'un coup d'œil quelle version tourne (l'en-tête porte les boutons de réglage de l'affichage)
+    g.setColour (skin.colour (Token::TextDim));
+    g.setFont (skin.font (9.0f, false));
+    g.drawText (version, r.withTrimmedRight (skin.px (16.0f)), juce::Justification::centredRight, false);
 }
 
 // ------------------------------------------------------------------------------------------------ Panel

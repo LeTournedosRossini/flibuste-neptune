@@ -85,7 +85,8 @@ void setParamNormalised (ParamHost&, neptune::core::ParamId, double normalised);
 // Compact : seulement le nom de l'instrument, à gauche (éditeur intégré dans une fenêtre qui a déjà son propre en-tête).
 enum class HeaderStyle { Full, Window, Compact };
 void paintHeaderBar (juce::Graphics&, const Skin&, juce::Rectangle<float>, const juce::String& word, const juce::String& sub, HeaderStyle = HeaderStyle::Full);
-void paintBottomBar (juce::Graphics&, const Skin&, juce::Rectangle<float>);
+// `version` : numéro de version affiché en bas à droite (facultatif)
+void paintBottomBar (juce::Graphics&, const Skin&, juce::Rectangle<float>, const juce::String& version = {});
 
 // ------------------------------------------------------------------------------------------------ cadre-carte (.panel)
 class Panel : public juce::Component

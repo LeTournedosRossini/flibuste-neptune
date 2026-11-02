@@ -72,4 +72,5 @@ private:
     nova::Text* drumsHint_ = nullptr;
     std::vector<nova::KnobCard*> drumKnobs_;   // niveau, accordage, durée, balance du son choisi
     int selectedDrum_ = 0;
+    int shownSteps_ = -1;   // valeur affichée par la pastille PAS
 };
