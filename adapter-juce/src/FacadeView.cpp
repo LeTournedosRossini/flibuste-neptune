@@ -920,7 +920,6 @@ private:
     {
         const float s = scale();
         auto r = juce::Rectangle<float> (fc::canvasWidth * s, fc::canvasHeight * s).withCentre (getLocalBounds().toFloat().getCentre());
-        if (topAligned_) r.setY (0.0f);   // barre repliée : la matrice remonte jusqu'en haut
         return r;
     }
     juce::Point<float> toCanvas (juce::Point<float> p) const
@@ -3375,8 +3374,7 @@ void FacadeView::resized()
             sideShowButton_.setBounds (whole.getX(), whole.getY(), 26, 24);   // un petit carré collé au coin haut gauche, contre la barre du haut
             sideShowButton_.toFront (false);
             toolbarRect_ = {};
-            canvas_->setTopAligned (true);
-            canvas_->setBounds (whole);
+            canvas_->setBounds (whole.reduced (32, 0));   // la grille garde sa place d'avant (marges de 32) ; seul le bouton va au coin de la vue
         }
         else
         {
