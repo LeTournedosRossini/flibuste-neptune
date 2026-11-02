@@ -171,7 +171,6 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     facadeView_ = std::make_unique<FacadeView> (processor_, palette_, tr_, neptune::core::theme::definition (neptune::core::theme::themeFromString (p.settings().theme).value_or (neptune::core::theme::ThemeId::Dark)).knob,
                                                 [this] (neptune::core::ParamId id, neptune::core::uistate::Terminal t) { openModal (id, t); });
     addChildComponent (*facadeView_);
-    facadeView_->onCollapsedChanged = [this] { resized(); };
     modView_ = std::make_unique<ModView> (processor_, palette_, tr_);
     addChildComponent (*modView_);
     routerView_ = std::make_unique<RouterView> (processor_, palette_, tr_);
@@ -1264,8 +1263,7 @@ void NeptuneEditor::resized()
         else
         {
             mixerView_->placeScaled ({ 32, top, lw_ - 64, juce::jmax (200, lh_ - top - bottomH) });
-            if (facadeView_->isCollapsed()) facadeView_->setBounds (0, top, lw_, areaH);   // barre repliée : la Façade va jusqu'aux bords
-            else facadeView_->setBounds (32, top, lw_ - 64, areaH);
+            facadeView_->setBounds (32, top, lw_ - 64, areaH);
         }
         if (! showSplit_)
         {

@@ -266,8 +266,6 @@ int menuCount (const neptune::core::ParamSpec& s)
 class FacadeView::Canvas : public juce::Component, private juce::Timer
 {
 public:
-    void setTopAligned (bool on) { if (topAligned_ != on) { topAligned_ = on; repaint(); } }
-
     explicit Canvas (FacadeView& owner) : owner_ (owner)
     {
         setWantsKeyboardFocus (true);
@@ -910,8 +908,6 @@ private:
         return it != latched_.end() && it->second.count (key) != 0;
     }
 
-    bool topAligned_ = false;
-
     float scale() const
     {
         return std::min (static_cast<float> (getWidth()) / fc::canvasWidth, static_cast<float> (getHeight()) / fc::canvasHeight);
@@ -919,9 +915,7 @@ private:
     juce::Rectangle<float> canvasArea() const
     {
         const float s = scale();
-        auto r = juce::Rectangle<float> (fc::canvasWidth * s, fc::canvasHeight * s).withCentre (getLocalBounds().toFloat().getCentre());
-        if (topAligned_) r.setY (0.0f);   // barre repliée : la matrice remonte jusqu'en haut
-        return r;
+        return juce::Rectangle<float> (fc::canvasWidth * s, fc::canvasHeight * s).withCentre (getLocalBounds().toFloat().getCentre());
     }
     juce::Point<float> toCanvas (juce::Point<float> p) const
     {
@@ -3355,11 +3349,6 @@ void FacadeView::resized()
         sideLayout = canvasWithColumn >= canvasWithTopBar;
     }
     const bool collapsed = ! editMode_ && sideHidden_;
-    if (collapsed != lastCollapsed_)
-    {
-        lastCollapsed_ = collapsed;
-        if (onCollapsedChanged) juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<FacadeView> (this)] { if (safe != nullptr && safe->onCollapsedChanged) safe->onCollapsedChanged(); });
-    }
     if (collapsed || sideLayout)
     {
         int y = whole.getY() + 12;
@@ -3372,15 +3361,13 @@ void FacadeView::resized()
         if (collapsed)
         {
             for (auto* b : sideItems) b->setBounds ({});
-            sideShowButton_.setBounds (whole.getX(), whole.getY(), 26, 24);   // un petit carré collé au coin haut gauche, contre la barre du haut
+            sideShowButton_.setBounds (whole.getX() + 1, whole.getY() + 1, 26, 24);   // un petit carré collé en haut à gauche, sous le sigle Neptune
             sideShowButton_.toFront (false);
             toolbarRect_ = {};
-            canvas_->setTopAligned (true);
             canvas_->setBounds (whole);
         }
         else
         {
-            canvas_->setTopAligned (false);
             toolbarRect_ = juce::Rectangle<int> (whole.getX() + 6, whole.getY() + 6, sideW + 12, y - whole.getY());
             canvas_->setBounds (whole.withTrimmedLeft (toolbarRect_.getRight() + 4));
         }
@@ -3393,7 +3380,6 @@ void FacadeView::resized()
         if (midiPanel_ != nullptr) midiPanel_->setBounds (getLocalBounds());
         return;
     }
-    canvas_->setTopAligned (false);
     sideShowButton_.setVisible (false);
     sideHideButton_.setVisible (! editMode_);   // en haut aussi, on peut replier la barre
     auto area = whole.reduced (12, 8);   // barre d'outils dans un conteneur arrondi
