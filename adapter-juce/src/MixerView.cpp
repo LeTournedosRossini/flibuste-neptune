@@ -688,6 +688,7 @@ public:
         pan_.bind (pp, 0.0);
         fader_.bind (pv, 0.0);
         pan_.getProperties().set ("bipolar", true);
+        pan_.getProperties().set ("soft", true);   // le point du curseur est gris plutôt que blanc plein
         fader_.getProperties().set ("fader", true);
         addAndMakeVisible (pan_);
         addAndMakeVisible (fader_);
@@ -825,7 +826,7 @@ public:
     void paint (juce::Graphics& g) override
     {
         const auto card = getLocalBounds().toFloat().reduced (1.0f);
-        g.setColour (owner_.colour (selected_ ? Token::Nav1 : (isPar_ ? Token::BgApp : Token::BgCard)));
+        g.setColour (owner_.colour (isPar_ ? Token::BgApp : Token::BgCard));   // la sélection ne se marque que par le filet orange, sans voile
         g.fillRoundedRectangle (card, 8.0f);
         g.setColour (owner_.colour (selected_ ? Token::Accent : Token::Border));
         g.drawRoundedRectangle (card, 8.0f, selected_ ? 1.5f : 1.0f);
@@ -963,7 +964,9 @@ public:
         pan_.setRange (-100.0, 100.0, 1.0);
         pan_.bind (probe::masterPan, 0.0);
         pan_.getProperties().set ("bipolar", true);
+        pan_.getProperties().set ("soft", true);   // le point du curseur est gris plutôt que blanc plein
         trim_.getProperties().set ("bipolar", true);
+        trim_.getProperties().set ("soft", true);
         fader_.getProperties().set ("fader", true);
         trim_.setRange (-12.0, 12.0, 0.1);
         trim_.bind (mixer::masterTrim, 0.0);
@@ -1066,8 +1069,8 @@ public:
         mono_.setBounds (bottom.reduced (1));
         auto col = rightArea_.withTrimmedBottom (16);
         faderArea_ = col;
-        fader_.setBounds (col.removeFromLeft (24));
-        meterArea_ = juce::Rectangle<int> (col.getX() + 2, col.getY(), 25, col.getHeight());
+        fader_.setBounds (col.removeFromLeft (22));
+        meterArea_ = juce::Rectangle<int> (col.getX() + 1, col.getY(), 25, col.getHeight());   // 2 px de marge avant le bord du carré, plus les 3 px de marge de la bande : l'écart entre les deux mètres
     }
 
     void paint (juce::Graphics& g) override

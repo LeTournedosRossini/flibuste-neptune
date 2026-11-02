@@ -941,9 +941,16 @@ void LookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w, int 
         g.setGradientFill (juce::ColourGradient (skin_.colour (Token::Accent, alpha).brighter (0.3f), fill.getX(), fill.getY(),
                                                  skin_.colour (Token::Accent, alpha), fill.getX(), fill.getBottom(), false));
         g.fillRoundedRectangle (fill, tw / 2.0f);
-        const float tw2 = std::min (static_cast<float> (w) - 2.0f, skin_.px (24.0f)), th = skin_.px (10.0f);
-        g.setColour (skin_.colour (Token::Text, alpha == 1.0f ? 1.0f : 0.5f));
-        g.fillRoundedRectangle (cx - tw2 / 2.0f, pos - th / 2.0f, tw2, th, skin_.px (3.0f));
+        // poignée : un gris moyen (le texte tiré vers le fond), avec un liseré clair et un trait de prise au milieu, au lieu du gros rectangle blanc
+        const float tw2 = std::min (static_cast<float> (w) - 2.0f, skin_.px (22.0f)), th = skin_.px (9.0f);
+        const auto cap = juce::Rectangle<float> (cx - tw2 / 2.0f, pos - th / 2.0f, tw2, th);
+        const auto soft = skin_.colour (Token::Text).interpolatedWith (skin_.colour (Token::BgCard), 0.42f);
+        g.setColour (soft.withMultipliedAlpha (alpha));
+        g.fillRoundedRectangle (cap, skin_.px (3.0f));
+        g.setColour (skin_.colour (Token::Text, 0.35f * alpha));
+        g.drawRoundedRectangle (cap.reduced (0.5f), skin_.px (3.0f), 1.0f);
+        g.setColour (skin_.colour (Token::BgApp, 0.55f * alpha));
+        g.fillRect (cap.getX() + skin_.px (4.0f), cap.getCentreY() - 0.5f, cap.getWidth() - skin_.px (8.0f), 1.0f);
         if (modulated)
         {
             // trait fin sur le bord droit, à côté du rail : la valeur réglée reste visible, la modulation se lit à côté
@@ -973,7 +980,9 @@ void LookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w, int 
     }
     else g.fillRoundedRectangle (track.withRight (pos), th / 2.0f);
     const float d = skin_.px (11.0f);
-    g.setColour (skin_.colour (Token::Text, s.isEnabled() ? 1.0f : 0.5f));
+    // curseurs du mixeur (pan, trim) : le point est un gris moyen plutôt que du blanc plein
+    const bool softThumb = s.getProperties().getWithDefault ("soft", false);
+    g.setColour ((softThumb ? skin_.colour (Token::Text).interpolatedWith (skin_.colour (Token::BgCard), 0.42f) : skin_.colour (Token::Text)).withMultipliedAlpha (s.isEnabled() ? 1.0f : 0.5f));
     g.fillEllipse (pos - d / 2.0f, cy - d / 2.0f, d, d);
     if (modulated)
     {
