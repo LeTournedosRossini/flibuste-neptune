@@ -88,6 +88,61 @@ void DiapasonProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     }
     if (pos < n) engine_.process (left + pos, right + pos, n - pos, transportAt (pos));
     midi.clear();
+
+    // messages MIDI envoyés à la main : ils attendent la fin du bloc pour partir vers l'hôte (addOutboundEventsToQueue)
+    int start1 = 0, size1 = 0, start2 = 0, size2 = 0;
+    midiFifo_.prepareToRead (midiFifo_.getNumReady(), start1, size1, start2, size2);
+    auto take = [this] (const MidiPacket& p) { if (p.size > 0 && numHostMidi_ < static_cast<int> (hostMidi_.size())) hostMidi_[static_cast<std::size_t> (numHostMidi_++)] = p; };
+    for (int i = 0; i < size1; ++i) take (midiPackets_[static_cast<std::size_t> (start1 + i)]);
+    for (int i = 0; i < size2; ++i) take (midiPackets_[static_cast<std::size_t> (start2 + i)]);
+    midiFifo_.finishedRead (size1 + size2);
+}
+
+bool DiapasonProcessor::postMidi (const std::vector<std::uint8_t>& bytes)
+{
+    if (bytes.empty() || bytes.size() > 1024) return false;
+    int start1 = 0, size1 = 0, start2 = 0, size2 = 0;
+    midiFifo_.prepareToWrite (1, start1, size1, start2, size2);
+    if (size1 + size2 < 1) return false;
+    auto& p = midiPackets_[static_cast<std::size_t> (size1 > 0 ? start1 : start2)];
+    p.size = static_cast<std::uint16_t> (bytes.size());
+    std::copy (bytes.begin(), bytes.end(), p.bytes.begin());
+    midiFifo_.finishedWrite (1);
+    return true;
+}
+
+void DiapasonProcessor::addOutboundEventsToQueue (const clap_output_events* out, const juce::MidiBuffer&, int sampleOffset)
+{
+    for (int i = 0; i < numHostMidi_; ++i)
+    {
+        const auto& p = hostMidi_[static_cast<std::size_t> (i)];
+        if (p.bytes[0] == 0xF0)
+        {
+            clap_event_midi_sysex ev {};
+            ev.header.size = sizeof (clap_event_midi_sysex);
+            ev.header.time = static_cast<std::uint32_t> (sampleOffset);
+            ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+            ev.header.type = CLAP_EVENT_MIDI_SYSEX;
+            ev.header.flags = 0;
+            ev.port_index = 0;
+            ev.buffer = p.bytes.data();
+            ev.size = p.size;
+            out->try_push (out, &ev.header);
+        }
+        else if (p.size >= 1 && p.size <= 3)
+        {
+            clap_event_midi ev {};
+            ev.header.size = sizeof (clap_event_midi);
+            ev.header.time = static_cast<std::uint32_t> (sampleOffset);
+            ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+            ev.header.type = CLAP_EVENT_MIDI;
+            ev.header.flags = 0;
+            ev.port_index = 0;
+            for (int b = 0; b < 3; ++b) ev.data[b] = b < p.size ? p.bytes[static_cast<std::size_t> (b)] : 0;
+            out->try_push (out, &ev.header);
+        }
+    }
+    numHostMidi_ = 0;
 }
 
 // ---- état : JSON, comme Neptune ({"format", "schema_version", "parameters": {id: valeur réelle}})
@@ -221,6 +276,7 @@ void DiapasonPluginEditor::buildContent()
     };
     content_.reset();
     content_ = std::make_unique<NovaDiapasonEditor> (p, p.engine(), palette, def.knob, tr_, opt);
+    content_->onSendMidi = [&p] (const std::vector<std::uint8_t>& bytes) { return p.postMidi (bytes); };
     addAndMakeVisible (*content_);
     content_->setBounds (getLocalBounds());
 }

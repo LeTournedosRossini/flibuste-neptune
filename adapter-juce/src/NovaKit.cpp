@@ -816,9 +816,28 @@ LookAndFeel::LookAndFeel (const Skin& s) : skin_ (s)
     setColour (juce::TextButton::textColourOnId, s.colour (Token::Text));
     setColour (juce::ToggleButton::textColourId, s.colour (Token::Text));
     setColour (juce::Label::textColourId, s.colour (Token::TextDim));
+    setColour (juce::AlertWindow::backgroundColourId, s.colour (Token::BgCard));
+    setColour (juce::AlertWindow::textColourId, s.colour (Token::Text));
+    setColour (juce::AlertWindow::outlineColourId, s.colour (Token::CtlBd));
     setColour (juce::Slider::textBoxTextColourId, s.colour (Token::Text));
     setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
+}
+
+DialogLook::DialogLook (const neptune::core::theme::Palette& palette, neptune::core::theme::KnobStyle knob)
+    : palette_ (palette), skin_ (palette_, knob), look_ (skin_)
+{
+    juce::LookAndFeel::setDefaultLookAndFeel (&look_);
+}
+
+DialogLook::~DialogLook()
+{
+    if (&juce::LookAndFeel::getDefaultLookAndFeel() == &look_) juce::LookAndFeel::setDefaultLookAndFeel (nullptr);   // un éditeur plus récent a pu en prendre la place
+}
+
+std::shared_ptr<DialogLook> DialogLook::acquire (const neptune::core::theme::Palette& palette, neptune::core::theme::KnobStyle knob)
+{
+    return std::shared_ptr<DialogLook> (new DialogLook (palette, knob));
 }
 
 void LookAndFeel::drawPopupMenuBackground (juce::Graphics& g, int w, int h)

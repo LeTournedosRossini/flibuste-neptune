@@ -211,6 +211,10 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
 
     profileLabel_.setColour (juce::Label::textColourId, colour (Token::Accent));
     addAndMakeVisible (profileLabel_);
+    noticeLabel_.setColour (juce::Label::textColourId, colour (Token::Accent));
+    noticeLabel_.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+    addChildComponent (noticeLabel_);
+    lastNoticeSerial_ = processor_.sceneNotice().serial;
     profileSwitchButton_.setIcon (IconButton::Icon::Cycle);
     profileSwitchButton_.setButtonText (text ("profile.switch_short"));
     profileSwitchButton_.setTooltip (text ("profile.switch"));
@@ -1126,6 +1130,34 @@ void NeptuneEditor::timerCallback()
     if (++latencyTicks_ >= 6) { latencyTicks_ = 0; processor_.refreshLatency(); }   // fenêtre ouverte : la latence annoncée suit le profil même si la minuterie du processeur ne tourne pas
     updateUndoButtons();
     {
+        // une scène qui a ignoré des inserts le dit un moment à la place du texte du profil
+        const auto& notice = processor_.sceneNotice();
+        const double now = juce::Time::getMillisecondCounterHiRes();
+        if (notice.serial != lastNoticeSerial_)
+        {
+            lastNoticeSerial_ = notice.serial;
+            juce::String list;
+            int shown = 0;
+            for (const int key : notice.skippedSlots)
+            {
+                if (shown++ == 4) { list << ", ..."; break; }
+                const int strip = key / 8, slot = key % 8 + 1;
+                const int tracks = neptune::core::mixer::numTracks, buses = neptune::core::mixer::numBuses;
+                std::string where;
+                if (strip < tracks) where = tr_.format ("comb.skip_track", { std::to_string (strip + 1), std::to_string (slot) });
+                else if (strip < tracks + buses) where = tr_.format ("comb.skip_bus", { std::to_string (strip - tracks + 1), std::to_string (slot) });
+                else if (strip == tracks + buses) where = tr_.format ("comb.skip_master", { std::to_string (slot) });
+                else where = tr_.format ("comb.skip_parallel", { std::to_string (strip - tracks - buses), std::to_string (slot) });
+                if (list.isNotEmpty()) list << ", ";
+                list << juce::String::fromUTF8 (where.c_str());
+            }
+            noticeLabel_.setText (juce::String::fromUTF8 (tr_.format ("comb.skipped", { std::to_string (notice.skippedSlots.size()), list.toStdString() }).c_str()), juce::dontSendNotification);
+            noticeUntilMs_ = now + 9000.0;
+        }
+        const bool showNotice = now < noticeUntilMs_;
+        if (noticeLabel_.isVisible() != showNotice) { noticeLabel_.setVisible (showNotice); profileLabel_.setVisible (! showNotice); }
+    }
+    {
         // compteur de voix actives, toutes pistes confondues (Sampler et Synthé)
         const int voices = processor_.totalActiveVoices();
         if (voices != lastVoiceCount_)
@@ -1285,6 +1317,7 @@ void NeptuneEditor::resized()
         voiceCountButton_.setBounds (row.removeFromLeft (widthOf ({ text ("analog.voices") + " 888 / 1024" })));
         row.removeFromLeft (gap + 6);
         profileLabel_.setBounds (row);
+        noticeLabel_.setBounds (row);
     }
 }
 

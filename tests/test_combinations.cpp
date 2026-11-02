@@ -902,3 +902,24 @@ TEST_CASE ("scenes: 32 banks of 64 scenes, files keep addressing scenes by bank 
     CHECK (fromJson (toJson (lib)) == lib);
     CHECK (generalKey (31, 63) == numGeneralKeys - 1);
 }
+
+TEST_CASE ("scenes: a recall reports the insert slots it skipped")
+{
+    auto set = makeFullSet();
+    FakeInserts ins;
+    CaptureSpec spec;
+    spec.tpl = Template::Everything;
+    auto m = capture (set, captureParams (set, spec, -1), &ins);
+    for (const ParamId id : captureInsertParams (ins, spec, -1)) { double v; REQUIRE (ins.read (id, v)); m.values.emplace_back (id, v); m.insertTypes[insertSlotKey (insertStrip (id), insertSlot (id))] = ins.find (id)->type; }
+
+    std::vector<int> skipped;
+    recall (set, m, nullptr, &ins, &skipped);
+    CHECK (skipped.empty());                       // mêmes modules : rien d'ignoré
+
+    ins.rows[0].type = "delay";                    // un autre module sur la piste 1, emplacement 1
+    ins.rows.pop_back();                           // et plus rien sur le Master
+    recall (set, m, nullptr, &ins, &skipped);
+    REQUIRE (skipped.size() == 2);
+    CHECK (std::find (skipped.begin(), skipped.end(), insertSlotKey (0, 0)) != skipped.end());
+    CHECK (std::find (skipped.begin(), skipped.end(), insertSlotKey (32, 1)) != skipped.end());
+}

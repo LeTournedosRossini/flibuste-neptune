@@ -38,5 +38,8 @@ Boutons « < » et « > » dans l'écran Scènes (à côté de « Pas n / m ») 
 - **32 banques de 64 scènes** (2048 emplacements ; `kBanks`, `kPistons`) ; les fichiers adressent une scène par « banque + numéro » : les anciens projets se rechargent à la même place. Le coût dépend du nombre de scènes enregistrées, pas du nombre d'emplacements (stockage clairsemé ; une scène « Tout Neptune » pèse environ 60 à 70 ko). Les commandes G1..G10 / D1..D10 des boutons de Façade et de la couche de contrôle gardent leur sens (`kFacadePistons` = 10, dix premières scènes de la banque courante) ; liste du pas à pas portée à 256 pas ; voyants des pistons sans copie de la bibliothèque.
 - **Changement de programme MIDI** : 0-63 scène de la banque courante, 64-95 banque 1-32, 96-127 scène de piste 1-32 du clavier du canal (avant : 0-9, 10-19, 20-29). Piste possible : réduire le poids des scènes « Tout Neptune » en ne retenant que les valeurs qui diffèrent des défauts (non fait).
 
+## Inserts ignorés (2026-11-02)
+Quand un rappel ignore des inserts (un autre module ou un emplacement vide à la place de celui de la scène), le texte du profil, dans la barre du bas, est remplacé 9 secondes par « Scène rappelée ; N insert(s) ignoré(s) ... : piste 1 insert 2, ... » (`Outcome::skippedInserts`, `NeptuneProcessor::sceneNotice`). L'écran Scènes le dit aussi dans son texte d'aide.
+
 ## Plus tard
 Commandes « Insérer le pas » et « Supprimer le pas » pour la Façade et la couche de contrôle (aujourd'hui seulement dans l'écran) ; noms de modèles personnalisés enregistrés ; sélection par piste dans « Au choix ».

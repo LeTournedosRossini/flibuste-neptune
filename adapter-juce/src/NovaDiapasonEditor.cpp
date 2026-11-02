@@ -1,7 +1,11 @@
 #include "NovaDiapasonEditor.h"
+#include "DragValuePill.h"
+#include "neptune/core/MidiSend.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <memory>
 
 using namespace neptune::core;
 using neptune::core::theme::Token;
@@ -24,6 +28,15 @@ juce::Path iconPath (int kind)
     {
         for (int r = 0; r < 3; ++r)
             for (int c = 0; c < 4; ++c) p.addRectangle (3.0f + static_cast<float> (c) * 5.0f, 5.0f + static_cast<float> (r) * 6.0f, 3.5f, 3.5f);
+    }
+    else if (kind == 2)   // prise MIDI (DIN) : cercle et cinq points
+    {
+        p.addEllipse (3.0f, 3.0f, 18.0f, 18.0f);
+        for (int i = 0; i < 5; ++i)
+        {
+            const float a = kPi * (1.0f + static_cast<float> (i) * 0.25f);
+            p.addEllipse (12.0f + 5.5f * std::cos (a) - 1.3f, 12.0f + 5.5f * std::sin (a) - 1.3f, 2.6f, 2.6f);
+        }
     }
     else
     {
@@ -367,10 +380,12 @@ NovaDiapasonEditor::NovaDiapasonEditor (ParamHost& host, gen::GeneratorEngine& e
 {
     addPage (tx ("dp.page_signal"), iconPath (0));
     addPage (tx ("dp.page_drums"), iconPath (1));
-    addPage (tx ("nv.page_settings"), iconPath (2));
+    addPage (tx ("dp.page_midi"), iconPath (2));
+    addPage (tx ("nv.page_settings"), iconPath (3));
     buildSignalPage();
     buildDrumsPage();
-    buildSettingsPage (2);
+    buildMidiPage();
+    buildSettingsPage (3);
     setPage (0);
     setSize (designWidth, designHeight);
 }
@@ -414,6 +429,252 @@ void NovaDiapasonEditor::buildSignalPage()
         c.knob->setPlain (true);
         columns_.push_back (c);
     }
+}
+
+
+// ------------------------------------------------------------------------------------------------ page MIDI : envoi de messages vers la sortie MIDI de l'hôte
+class NovaDiapasonEditor::MidiView : public juce::Component
+{
+public:
+    MidiView (const nova::Skin& s, std::function<juce::String (const char*)> tx, std::function<bool (const std::vector<std::uint8_t>&)>& sender)
+        : skin_ (s), tx_ (std::move (tx)), sender_ (sender)
+    {
+        namespace ms = neptune::core::midisend;
+        static const char* const kindKeys[ms::numKinds] = { "dp.midi_k0", "dp.midi_k1", "dp.midi_k2", "dp.midi_k3", "dp.midi_k4", "dp.midi_k5", "dp.midi_k6", "dp.midi_k7" };
+        for (int k = 0; k < ms::numKinds; ++k)
+        {
+            auto& p = kinds_[static_cast<std::size_t> (k)];
+            p = std::make_unique<nova::Pill> (skin_);
+            p->setText (tx_ (kindKeys[k]));
+            p->onClick = [this, k] { setKind (k); };
+            addAndMakeVisible (*p);
+        }
+        row (channel_, "dp.midi_channel", { 1.0, 16.0, false, 1.0, 0, 1.0 });
+        row (data1_, "", { 0.0, 127.0, false, 1.0, 0, 60.0 });
+        row (data2_, "", { 0.0, 127.0, false, 1.0, 0, 100.0 });
+        channel_.pill.onValue = [this] (double) { changed(); };
+        data1_.pill.onValue = [this] (double) { changed(); };
+        data2_.pill.onValue = [this] (double) { changed(); };
+        sysex_.setMultiLine (true, true);
+        sysex_.setReturnKeyStartsNewLine (true);
+        sysex_.setFont (juce::FontOptions (16.0f));
+        sysex_.setText ("F0 7E 7F 09 01 F7");
+        style (sysex_);
+        addChildComponent (sysex_);
+        history_.setMultiLine (true, true);
+        history_.setReadOnly (true);
+        history_.setCaretVisible (false);
+        history_.setFont (juce::FontOptions (14.0f));
+        style (history_);
+        addAndMakeVisible (history_);
+        send_ = std::make_unique<nova::Pill> (skin_);
+        send_->setText (tx_ ("dp.midi_send"));
+        send_->onClick = [this] { send(); };
+        addAndMakeVisible (*send_);
+        live_ = std::make_unique<nova::Pill> (skin_);
+        live_->setText (tx_ ("dp.midi_live"));
+        live_->onClick = [this] { live_->setOn (! live_->isOn()); };
+        addAndMakeVisible (*live_);
+        allOff_ = std::make_unique<nova::Pill> (skin_);
+        allOff_->setText (tx_ ("dp.midi_all_off"));
+        allOff_->onClick = [this] { post ({ static_cast<std::uint8_t> (0xB0 | (static_cast<int> (channel_.pill.value()) - 1)), 123, 0 }, "CC 123 = 0"); };
+        addAndMakeVisible (*allOff_);
+        hint_ = std::make_unique<nova::Text> (skin_, Token::TextDim2, 11.0f);
+        hint_->setText (tx_ ("dp.midi_hint"));
+        addAndMakeVisible (*hint_);
+        setKind (2);
+    }
+
+    void resized() override
+    {
+        const int h = skin_.ipx (32.0f), g = skin_.ipx (8.0f);
+        auto r = getLocalBounds();
+        {
+            auto line = r.removeFromTop (h);
+            const int w = (line.getWidth() - g * (static_cast<int> (kinds_.size()) - 1)) / static_cast<int> (kinds_.size());
+            for (auto& k : kinds_) { k->setBounds (line.removeFromLeft (w)); line.removeFromLeft (g); }
+        }
+        r.removeFromTop (skin_.ipx (18.0f));
+        placeRow (channel_, r.removeFromTop (h));
+        r.removeFromTop (g);
+        const bool isSysex = kind_ == 7;
+        if (isSysex)
+        {
+            sysex_.setBounds (r.removeFromTop (skin_.ipx (96.0f)));
+            r.removeFromTop (g);
+        }
+        else
+        {
+            placeRow (data1_, r.removeFromTop (h));
+            r.removeFromTop (g);
+            placeRow (data2_, r.removeFromTop (h));
+            r.removeFromTop (g);
+        }
+        r.removeFromTop (skin_.ipx (8.0f));
+        {
+            auto line = r.removeFromTop (h);
+            send_->setBounds (line.removeFromLeft (skin_.ipx (150.0f)));
+            line.removeFromLeft (g);
+            live_->setBounds (line.removeFromLeft (skin_.ipx (190.0f)));
+            line.removeFromLeft (g);
+            allOff_->setBounds (line.removeFromLeft (skin_.ipx (170.0f)));
+        }
+        r.removeFromTop (g);
+        hint_->setBounds (r.removeFromTop (skin_.ipx (34.0f)));
+        history_.setBounds (r);
+    }
+
+private:
+    using Token = neptune::core::theme::Token;
+    struct Row
+    {
+        nova::Text* label = nullptr;
+        std::unique_ptr<nova::Text> labelOwner;
+        std::unique_ptr<nova::Pill> minus, plus;
+        DragValuePill pill;
+    };
+
+    void row (Row& r, const char* labelKey, const neptune::core::dragvalue::Range& range)
+    {
+        r.labelOwner = std::make_unique<nova::Text> (skin_, Token::Text, 13.0f, true);
+        r.label = r.labelOwner.get();
+        if (*labelKey != 0) r.label->setText (tx_ (labelKey));
+        addAndMakeVisible (*r.labelOwner);
+        r.minus = std::make_unique<nova::Pill> (skin_, nova::Pill::Look::Small);
+        r.plus = std::make_unique<nova::Pill> (skin_, nova::Pill::Look::Small);
+        r.minus->setText ("-");
+        r.plus->setText ("+");
+        r.minus->setFontSize (20.0f);
+        r.plus->setFontSize (20.0f);
+        r.minus->onClick = [&r] { r.pill.setValue (r.pill.value() - 1.0); if (r.pill.onValue) r.pill.onValue (r.pill.value()); };
+        r.plus->onClick = [&r] { r.pill.setValue (r.pill.value() + 1.0); if (r.pill.onValue) r.pill.onValue (r.pill.value()); };
+        addAndMakeVisible (*r.minus);
+        addAndMakeVisible (*r.plus);
+        r.pill.setPalette (skin_.palette());
+        r.pill.setRange (range);
+        r.pill.setValue (range.def);
+        addAndMakeVisible (r.pill);
+    }
+
+    void placeRow (Row& r, juce::Rectangle<int> line)
+    {
+        const int g = skin_.ipx (8.0f), b = skin_.ipx (40.0f);
+        r.label->setBounds (line.removeFromLeft (skin_.ipx (230.0f)).withTrimmedTop (skin_.ipx (8.0f)));
+        r.minus->setBounds (line.removeFromLeft (b));
+        line.removeFromLeft (g);
+        r.plus->setBounds (line.removeFromRight (b));
+        line.removeFromRight (g);
+        r.pill.setBounds (line);
+    }
+
+    void style (juce::TextEditor& e)
+    {
+        const auto& p = skin_.palette();
+        auto c = [&p] (Token t) { const auto& v = p.color (t); return juce::Colour (v.r, v.g, v.b, static_cast<float> (v.a)); };
+        e.setColour (juce::TextEditor::backgroundColourId, c (Token::BgApp));
+        e.setColour (juce::TextEditor::textColourId, c (Token::Text));
+        e.setColour (juce::TextEditor::outlineColourId, c (Token::Border));
+        e.setColour (juce::TextEditor::focusedOutlineColourId, c (Token::Accent));
+    }
+
+    void setKind (int k)
+    {
+        namespace ms = neptune::core::midisend;
+        kind_ = juce::jlimit (0, ms::numKinds - 1, k);
+        for (int i = 0; i < ms::numKinds; ++i) kinds_[static_cast<std::size_t> (i)]->setOn (i == kind_);
+        struct Spec { const char* l1; neptune::core::dragvalue::Range r1; const char* l2; neptune::core::dragvalue::Range r2; };
+        const neptune::core::dragvalue::Range note { 0.0, 127.0, false, 1.0, 0, 60.0 }, vel { 0.0, 127.0, false, 1.0, 0, 100.0 }, cc { 0.0, 127.0, false, 1.0, 0, 1.0 },
+            val { 0.0, 127.0, false, 1.0, 0, 64.0 }, prog { 0.0, 127.0, false, 1.0, 0, 0.0 }, bend { 0.0, 16383.0, false, 1.0, 0, 8192.0 };
+        Spec sp { "midi.v_note", note, "", note };
+        switch (static_cast<ms::Kind> (kind_))
+        {
+            case ms::Kind::NoteOn: sp = { "midi.v_note", note, "midi.v_velocity", vel }; break;
+            case ms::Kind::NoteOff: sp = { "midi.v_note", note, "midi.v_velocity", { 0.0, 127.0, false, 1.0, 0, 64.0 } }; break;
+            case ms::Kind::ControlChange: sp = { "midi.v_controller", cc, "midi.v_value", val }; break;
+            case ms::Kind::ProgramChange: sp = { "midi.v_program", prog, "", prog }; break;
+            case ms::Kind::PitchBend: sp = { "midi.v_bend", bend, "", bend }; break;
+            case ms::Kind::ChannelPressure: sp = { "midi.v_pressure", val, "", val }; break;
+            case ms::Kind::PolyPressure: sp = { "midi.v_note", note, "midi.v_pressure", val }; break;
+            case ms::Kind::SysEx: break;
+        }
+        data1_.label->setText (tx_ (sp.l1));
+        data1_.pill.setRange (sp.r1);
+        data1_.pill.setValue (sp.r1.def);
+        data2_.label->setText (*sp.l2 != 0 ? tx_ (sp.l2) : juce::String());
+        data2_.pill.setRange (sp.r2);
+        data2_.pill.setValue (sp.r2.def);
+        const bool two = *sp.l2 != 0;
+        const bool sx = kind_ == 7;
+        for (auto* c : std::initializer_list<juce::Component*> { data1_.label, data1_.minus.get(), data1_.plus.get(), &data1_.pill }) c->setVisible (! sx);
+        for (auto* c : std::initializer_list<juce::Component*> { data2_.label, data2_.minus.get(), data2_.plus.get(), &data2_.pill }) c->setVisible (! sx && two);
+        sysex_.setVisible (sx);
+        resized();
+    }
+
+    // une valeur a bougé : avec « envoi à chaque changement », le message part tout de suite (pas pour les notes, qui sonneraient sans fin)
+    void changed()
+    {
+        namespace ms = neptune::core::midisend;
+        if (! live_->isOn() || kind_ == 0 || kind_ == 1 || kind_ == 7) return;
+        send();
+    }
+
+    neptune::core::midisend::Message current() const
+    {
+        namespace ms = neptune::core::midisend;
+        ms::Message m;
+        m.kind = static_cast<ms::Kind> (kind_);
+        m.channel = static_cast<int> (channel_.pill.value());
+        m.data1 = static_cast<int> (data1_.pill.value());
+        m.data2 = static_cast<int> (data2_.pill.value());
+        m.sysex = sysex_.getText().toStdString();
+        return ms::sanitised (m);
+    }
+
+    void send()
+    {
+        namespace ms = neptune::core::midisend;
+        const auto m = current();
+        std::string error;
+        const auto bytes = ms::encode (m, &error);
+        if (bytes.empty())
+        {
+            log (juce::String::fromUTF8 (error.c_str()));
+            return;
+        }
+        const bool ok = sender_ && sender_ (bytes);
+        log (juce::String::fromUTF8 (ms::describe (m).c_str()) + (ok ? "" : "  " + tx_ ("dp.midi_not_sent")));
+    }
+
+    void post (std::vector<std::uint8_t> bytes, const juce::String& what)
+    {
+        const bool ok = sender_ && sender_ (bytes);
+        log (what + " (" + tx_ ("dp.midi_channel") + " " + juce::String (static_cast<int> (channel_.pill.value())) + ")" + (ok ? "" : "  " + tx_ ("dp.midi_not_sent")));
+    }
+
+    void log (const juce::String& line)
+    {
+        history_.moveCaretToEnd();
+        history_.insertTextAtCaret (line + "\n");
+        history_.moveCaretToEnd();
+    }
+
+    const nova::Skin& skin_;
+    std::function<juce::String (const char*)> tx_;
+    std::function<bool (const std::vector<std::uint8_t>&)>& sender_;
+    std::array<std::unique_ptr<nova::Pill>, neptune::core::midisend::numKinds> kinds_;
+    Row channel_, data1_, data2_;
+    juce::TextEditor sysex_, history_;
+    std::unique_ptr<nova::Pill> send_, live_, allOff_;
+    std::unique_ptr<nova::Text> hint_;
+    int kind_ = 2;
+};
+
+void NovaDiapasonEditor::buildMidiPage()
+{
+    midiPanel_ = add<nova::Panel> (2, skin());
+    midiPanel_->setTitle (tx ("dp.midi_title"));
+    midiView_ = add<MidiView> (2, skin(), [this] (const char* key) { return tx (key); }, onSendMidi);
 }
 
 void NovaDiapasonEditor::assignKnobs()
@@ -557,6 +818,10 @@ void NovaDiapasonEditor::layout()
     polarityPill_->setBounds (R (876, 352, 254, 32));
     signalHint_->setBounds (R (220, 462, 910, 52));
     placeColumns();
+
+    // ---- page MIDI
+    midiPanel_->setBounds (R (204, 72, 942, 638));
+    midiView_->setBounds (R (220, 108, 910, 584));
 
     // ---- page DRUMS
     drumsPanel_->setBounds (R (204, 72, 942, 638));

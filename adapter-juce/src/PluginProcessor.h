@@ -229,6 +229,9 @@ public:
         int sequenceLength = 0;
     };
     CombiStatus combiStatus() const;
+    // Dernier rappel qui a ignoré des inserts (emplacements en insertSlotKey) ; `serial` change à chaque fois (fil de message seulement).
+    struct SceneNotice { std::uint32_t serial = 0; std::vector<int> skippedSlots; };
+    const SceneNotice& sceneNotice() const noexcept { return sceneNotice_; }
     bool combiArmed() const noexcept { return combi_.armed(); }   // touche Set armée : le prochain piston mémorise (aussi pour les pistons « instantané » de la Façade)
     void uiCombiArm (bool armed) noexcept { combi_.arm (armed); }
     bool uiCombiSequenceInsert (int generalKeyValue);   // insère le général après le pas courant du pas à pas (annulable)
@@ -452,6 +455,7 @@ private:
     std::vector<Glide> glides_;
     void startGlide (neptune::core::ParameterSet&, std::shared_ptr<neptune::core::InsertInstance> keep, std::size_t index, double target, int milliseconds, juce::AudioProcessorParameter* host);
     void glideTick();
+    SceneNotice sceneNotice_;
     neptune::core::combi::Result combiExecute (const std::function<neptune::core::combi::Outcome (neptune::core::combi::Library&)>&);
     // Changements de programme MIDI reçus par le fil audio (canal << 8 | programme), consommés sur le fil de message (voir controlTick).
     juce::AbstractFifo combiProgramFifo_ { 64 };

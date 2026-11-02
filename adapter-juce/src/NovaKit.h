@@ -355,4 +355,21 @@ private:
     const Skin& skin_;
     float buttonTextScale_ = 1.0f, popupScale_ = 1.0f;
 };
+
+// Habillage par défaut de tout ce que JUCE ouvre hors de la fenêtre du plugin (boîtes de renommage et de message, menus sans habillage propre) :
+// tant qu'un éditeur en tient un exemplaire, il est le style par défaut de JUCE ; le dernier éditeur fermé rend le style d'origine.
+class DialogLook
+{
+public:
+    static std::shared_ptr<DialogLook> acquire (const neptune::core::theme::Palette&, neptune::core::theme::KnobStyle);
+    ~DialogLook();
+    DialogLook (const DialogLook&) = delete;
+    DialogLook& operator= (const DialogLook&) = delete;
+
+private:
+    DialogLook (const neptune::core::theme::Palette&, neptune::core::theme::KnobStyle);
+    neptune::core::theme::Palette palette_;
+    Skin skin_;
+    LookAndFeel look_;
+};
 } // namespace nova

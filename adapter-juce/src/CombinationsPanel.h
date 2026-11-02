@@ -171,7 +171,7 @@ public:
     {
         auto r = panel().reduced (18);
         title_.setBounds (r.removeFromTop (32));
-        hint_.setBounds (r.removeFromTop (74));
+        hint_.setBounds (r.removeFromTop (104));
         {
             auto row = r.removeFromTop (34);
             captureLabel_.setBounds (row.removeFromLeft (100));
@@ -254,7 +254,7 @@ private:
         const auto& c = palette_.color (t);
         return juce::Colour (c.r, c.g, c.b, static_cast<float> (c.a));
     }
-    juce::Rectangle<int> panel() const { return juce::Rectangle<int> (940, juce::jmin (740, getHeight() - 20)).withCentre (getLocalBounds().getCentre()); }
+    juce::Rectangle<int> panel() const { return juce::Rectangle<int> (940, juce::jmin (770, getHeight() - 20)).withCentre (getLocalBounds().getCentre()); }
 
     static juce::String utf8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
 

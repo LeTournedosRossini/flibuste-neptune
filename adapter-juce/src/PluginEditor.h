@@ -75,12 +75,16 @@ private:
     neptune::core::i18n::Translator tr_;
     neptune::core::theme::Palette palette_;
     nova::Skin novaSkin_ { palette_, neptune::core::theme::KnobStyle::Led };   // échelle 1 : la racine met déjà tout à l'échelle
+    std::shared_ptr<nova::DialogLook> dialogLook_ = nova::DialogLook::acquire (palette_, neptune::core::theme::KnobStyle::Led);   // boîtes et menus hors de la fenêtre : même habillage
     nova::LookAndFeel novaLook_ { novaSkin_ };                                // habille la barre du haut (boutons, choix de piste) et les vues sans habillage propre
     juce::Colour colour (neptune::core::theme::Token t) const;
     juce::String text (std::string_view key) const { return juce::String::fromUTF8 (tr_.tr (key).data(), static_cast<int> (tr_.tr (key).size())); }
     juce::Label latencyLabel_;
     juce::Label recoveryLabel_;
     juce::Label profileLabel_;
+    juce::Label noticeLabel_;                     // remplace le texte du profil quelques secondes (inserts ignorés par une scène)
+    std::uint32_t lastNoticeSerial_ = 0;
+    double noticeUntilMs_ = 0.0;
     IconButton profileSwitchButton_, profileLockButton_;
     void updateProfileControls();
 

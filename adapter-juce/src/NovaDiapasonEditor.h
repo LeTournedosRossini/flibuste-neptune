@@ -3,6 +3,9 @@
 // aperçu, mode, marche / déclenchement, potards qui suivent le signal choisi), page DRUMS (réglages du séquenceur, grille de pas, réglages du son choisi) et page SETTINGS.
 #include "NovaEditor.h"
 #include "neptune/core/SignalGenerator.h"
+#include <cstdint>
+#include <functional>
+#include <vector>
 
 class NovaDiapasonEditor : public nova::EditorBase
 {
@@ -11,18 +14,22 @@ public:
                         const neptune::core::i18n::Translator&, Options);
     ~NovaDiapasonEditor() override;
     void setPageForTest (int p) { setPage (p); }
+    // Envoi d'un message MIDI vers la sortie de l'hôte (fourni par le processeur) ; faux si la file est pleine
+    std::function<bool (const std::vector<std::uint8_t>&)> onSendMidi;
     void selectDrumForTest (int d) { selectDrum (d); }
 
 private:
     class ChipGrid;
     class SignalView;
     class StepGrid;
+    class MidiView;
 
     void layout() override;
     void tick() override;
     void pageChanged() override;
     void buildSignalPage();
     void buildDrumsPage();
+    void buildMidiPage();
     void assignKnobs();   // les potards de la page SIGNAL suivent le signal et le mode choisis
     void placeColumns();  // les potards montrés sont alignés à gauche
     void selectDrum (int);
@@ -46,6 +53,10 @@ private:
     std::vector<Column> columns_;
     std::vector<int> columnPos_;   // rang de chaque potard parmi les potards montrés (-1 : caché)
     std::uint32_t knobKey_ = 0xFFFFFFFFu;
+
+    // page MIDI
+    nova::Panel* midiPanel_ = nullptr;
+    MidiView* midiView_ = nullptr;
 
     // page DRUMS
     nova::Panel *drumsPanel_ = nullptr, *drumCard_ = nullptr;

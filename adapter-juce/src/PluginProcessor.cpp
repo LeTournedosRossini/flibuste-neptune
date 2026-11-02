@@ -701,6 +701,7 @@ neptune::core::combi::Result NeptuneProcessor::combiExecute (const std::function
     undo_.beginTransaction ("Scene");
     const auto outcome = action (lib);
     combi_.setInsertAccess (nullptr);
+    if (! outcome.skippedInserts.empty()) { sceneNotice_.skippedSlots = outcome.skippedInserts; ++sceneNotice_.serial; }
     if (! outcome.changes.empty()) { ++revision_; notifyStateChanged(); }
     if (outcome.result == combi::Result::Stored) uiEditCombinations (std::move (lib), "Scene: store");
     undo_.endTransaction();

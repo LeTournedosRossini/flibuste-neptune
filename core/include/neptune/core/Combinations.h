@@ -161,7 +161,8 @@ bool matches (const ParameterSet&, const Memory&, InsertAccess* inserts = nullpt
 // Mémorise les valeurs courantes de `ids` (ceux que le jeu ne connaît pas sont ignorés). Le nom est laissé vide.
 Memory capture (const ParameterSet&, const std::vector<ParamId>& ids, InsertAccess* inserts = nullptr);   // `ids` peut contenir des identifiants d'insert (lus par `inserts`)
 // Règle les paramètres de la mémoire ; rend ce qui a réellement changé (valeur bornée au paramètre ; id inconnu : ignoré).
-std::vector<Change> recall (ParameterSet&, const Memory&, const Writer& write = {}, InsertAccess* inserts = nullptr);
+// `skipped` (facultatif) reçoit les emplacements d'insert ignorés : la scène en portait des valeurs, mais le module posé n'est plus le même.
+std::vector<Change> recall (ParameterSet&, const Memory&, const Writer& write = {}, InsertAccess* inserts = nullptr, std::vector<int>* skipped = nullptr);
 // Annulation générale : tout repousser (valeur 0 de chaque paramètre de la console).
 std::vector<Change> cancelAll (ParameterSet&, const Writer& write = {});
 // Idem pour un modèle : les modèles d'orgue repoussent tout à 0 (jeux, tirants, transpositions) ; les autres remettent les paramètres du modèle à leur valeur par défaut (celle de l'ouverture du logiciel).
@@ -172,6 +173,7 @@ struct Outcome
 {
     Result result = Result::Ignored;
     std::vector<Change> changes;   // Recalled : ce qui a changé
+    std::vector<int> skippedInserts;   // Recalled : emplacements d'insert (insertSlotKey) dont la scène portait des valeurs mais où le module a changé ou a disparu
 };
 
 class Controller

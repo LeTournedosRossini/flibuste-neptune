@@ -439,14 +439,16 @@ void applyInsert (InsertAccess& access, ParamId id, double value, std::vector<Ch
 }
 } // namespace
 
-std::vector<Change> recall (ParameterSet& set, const Memory& m, const Writer& write, InsertAccess* inserts)
+std::vector<Change> recall (ParameterSet& set, const Memory& m, const Writer& write, InsertAccess* inserts, std::vector<int>* skipped)
 {
     std::vector<Change> changes;
     const auto types = currentTypes (inserts);
     for (const auto& [id, value] : m.values)
     {
         if (! isInsertParam (id)) { apply (set, id, value, changes, write); continue; }
-        if (inserts != nullptr && sameInsert (m, id, types)) applyInsert (*inserts, id, value, changes);
+        if (inserts != nullptr && sameInsert (m, id, types)) { applyInsert (*inserts, id, value, changes); continue; }
+        const int key = insertSlotKey (insertStrip (id), insertSlot (id));
+        if (skipped != nullptr && std::find (skipped->begin(), skipped->end(), key) == skipped->end()) skipped->push_back (key);
     }
     return changes;
 }
@@ -582,7 +584,7 @@ Outcome recallMemory (const Memory* m, ParameterSet& set, const Writer& write, I
         return out;
     }
     out.result = Result::Recalled;
-    out.changes = recall (set, *m, write, inserts);
+    out.changes = recall (set, *m, write, inserts, &out.skippedInserts);
     return out;
 }
 } // namespace
