@@ -27,7 +27,7 @@ theme::Palette makePalette (const settings::GlobalSettings& st)
 
 juce::AudioProcessor::BusesProperties DiapasonProcessor::makeBuses()
 {
-    return BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true);
+    return BusesProperties().withInput ("Input", juce::AudioChannelSet::stereo(), true).withOutput ("Output", juce::AudioChannelSet::stereo(), true);
 }
 
 DiapasonProcessor::DiapasonProcessor() : juce::AudioProcessor (makeBuses())
@@ -41,7 +41,12 @@ DiapasonProcessor::DiapasonProcessor() : juce::AudioProcessor (makeBuses())
     for (auto& s : modal_) s = {};
 }
 
-bool DiapasonProcessor::isBusesLayoutSupported (const BusesLayout& l) const { return l.getMainOutputChannelSet() == juce::AudioChannelSet::stereo(); }
+bool DiapasonProcessor::isBusesLayoutSupported (const BusesLayout& l) const
+{
+    const auto in = l.getMainInputChannelSet();
+    return l.getMainOutputChannelSet() == juce::AudioChannelSet::stereo()
+        && (in.isDisabled() || in == juce::AudioChannelSet::mono() || in == juce::AudioChannelSet::stereo());   // l'entrée sert à l'accordeur
+}
 
 void DiapasonProcessor::prepareToPlay (double sampleRate, int samplesPerBlock) { engine_.prepare (sampleRate, samplesPerBlock); }
 
@@ -50,6 +55,9 @@ void DiapasonProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     juce::ScopedNoDenormals noDenormals;
     const int n = buffer.getNumSamples();
     if (n <= 0 || buffer.getNumChannels() < 2) return;
+    // entrée audio pour l'accordeur : lue avant que le rendu n'écrase le tampon, et jamais renvoyée à la sortie
+    if (const int nIn = getTotalNumInputChannels(); nIn >= 1)
+        engine_.pushInput (buffer.getReadPointer (0), nIn >= 2 ? buffer.getReadPointer (1) : nullptr, n);
     float* left = buffer.getWritePointer (0);
     float* right = buffer.getWritePointer (1);
 

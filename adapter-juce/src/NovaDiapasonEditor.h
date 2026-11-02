@@ -23,6 +23,7 @@ private:
     class SignalView;
     class StepGrid;
     class MidiView;
+    class ToolsView;
 
     void layout() override;
     void tick() override;
@@ -30,6 +31,7 @@ private:
     void buildSignalPage();
     void buildDrumsPage();
     void buildMidiPage();
+    void buildToolsPage();
     void assignKnobs();   // les potards de la page SIGNAL suivent le signal et le mode choisis
     void placeColumns();  // les potards montrés sont alignés à gauche
     void selectDrum (int);
@@ -53,6 +55,10 @@ private:
     std::vector<Column> columns_;
     std::vector<int> columnPos_;   // rang de chaque potard parmi les potards montrés (-1 : caché)
     std::uint32_t knobKey_ = 0xFFFFFFFFu;
+
+    // page OUTILS (accordeur et métronome)
+    nova::Panel* toolsPanel_ = nullptr;
+    ToolsView* toolsView_ = nullptr;
 
     // page MIDI
     nova::Panel* midiPanel_ = nullptr;

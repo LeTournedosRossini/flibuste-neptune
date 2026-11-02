@@ -135,6 +135,42 @@ bool addParams (ParameterSet& set, std::string* error)
     add (pct (swing, "Swing", 0.0, 75.0, 0.0));
     add (db (drumLevel, "Drums Level", -96.0, 6.0, 0.0));
 
+    // métronome
+    add (P::toggle (metroOn, "Metronome On", false));
+    add (P::choice (metroSync, "Metronome Sync", { "Internal", "Host" }, kSyncInternal));
+    {
+        auto t = P::continuous (metroTempo, "Metronome Tempo", Unit::None, 20.0, 300.0, 120.0);
+        t.decimals = 1;
+        add (std::move (t));
+    }
+    add (P::stepped (metroBeats, "Metronome Beats", Unit::None, 1, 12, 4));
+    add (P::choice (metroUnit, "Metronome Beat Unit", { "1/4", "1/8", "1/16" }, 0));
+    add (P::choice (metroSub, "Metronome Subdivision", { "1", "2", "3", "4" }, 0));
+    add (P::choice (metroSound, "Metronome Sound", { "Click", "Wood", "Beep", "Bell" }, 0));
+    add (db (metroLevel, "Metronome Level", -60.0, 0.0, -12.0));
+    add (P::continuous (metroAccent, "Metronome Accent", Unit::Decibel, 0.0, 12.0, 6.0));
+    add (P::continuous (metroSubLevel, "Metronome Subdivision Level", Unit::Decibel, -24.0, 0.0, -6.0));
+
+    // accordeur
+    {
+        auto a = P::continuous (tunerA4, "Tuner Reference A4", Unit::Hertz, 415.0, 466.0, 440.0);
+        a.decimals = 1;
+        add (std::move (a));
+    }
+    {
+        std::vector<std::string> names;
+        for (const auto& t : tuner::tunings()) names.emplace_back (t.en);
+        add (P::choice (tunerPreset, "Tuner Tuning", names, 0));
+    }
+    add (P::toggle (tunerTone, "Tuner Tone On", false));
+    add (P::stepped (tunerNote, "Tuner Tone Note", Unit::None, 0, 127, 69));
+    {
+        auto c = P::continuous (tunerCents, "Tuner Tone Cents", Unit::Cents, -50.0, 50.0, 0.0);
+        c.decimals = 1;
+        add (std::move (c));
+    }
+    add (db (tunerLevel, "Tuner Tone Level", -60.0, 0.0, -18.0));
+
     for (int d = 0; d < kNumDrums; ++d)
     {
         const std::string n = kDrumNames[d];
@@ -164,6 +200,9 @@ void GeneratorEngine::bindIndices()
     iFreq2_ = ix (freq2); iLevel2_ = ix (level2); iSweepStart_ = ix (sweepStart); iSweepEnd_ = ix (sweepEnd); iSweepTime_ = ix (sweepTime);
     iLength_ = ix (length); iBurstOn_ = ix (burstOn); iBurstOff_ = ix (burstOff); iPolarity_ = ix (polarity); iTrigger_ = ix (trigger);
     iDrumNote_ = ix (drumNote); iMaster_ = ix (master);
+    iMetroOn_ = ix (metroOn); iMetroSync_ = ix (metroSync); iMetroTempo_ = ix (metroTempo); iMetroBeats_ = ix (metroBeats); iMetroUnit_ = ix (metroUnit);
+    iMetroSub_ = ix (metroSub); iMetroSound_ = ix (metroSound); iMetroLevel_ = ix (metroLevel); iMetroAccent_ = ix (metroAccent); iMetroSubLevel_ = ix (metroSubLevel);
+    iTunerA4_ = ix (tunerA4); iTunerTone_ = ix (tunerTone); iTunerNote_ = ix (tunerNote); iTunerCents_ = ix (tunerCents); iTunerLevel_ = ix (tunerLevel);
     iSeqRun_ = ix (seqRun); iSeqSync_ = ix (seqSync); iTempo_ = ix (tempo); iSteps_ = ix (steps); iSwing_ = ix (swing); iDrumLevel_ = ix (drumLevel);
     for (int d = 0; d < kNumDrums; ++d)
     {
@@ -177,6 +216,10 @@ void GeneratorEngine::prepare (double sampleRate, int maxBlockSize)
     sr_ = sampleRate > 0.0 ? sampleRate : 48000.0;
     maxBlock_ = std::max (1, maxBlockSize);
     (void) noiseNorm();   // calibration des bruits, hors temps réel
+    tracker_.prepare (sr_);
+    tone_.prepare (sr_);
+    metro_.prepare (sr_);
+    aux_.assign (static_cast<std::size_t> (std::max (maxBlock_, 8192)), 0.0f);
     reset();
 }
 
@@ -479,6 +522,33 @@ void GeneratorEngine::process (float* left, float* right, int n, const Transport
     long long lastCur = lastStepGlobal_;
     if (! playing) lastCur = std::numeric_limits<long long>::min();
 
+    // ---- métronome et note de référence de l'accordeur : un tampon mono ajouté aux deux voies
+    const int nAux = std::min (n, static_cast<int> (aux_.size()));
+    {
+        metronome::Settings ms;
+        ms.run = p (iMetroOn_) >= 0.5;
+        ms.hostSync = static_cast<int> (std::lround (p (iMetroSync_))) == kSyncHost;
+        ms.bpm = p (iMetroTempo_);
+        ms.beats = static_cast<int> (std::lround (p (iMetroBeats_)));
+        const int unitChoice = static_cast<int> (std::lround (p (iMetroUnit_)));
+        ms.unit = unitChoice == 1 ? 8 : unitChoice == 2 ? 16 : 4;
+        ms.sub = static_cast<int> (std::lround (p (iMetroSub_))) + 1;
+        ms.sound = static_cast<int> (std::lround (p (iMetroSound_)));
+        ms.levelDb = p (iMetroLevel_);
+        ms.accentDb = p (iMetroAccent_);
+        ms.subDb = p (iMetroSubLevel_);
+        metronome::HostPos hp;
+        hp.valid = tr.valid;
+        hp.playing = tr.playing;
+        hp.ppq = tr.ppq;
+        hp.bpm = tr.bpm;
+        metro_.render (ms, hp, aux_.data(), nAux);
+        const double midi = static_cast<double> (std::lround (p (iTunerNote_))) + p (iTunerCents_) * 0.01;
+        tone_.render (aux_.data(), nAux, p (iTunerTone_) >= 0.5, tuner::noteFrequency (midi, p (iTunerA4_)), static_cast<float> (dbToLin (p (iTunerLevel_))));
+        const float mg = static_cast<float> (master);
+        for (int i = 0; i < nAux; ++i) aux_[static_cast<std::size_t> (i)] *= mg;   // le réglage général vaut aussi pour le clic et la note de référence
+    }
+
     float peakL = 0.0f, peakR = 0.0f;
     bool anySound = false;
     for (int i = 0; i < n; ++i)
@@ -587,6 +657,7 @@ void GeneratorEngine::process (float* left, float* right, int n, const Transport
             r += y * ds.gain[d] * ds.panR[d];
             anySound = true;
         }
+        if (i < nAux) { const float a = aux_[static_cast<std::size_t> (i)]; l += a; r += a; if (a != 0.0f) anySound = true; }
         left[i] = l;
         right[i] = r;
         peakL = std::max (peakL, std::fabs (l));

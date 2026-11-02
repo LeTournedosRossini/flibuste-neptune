@@ -13,7 +13,9 @@
 #include <vector>
 
 #include "neptune/core/Biquad.h"
+#include "neptune/core/Metronome.h"
 #include "neptune/core/Parameter.h"
+#include "neptune/core/Tuner.h"
 
 namespace neptune::core::generator
 {
@@ -33,6 +35,10 @@ constexpr ParamId signal = 100, mode = 101, on = 102, freq = 103, level = 104, p
 constexpr ParamId sweepStart = 109, sweepEnd = 110, sweepTime = 111, length = 112, burstOn = 113, burstOff = 114, polarity = 115, trigger = 116;
 constexpr ParamId drumNote = 117, master = 118;
 constexpr ParamId seqRun = 130, seqSync = 131, tempo = 132, steps = 133, swing = 134, drumLevel = 135;
+
+// Métronome (600..609) et accordeur (620..625)
+constexpr ParamId metroOn = 600, metroSync = 601, metroTempo = 602, metroBeats = 603, metroUnit = 604, metroSub = 605, metroSound = 606, metroLevel = 607, metroAccent = 608, metroSubLevel = 609;
+constexpr ParamId tunerA4 = 620, tunerPreset = 621, tunerTone = 622, tunerNote = 623, tunerCents = 624, tunerLevel = 625;
 
 enum DrumKind : int { kDrumLevel = 0, kDrumTune, kDrumDecay, kDrumPan, kDrumMute };
 constexpr ParamId drumParam (int drum, int kind) noexcept { return static_cast<ParamId> (200 + drum * 10 + kind); }
@@ -83,7 +89,13 @@ public:
     // Écrase `left` et `right`.
     void process (float* left, float* right, int n, const Transport& transport) noexcept;
 
+    // Entrée audio de l'instrument (accordeur) : à appeler avant `process`, qui écrase les tampons de sortie. Deuxième voie facultative (nullptr).
+    void pushInput (const float* a, const float* b, int n) noexcept { tracker_.push (a, b, n); }
+
     // --- affichage (lisible depuis l'interface sans verrou)
+    tuner::PitchTracker::Result tunerReading() const { return tracker_.analyse(); }   // thread de l'interface : calcule la hauteur de l'entrée
+    int metronomeBeat() const noexcept { return metro_.beatInBar(); }
+    std::uint32_t metronomeClicks() const noexcept { return metro_.clicks(); }
     float peakLeft() const noexcept { return peakL_.load (std::memory_order_relaxed); }
     float peakRight() const noexcept { return peakR_.load (std::memory_order_relaxed); }
     int currentStep() const noexcept { return step_.load (std::memory_order_relaxed); }   // -1 : séquenceur arrêté
@@ -130,6 +142,12 @@ private:
     // index des paramètres
     std::size_t iSignal_ = 0, iMode_ = 0, iOn_ = 0, iFreq_ = 0, iLevel_ = 0, iPan_ = 0, iWidth_ = 0, iFreq2_ = 0, iLevel2_ = 0, iSweepStart_ = 0, iSweepEnd_ = 0, iSweepTime_ = 0;
     std::size_t iLength_ = 0, iBurstOn_ = 0, iBurstOff_ = 0, iPolarity_ = 0, iTrigger_ = 0, iDrumNote_ = 0, iMaster_ = 0;
+    std::size_t iMetroOn_ = 0, iMetroSync_ = 0, iMetroTempo_ = 0, iMetroBeats_ = 0, iMetroUnit_ = 0, iMetroSub_ = 0, iMetroSound_ = 0, iMetroLevel_ = 0, iMetroAccent_ = 0, iMetroSubLevel_ = 0;
+    std::size_t iTunerA4_ = 0, iTunerTone_ = 0, iTunerNote_ = 0, iTunerCents_ = 0, iTunerLevel_ = 0;
+    tuner::PitchTracker tracker_;
+    tuner::ToneGen tone_;
+    metronome::Metronome metro_;
+    std::vector<float> aux_;   // clic et note de référence d'un bloc, ajoutés à la sortie
     std::size_t iSeqRun_ = 0, iSeqSync_ = 0, iTempo_ = 0, iSteps_ = 0, iSwing_ = 0, iDrumLevel_ = 0;
     std::array<std::array<std::size_t, 5>, kNumDrums> iDrum_ {};
     std::array<std::array<std::size_t, kMaxSteps>, kNumDrums> iStep_ {};

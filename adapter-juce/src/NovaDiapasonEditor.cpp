@@ -38,6 +38,13 @@ juce::Path iconPath (int kind)
             p.addEllipse (12.0f + 5.5f * std::cos (a) - 1.3f, 12.0f + 5.5f * std::sin (a) - 1.3f, 2.6f, 2.6f);
         }
     }
+    else if (kind == 3)   // diapason : deux dents et un manche
+    {
+        p.addRoundedRectangle (7.0f, 2.0f, 3.0f, 11.0f, 1.2f);
+        p.addRoundedRectangle (14.0f, 2.0f, 3.0f, 11.0f, 1.2f);
+        p.addRoundedRectangle (7.0f, 11.0f, 10.0f, 3.0f, 1.2f);
+        p.addRoundedRectangle (10.5f, 13.0f, 3.0f, 9.0f, 1.2f);
+    }
     else
     {
         p.addEllipse (9.0f, 9.0f, 6.0f, 6.0f);
@@ -381,11 +388,13 @@ NovaDiapasonEditor::NovaDiapasonEditor (ParamHost& host, gen::GeneratorEngine& e
     addPage (tx ("dp.page_signal"), iconPath (0));
     addPage (tx ("dp.page_drums"), iconPath (1));
     addPage (tx ("dp.page_midi"), iconPath (2));
-    addPage (tx ("nv.page_settings"), iconPath (3));
+    addPage (tx ("dp.page_tools"), iconPath (3));
+    addPage (tx ("nv.page_settings"), iconPath (4));
     buildSignalPage();
     buildDrumsPage();
     buildMidiPage();
-    buildSettingsPage (3);
+    buildToolsPage();
+    buildSettingsPage (4);
     setPage (0);
     setSize (designWidth, designHeight);
 }
@@ -677,6 +686,472 @@ void NovaDiapasonEditor::buildMidiPage()
     midiView_ = add<MidiView> (2, skin(), [this] (const char* key) { return tx (key); }, onSendMidi);
 }
 
+
+// ------------------------------------------------------------------------------------------------ page OUTILS : accordeur et métronome
+namespace
+{
+const juce::Colour kInTune (0xFF4CC38A);
+
+// Affichage de l'accordeur : note, fréquence, aiguille en cents, cordes de l'accordage choisi, niveau d'entrée.
+class TunerDisplay : public juce::Component
+{
+public:
+    TunerDisplay (const nova::Skin& s, ParamHost& host, gen::GeneratorEngine& engine, std::function<juce::String (const char*)> tx, bool french)
+        : skin_ (s), host_ (host), engine_ (engine), tx_ (std::move (tx)), french_ (french) {}
+
+    void update()
+    {
+        const auto tuningIdx = static_cast<int> (std::lround (host_.parameters().get (gen::tunerPreset)));
+        const double a4 = host_.parameters().get (gen::tunerA4);
+        const auto r = engine_.tunerReading();
+        levelDb_ = r.levelDb;
+        const double nowMs = juce::Time::getMillisecondCounterHiRes();
+        if (r.valid)
+        {
+            history_.push_back (r.freq);
+            if (history_.size() > 5) history_.erase (history_.begin());
+            auto sorted = history_;
+            std::sort (sorted.begin(), sorted.end());
+            const double freq = sorted[sorted.size() / 2];   // médiane : un saut d'octave isolé ne passe pas
+            const auto m = tuner::matchFrequency (freq, a4, tuningIdx);
+            if (m.valid)
+            {
+                if (match_.stringIndex != m.stringIndex || match_.midi != m.midi || ! hasMatch_) shownCents_ = m.cents;
+                else shownCents_ += 0.45 * (m.cents - shownCents_);
+                match_ = m;
+                freq_ = freq;
+                hasMatch_ = true;
+                lastSeenMs_ = nowMs;
+            }
+        }
+        else if (nowMs - lastSeenMs_ > 700.0)
+        {
+            history_.clear();
+            hasMatch_ = false;
+        }
+        tuning_ = tuningIdx;
+        a4_ = a4;
+        repaint();
+    }
+
+    // sert la note de la corde touchée (ou du dernier clic) à la note de référence
+    std::function<void (int midi)> onStringClicked;
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto r = getLocalBounds().toFloat();
+        skin_.fill (g, Token::StageBg, r, skin_.px (10.0f));
+        g.setColour (skin_.colour (Token::Border));
+        g.drawRoundedRectangle (r.reduced (0.5f), skin_.px (10.0f), 1.0f);
+
+        const bool sig = hasMatch_ && juce::Time::getMillisecondCounterHiRes() - lastSeenMs_ < 700.0;
+        const double cents = shownCents_;
+        const bool inTune = sig && std::fabs (cents) <= 5.0;
+        const auto accent = inTune ? kInTune : (sig && std::fabs (cents) > 25.0 ? skin_.colour (Token::Pink) : skin_.colour (Token::Accent));
+        const auto dim = skin_.colour (Token::TextDim2);
+
+        const float w = r.getWidth(), cx = r.getCentreX();
+        float y = r.getY() + skin_.px (14.0f);
+
+        // note
+        g.setColour (sig ? accent : dim);
+        g.setFont (skin_.font (78.0f, true));
+        const juce::String note = sig ? juce::String (tuner::noteName (match_.midi, french_)) : juce::String ("--");
+        g.drawText (note, juce::Rectangle<float> (cx - w * 0.3f, y, w * 0.6f, skin_.px (86.0f)), juce::Justification::centred);
+        y += skin_.px (88.0f);
+        g.setColour (skin_.colour (Token::Text));
+        g.setFont (skin_.font (17.0f, true));
+        juce::String line;
+        if (sig) line = juce::String (freq_, 2) + " Hz   " + (cents >= 0 ? "+" : "") + juce::String (cents, 1) + " " + tx_ ("dp.tu_cents");
+        else line = tx_ ("dp.tu_play");
+        g.drawText (line, juce::Rectangle<float> (0.0f, y, w, skin_.px (24.0f)), juce::Justification::centred);
+        y += skin_.px (36.0f);
+
+        // jauge de -50 à +50 cents
+        const float gx0 = r.getX() + skin_.px (60.0f), gx1 = r.getRight() - skin_.px (60.0f), gy = y + skin_.px (34.0f);
+        auto xOf = [&] (double c) { return gx0 + static_cast<float> ((std::clamp (c, -50.0, 50.0) + 50.0) / 100.0) * (gx1 - gx0); };
+        g.setColour (kInTune.withAlpha (0.22f));
+        g.fillRoundedRectangle (juce::Rectangle<float> (xOf (-5.0), gy - skin_.px (24.0f), xOf (5.0) - xOf (-5.0), skin_.px (48.0f)), skin_.px (4.0f));
+        g.setColour (dim);
+        for (int c = -50; c <= 50; c += 10)
+        {
+            const float tx = xOf (c);
+            const float len = c == 0 ? 20.0f : (c % 50 == 0 ? 14.0f : 9.0f);
+            g.drawLine (tx, gy - skin_.px (len), tx, gy + skin_.px (len), c == 0 ? 2.0f : 1.0f);
+            if (c % 25 == 0 || c == 0 || c == -50 || c == 50)
+            {
+                g.setFont (skin_.font (11.0f));
+                g.drawText (juce::String (c), juce::Rectangle<float> (tx - skin_.px (20.0f), gy + skin_.px (24.0f), skin_.px (40.0f), skin_.px (16.0f)), juce::Justification::centred);
+            }
+        }
+        g.drawText (tx_ ("dp.tu_flat"), juce::Rectangle<float> (r.getX() + skin_.px (6.0f), gy - skin_.px (10.0f), skin_.px (54.0f), skin_.px (20.0f)), juce::Justification::centred);
+        g.drawText (tx_ ("dp.tu_sharp"), juce::Rectangle<float> (r.getRight() - skin_.px (60.0f), gy - skin_.px (10.0f), skin_.px (54.0f), skin_.px (20.0f)), juce::Justification::centred);
+        if (sig)
+        {
+            const float nx = xOf (cents);
+            juce::Path needle;
+            needle.addTriangle (nx - skin_.px (9.0f), gy - skin_.px (30.0f), nx + skin_.px (9.0f), gy - skin_.px (30.0f), nx, gy - skin_.px (8.0f));
+            g.setColour (accent);
+            g.fillPath (needle);
+            g.drawLine (nx, gy - skin_.px (8.0f), nx, gy + skin_.px (16.0f), 3.0f);
+        }
+        y = gy + skin_.px (52.0f);
+
+        // cordes de l'accordage
+        strings_.clear();
+        const auto& list = tuner::tunings();
+        if (tuning_ > 0 && tuning_ < static_cast<int> (list.size()))
+        {
+            const auto& notes = list[static_cast<std::size_t> (tuning_)].notes;
+            const float d = skin_.px (54.0f), gap = skin_.px (14.0f);
+            const float total = static_cast<float> (notes.size()) * d + static_cast<float> (notes.size() - 1) * gap;
+            float x = cx - total * 0.5f;
+            for (std::size_t i = 0; i < notes.size(); ++i)
+            {
+                const juce::Rectangle<float> c (x, y, d, d);
+                strings_.push_back ({ c, notes[i] });
+                const bool hit = sig && match_.stringIndex == static_cast<int> (i);
+                g.setColour (hit ? accent.withAlpha (0.28f) : skin_.colour (Token::Pb));
+                g.fillEllipse (c);
+                g.setColour (hit ? accent : skin_.colour (Token::Border));
+                g.drawEllipse (c.reduced (0.5f), hit ? 3.0f : 1.0f);
+                g.setColour (hit ? accent : skin_.colour (Token::Text));
+                g.setFont (skin_.font (15.0f, true));
+                g.drawText (juce::String (tuner::noteName (notes[i], french_)), c, juce::Justification::centred);
+                x += d + gap;
+            }
+            y += d + skin_.px (10.0f);
+            g.setColour (dim);
+            g.setFont (skin_.font (11.0f));
+            g.drawText (tx_ ("dp.tu_click_string"), juce::Rectangle<float> (0.0f, y, w, skin_.px (16.0f)), juce::Justification::centred);
+        }
+
+        // niveau d'entrée
+        const float barY = r.getBottom() - skin_.px (20.0f);
+        const float bx0 = r.getX() + skin_.px (14.0f), bx1 = r.getRight() - skin_.px (14.0f);
+        g.setColour (skin_.colour (Token::Pb));
+        g.fillRoundedRectangle (bx0, barY, bx1 - bx0, skin_.px (6.0f), skin_.px (3.0f));
+        const float lv = std::clamp ((levelDb_ + 80.0f) / 80.0f, 0.0f, 1.0f);
+        g.setColour (levelDb_ < -62.0f ? dim : skin_.colour (Token::Accent));
+        g.fillRoundedRectangle (bx0, barY, (bx1 - bx0) * lv, skin_.px (6.0f), skin_.px (3.0f));
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        for (const auto& s : strings_)
+            if (s.bounds.contains (e.position) && onStringClicked) { onStringClicked (s.midi); return; }
+    }
+
+private:
+    struct StringRect { juce::Rectangle<float> bounds; int midi; };
+    const nova::Skin& skin_;
+    ParamHost& host_;
+    gen::GeneratorEngine& engine_;
+    std::function<juce::String (const char*)> tx_;
+    bool french_;
+    std::vector<double> history_;
+    std::vector<StringRect> strings_;
+    tuner::Match match_;
+    bool hasMatch_ = false;
+    double freq_ = 0.0, shownCents_ = 0.0, lastSeenMs_ = 0.0, a4_ = 440.0;
+    float levelDb_ = -120.0f;
+    int tuning_ = 0;
+};
+
+// Rangée de pastilles de temps du métronome.
+class BeatDisplay : public juce::Component
+{
+public:
+    BeatDisplay (const nova::Skin& s, ParamHost& host, gen::GeneratorEngine& engine) : skin_ (s), host_ (host), engine_ (engine) {}
+    void update()
+    {
+        const int beats = static_cast<int> (std::lround (host_.parameters().get (gen::metroBeats)));
+        const int cur = engine_.metronomeBeat();
+        const auto clicks = engine_.metronomeClicks();
+        if (beats != beats_ || cur != cur_ || clicks != clicks_) { beats_ = beats; cur_ = cur; clicks_ = clicks; flash_ = 1.0f; }
+        else if (flash_ > 0.0f) flash_ = std::max (0.0f, flash_ - 0.12f);
+        repaint();
+    }
+    void paint (juce::Graphics& g) override
+    {
+        const auto r = getLocalBounds().toFloat();
+        skin_.fill (g, Token::StageBg, r, skin_.px (10.0f));
+        g.setColour (skin_.colour (Token::Border));
+        g.drawRoundedRectangle (r.reduced (0.5f), skin_.px (10.0f), 1.0f);
+        const int n = std::max (1, beats_);
+        const float d = std::min (skin_.px (64.0f), (r.getWidth() - skin_.px (40.0f)) / static_cast<float> (n) - skin_.px (10.0f));
+        const float gap = skin_.px (10.0f);
+        float x = r.getCentreX() - (static_cast<float> (n) * d + static_cast<float> (n - 1) * gap) * 0.5f;
+        const float y = r.getCentreY() - d * 0.5f;
+        for (int i = 0; i < n; ++i)
+        {
+            const juce::Rectangle<float> c (x, y, d, d);
+            const bool now = i == cur_;
+            const auto col = i == 0 ? skin_.colour (Token::Pink) : skin_.colour (Token::Accent);
+            g.setColour (now ? col.withAlpha (0.25f + 0.55f * flash_) : skin_.colour (Token::Pb));
+            g.fillEllipse (c);
+            g.setColour (now ? col : skin_.colour (Token::Border));
+            g.drawEllipse (c.reduced (0.5f), now ? 3.0f : 1.0f);
+            g.setColour (now ? col : skin_.colour (Token::TextDim2));
+            g.setFont (skin_.font (16.0f, true));
+            g.drawText (juce::String (i + 1), c, juce::Justification::centred);
+            x += d + gap;
+        }
+    }
+private:
+    const nova::Skin& skin_;
+    ParamHost& host_;
+    gen::GeneratorEngine& engine_;
+    int beats_ = 4, cur_ = -1;
+    std::uint32_t clicks_ = 0;
+    float flash_ = 0.0f;
+};
+} // namespace
+
+class NovaDiapasonEditor::ToolsView : public juce::Component
+{
+public:
+    ToolsView (const nova::Skin& s, ParamHost& host, gen::GeneratorEngine& engine, std::function<juce::String (const char*)> tx)
+        : skin_ (s), host_ (host), engine_ (engine), tx_ (std::move (tx)), french_ (tx_ ("dp.is_french") == "1")
+    {
+        tabTuner_ = pill();
+        tabTuner_->setText (tx_ ("dp.tab_tuner"));
+        tabTuner_->onClick = [this] { setTab (0); };
+        tabMetro_ = pill();
+        tabMetro_->setText (tx_ ("dp.tab_metronome"));
+        tabMetro_->onClick = [this] { setTab (1); };
+
+        // ---- accordeur
+        tuningPill_ = pill();
+        tuningPill_->onClick = [this] { showTunings(); };
+        a4Pill_ = pill();
+        a4Pill_->bindValue (host_, gen::tunerA4, tx_ ("dp.tu_a4"));
+        display_ = std::make_unique<TunerDisplay> (skin_, host_, engine_, tx_, french_);
+        addAndMakeVisible (*display_);
+        display_->onStringClicked = [this] (int midi)
+        {
+            const bool same = static_cast<int> (std::lround (host_.parameters().get (gen::tunerNote))) == midi && host_.parameters().get (gen::tunerTone) >= 0.5;
+            nova::setParam (host_, gen::tunerNote, midi);
+            nova::setParam (host_, gen::tunerCents, 0.0);
+            nova::setParam (host_, gen::tunerTone, same ? 0.0 : 1.0);
+        };
+        tonePill_ = pill();
+        tonePill_->bindToggle (host_, gen::tunerTone, tx_ ("dp.tu_tone"));
+        noteMinus_ = pill (nova::Pill::Look::Small);
+        notePlus_ = pill (nova::Pill::Look::Small);
+        noteMinus_->setText ("-");
+        notePlus_->setText ("+");
+        noteMinus_->setFontSize (20.0f);
+        notePlus_->setFontSize (20.0f);
+        noteMinus_->onClick = [this] { stepNote (-1); };
+        notePlus_->onClick = [this] { stepNote (1); };
+        noteLabel_ = std::make_unique<nova::Text> (skin_, Token::Text, 14.0f, true);
+        addAndMakeVisible (*noteLabel_);
+        centsPill_ = pill();
+        centsPill_->bindValue (host_, gen::tunerCents, tx_ ("dp.tu_offset"));
+        levelPill_ = pill();
+        levelPill_->bindValue (host_, gen::tunerLevel, tx_ ("dp.tu_level"));
+        tunerHint_ = std::make_unique<nova::Text> (skin_, Token::TextDim2, 11.0f);
+        tunerHint_->setText (tx_ ("dp.tu_hint"));
+        addAndMakeVisible (*tunerHint_);
+
+        // ---- métronome
+        onPill_ = pill();
+        onPill_->bindToggle (host_, gen::metroOn, tx_ ("dp.me_on"));
+        syncPill_ = pill();
+        syncPill_->bindChoice (host_, gen::metroSync, tx_ ("dp.me_sync"), { tx_ ("dp.me_internal"), tx_ ("dp.me_host") });
+        tempoPill_ = pill();
+        tempoPill_->bindValue (host_, gen::metroTempo, tx_ ("dp.me_tempo"));
+        tapPill_ = pill();
+        tapPill_->setText (tx_ ("dp.me_tap"));
+        tapPill_->onClick = [this] { tap(); };
+        beatsPill_ = pill();
+        beatsPill_->bindValue (host_, gen::metroBeats, tx_ ("dp.me_beats"));
+        unitPill_ = pill();
+        unitPill_->bindChoice (host_, gen::metroUnit, tx_ ("dp.me_unit"), { "1/4", "1/8", "1/16" });
+        subPill_ = pill();
+        subPill_->bindChoice (host_, gen::metroSub, tx_ ("dp.me_sub"), { "1", "2", "3", "4" });
+        soundPill_ = pill();
+        soundPill_->bindChoice (host_, gen::metroSound, tx_ ("dp.me_sound"), { tx_ ("dp.me_s0"), tx_ ("dp.me_s1"), tx_ ("dp.me_s2"), tx_ ("dp.me_s3") });
+        mLevelPill_ = pill();
+        mLevelPill_->bindValue (host_, gen::metroLevel, tx_ ("dp.me_level"));
+        accentPill_ = pill();
+        accentPill_->bindValue (host_, gen::metroAccent, tx_ ("dp.me_accent"));
+        subLevelPill_ = pill();
+        subLevelPill_->bindValue (host_, gen::metroSubLevel, tx_ ("dp.me_sublevel"));
+        beats_ = std::make_unique<BeatDisplay> (skin_, host_, engine_);
+        addAndMakeVisible (*beats_);
+        metroHint_ = std::make_unique<nova::Text> (skin_, Token::TextDim2, 11.0f);
+        metroHint_->setText (tx_ ("dp.me_hint"));
+        addAndMakeVisible (*metroHint_);
+        setTab (0);
+    }
+
+    // 30 Hz, page visible
+    void update()
+    {
+        for (auto* p : { tuningPill_, a4Pill_, tonePill_, centsPill_, levelPill_, onPill_, syncPill_, tempoPill_, beatsPill_, unitPill_, subPill_, soundPill_, mLevelPill_, accentPill_, subLevelPill_ })
+            p->refresh();
+        if (tab_ == 0)
+        {
+            const int idx = static_cast<int> (std::lround (host_.parameters().get (gen::tunerPreset)));
+            if (idx != shownTuning_) { shownTuning_ = idx; tuningPill_->setText (tx_ ("dp.tu_tuning") + "  " + tuningName (idx)); }
+            const int note = static_cast<int> (std::lround (host_.parameters().get (gen::tunerNote)));
+            const double hz = tuner::noteFrequency (note + host_.parameters().get (gen::tunerCents) * 0.01, host_.parameters().get (gen::tunerA4));
+            noteLabel_->setText (juce::String (tuner::noteName (note, french_)) + "   " + juce::String (hz, 2) + " Hz");
+            if (++tick_ % 2 == 0) display_->update();
+        }
+        else beats_->update();
+    }
+
+    void resized() override
+    {
+        const int h = skin_.ipx (32.0f), g = skin_.ipx (8.0f);
+        auto r = getLocalBounds();
+        {
+            auto line = r.removeFromTop (h);
+            tabTuner_->setBounds (line.removeFromLeft (skin_.ipx (190.0f)));
+            line.removeFromLeft (g);
+            tabMetro_->setBounds (line.removeFromLeft (skin_.ipx (190.0f)));
+        }
+        r.removeFromTop (skin_.ipx (14.0f));
+        // accordeur
+        {
+            auto line = r.removeFromTop (h);
+            a4Pill_->setBounds (line.removeFromRight (skin_.ipx (220.0f)));
+            line.removeFromRight (g);
+            tuningPill_->setBounds (line);
+        }
+        r.removeFromTop (g);
+        auto hintArea = r.removeFromBottom (skin_.ipx (30.0f));
+        tunerHint_->setBounds (hintArea);
+        metroHint_->setBounds (hintArea);
+        {
+            auto line = r.removeFromBottom (h);
+            tonePill_->setBounds (line.removeFromLeft (skin_.ipx (180.0f)));
+            line.removeFromLeft (g);
+            noteMinus_->setBounds (line.removeFromLeft (skin_.ipx (40.0f)));
+            line.removeFromLeft (g);
+            noteLabel_->setBounds (line.removeFromLeft (skin_.ipx (170.0f)).withTrimmedTop (skin_.ipx (8.0f)));
+            notePlus_->setBounds (line.removeFromLeft (skin_.ipx (40.0f)));
+            line.removeFromLeft (g * 2);
+            centsPill_->setBounds (line.removeFromLeft (skin_.ipx (200.0f)));
+            line.removeFromLeft (g);
+            levelPill_->setBounds (line.removeFromLeft (skin_.ipx (200.0f)));
+        }
+        r.removeFromBottom (g);
+        display_->setBounds (r);
+
+        // métronome : la même zone, autre contenu
+        auto m = getLocalBounds();
+        m.removeFromTop (h + skin_.ipx (14.0f));
+        auto row = [&] (std::initializer_list<std::pair<nova::Pill*, float>> items)
+        {
+            auto line = m.removeFromTop (h);
+            for (const auto& it : items) { it.first->setBounds (line.removeFromLeft (skin_.ipx (it.second))); line.removeFromLeft (g); }
+            m.removeFromTop (g);
+        };
+        row ({ { onPill_, 150.0f }, { syncPill_, 250.0f }, { tempoPill_, 230.0f }, { tapPill_, 120.0f } });
+        row ({ { beatsPill_, 190.0f }, { unitPill_, 190.0f }, { subPill_, 230.0f }, { soundPill_, 230.0f } });
+        row ({ { mLevelPill_, 210.0f }, { accentPill_, 210.0f }, { subLevelPill_, 290.0f } });
+        m.removeFromTop (g);
+        m.removeFromBottom (skin_.ipx (30.0f));
+        beats_->setBounds (m.removeFromTop (skin_.ipx (190.0f)));
+    }
+
+private:
+    using Token = neptune::core::theme::Token;
+
+    nova::Pill* pill (nova::Pill::Look look = nova::Pill::Look::Pill)
+    {
+        pills_.push_back (std::make_unique<nova::Pill> (skin_, look));
+        addAndMakeVisible (*pills_.back());
+        return pills_.back().get();
+    }
+
+    void setTab (int t)
+    {
+        tab_ = t;
+        tabTuner_->setOn (t == 0);
+        tabMetro_->setOn (t == 1);
+        for (auto* c : std::initializer_list<juce::Component*> { tuningPill_, a4Pill_, display_.get(), tonePill_, noteMinus_, notePlus_, noteLabel_.get(), centsPill_, levelPill_, tunerHint_.get() }) c->setVisible (t == 0);
+        for (auto* c : std::initializer_list<juce::Component*> { onPill_, syncPill_, tempoPill_, tapPill_, beatsPill_, unitPill_, subPill_, soundPill_, mLevelPill_, accentPill_, subLevelPill_, beats_.get(), metroHint_.get() }) c->setVisible (t == 1);
+        shownTuning_ = -1;
+        resized();
+    }
+
+    juce::String tuningName (int idx) const
+    {
+        const auto& list = tuner::tunings();
+        if (idx < 0 || idx >= static_cast<int> (list.size())) return {};
+        const auto& t = list[static_cast<std::size_t> (idx)];
+        return juce::String::fromUTF8 (french_ ? t.fr : t.en);
+    }
+
+    void showTunings()
+    {
+        juce::PopupMenu menu;
+        menu.setLookAndFeel (&getLookAndFeel());
+        const auto& list = tuner::tunings();
+        std::string lastFamily;
+        for (std::size_t i = 0; i < list.size(); ++i)
+        {
+            const std::string en = list[i].en;
+            const auto cut = en.find (" - ");
+            const std::string family = cut == std::string::npos ? en.substr (0, en.find (' ')) : en.substr (0, cut);
+            if (i > 0 && family != lastFamily) menu.addSeparator();
+            lastFamily = family;
+            menu.addItem (static_cast<int> (i) + 1, tuningName (static_cast<int> (i)), true, static_cast<int> (std::lround (host_.parameters().get (gen::tunerPreset))) == static_cast<int> (i));
+        }
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (tuningPill_), [safe = juce::Component::SafePointer<ToolsView> (this)] (int chosen)
+        {
+            if (chosen > 0 && safe != nullptr) nova::setParam (safe->host_, gen::tunerPreset, chosen - 1);
+        });
+    }
+
+    void stepNote (int d)
+    {
+        const int note = static_cast<int> (std::lround (host_.parameters().get (gen::tunerNote)));
+        nova::setParam (host_, gen::tunerNote, std::clamp (note + d, 0, 127));
+    }
+
+    void tap()
+    {
+        const double now = juce::Time::getMillisecondCounterHiRes();
+        if (! taps_.empty() && now - taps_.back() > 2500.0) taps_.clear();
+        taps_.push_back (now);
+        if (taps_.size() > 8) taps_.erase (taps_.begin());
+        if (taps_.size() >= 2)
+        {
+            const double avg = (taps_.back() - taps_.front()) / static_cast<double> (taps_.size() - 1);
+            nova::setParam (host_, gen::metroTempo, std::clamp (60000.0 / avg, 20.0, 300.0));
+        }
+    }
+
+    const nova::Skin& skin_;
+    ParamHost& host_;
+    gen::GeneratorEngine& engine_;
+    std::function<juce::String (const char*)> tx_;
+    bool french_;
+    std::vector<std::unique_ptr<nova::Pill>> pills_;
+    nova::Pill *tabTuner_ = nullptr, *tabMetro_ = nullptr;
+    nova::Pill *tuningPill_ = nullptr, *a4Pill_ = nullptr, *tonePill_ = nullptr, *noteMinus_ = nullptr, *notePlus_ = nullptr, *centsPill_ = nullptr, *levelPill_ = nullptr;
+    nova::Pill *onPill_ = nullptr, *syncPill_ = nullptr, *tempoPill_ = nullptr, *tapPill_ = nullptr, *beatsPill_ = nullptr, *unitPill_ = nullptr, *subPill_ = nullptr, *soundPill_ = nullptr,
+               *mLevelPill_ = nullptr, *accentPill_ = nullptr, *subLevelPill_ = nullptr;
+    std::unique_ptr<TunerDisplay> display_;
+    std::unique_ptr<BeatDisplay> beats_;
+    std::unique_ptr<nova::Text> noteLabel_, tunerHint_, metroHint_;
+    std::vector<double> taps_;
+    int tab_ = 0, shownTuning_ = -1, tick_ = 0;
+};
+
+void NovaDiapasonEditor::buildToolsPage()
+{
+    toolsPanel_ = add<nova::Panel> (3, skin());
+    toolsPanel_->setTitle (tx ("dp.tools_title"));
+    toolsView_ = add<ToolsView> (3, skin(), host(), engine_, [this] (const char* key) { return tx (key); });
+}
+
 void NovaDiapasonEditor::assignKnobs()
 {
     const int sig = choiceValue (gen::signal), md = choiceValue (gen::mode);
@@ -819,6 +1294,10 @@ void NovaDiapasonEditor::layout()
     signalHint_->setBounds (R (220, 462, 910, 52));
     placeColumns();
 
+    // ---- page OUTILS
+    toolsPanel_->setBounds (R (204, 72, 942, 638));
+    toolsView_->setBounds (R (220, 108, 910, 584));
+
     // ---- page MIDI
     midiPanel_->setBounds (R (204, 72, 942, 638));
     midiView_->setBounds (R (220, 108, 910, 584));
@@ -865,6 +1344,7 @@ void NovaDiapasonEditor::pageChanged() { assignKnobs(); }
 void NovaDiapasonEditor::tick()
 {
     outMeter_->update (dbOf (engine_.peakLeft()), dbOf (engine_.peakRight()));
+    if (currentPage() == 3) toolsView_->update();
     if (currentPage() == 0)
     {
         view_->update();
