@@ -2583,6 +2583,15 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
 
     engine_.process (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), buffer.getNumSamples());
     midi.clear();   // Neptune n'a pas de sortie MIDI « de passage » : seuls les messages envoyés à la main partent vers l'hôte (addOutboundEventsToQueue)
+#ifdef NEPTUNE_STANDALONE_APP
+    // Application autonome : pas d'hôte CLAP (addOutboundEventsToQueue n'est jamais appelée) ; les messages envoyés à la main partent par la sortie MIDI choisie dans les options
+    for (int i = 0; i < numHostMidi_; ++i)
+    {
+        const auto& p = hostMidi_[static_cast<std::size_t> (i)];
+        if (p.size > 0) midi.addEvent (juce::MidiMessage (p.bytes.data(), static_cast<int> (p.size)), 0);
+    }
+    numHostMidi_ = 0;
+#endif
 }
 
 bool NeptuneProcessor::postMidi (const std::vector<std::uint8_t>& bytes, int targets)
