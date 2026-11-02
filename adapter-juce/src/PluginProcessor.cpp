@@ -607,7 +607,7 @@ std::vector<NeptuneProcessor::SceneCell> NeptuneProcessor::sceneCells (int bank,
     const juce::ScopedLock lock (instrumentLock_);
     for (std::size_t i = 0; i < out.size(); ++i)
         if (const auto* m = mixer_.combinations.general (bank, static_cast<int> (i)))
-            out[i] = { true, m->name, m->note };
+            out[i] = { true, m->name, m->note, m->note2 };
     return out;
 }
 
@@ -617,10 +617,10 @@ neptune::core::combi::Result NeptuneProcessor::uiCombiScene (int piston)
     return combiExecute ([this, piston] (combi::Library& lib) { return combi_.general (lib, params_, piston); });
 }
 
-bool NeptuneProcessor::uiCombiSetText (int key, std::string name, std::string note)
+bool NeptuneProcessor::uiCombiSetText (int key, std::string name, std::string note, std::string note2)
 {
     auto lib = combinations();
-    if (! neptune::core::combi::setGeneralText (lib, key, std::move (name), std::move (note))) return false;
+    if (! neptune::core::combi::setGeneralText (lib, key, std::move (name), std::move (note), std::move (note2))) return false;
     uiEditCombinations (std::move (lib), "Scene: text");
     return true;
 }

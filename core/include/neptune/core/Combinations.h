@@ -75,8 +75,8 @@ struct Memory
     std::string name;
     std::vector<std::pair<ParamId, double>> values;      // valeurs réelles (les paramètres d'insert : identifiants composés, voir insertParam)
     std::map<int, std::string> insertTypes;               // pour chaque emplacement dont la mémoire porte des valeurs : le module qui y était (insertSlotKey) ; au rappel, un autre module ne reçoit rien
-    std::string note;                                    // texte en plus du nom, montré dans la grille de scènes de la Façade (nom de l'élève, morceau...)
-    bool operator== (const Memory& o) const noexcept { return used == o.used && name == o.name && values == o.values && insertTypes == o.insertTypes && note == o.note; }
+    std::string note, note2;                             // deux lignes de texte sous le nom, montrées dans la grille de scènes de la Façade (nom de l'élève, morceau...)
+    bool operator== (const Memory& o) const noexcept { return used == o.used && name == o.name && values == o.values && insertTypes == o.insertTypes && note == o.note && note2 == o.note2; }
 };
 
 // Modèle de capture : ce qu'un enregistrement (Set + piston) mémorise. Les mémoires déjà enregistrées gardent leurs propres valeurs : le modèle ne sert qu'à enregistrer
@@ -120,7 +120,7 @@ bool sequenceRemove (Library&, int index);
 bool sequenceMove (Library&, int index, int delta);               // échange le pas avec son voisin (delta -1 ou +1) ; faux hors de la liste
 bool eraseGeneral (Library&, int generalKeyValue);                // efface la mémoire (les pas de la séquence qui la visent restent, ils sont « vides »)
 bool renameGeneral (Library&, int generalKeyValue, std::string name);
-bool setGeneralText (Library&, int generalKeyValue, std::string name, std::string note);   // nom et texte en plus ; la mémoire doit exister   // la mémoire doit exister ; nom nettoyé et tronqué
+bool setGeneralText (Library&, int generalKeyValue, std::string name, std::string note, std::string note2 = {});   // nom et deux lignes de texte en plus ; la mémoire doit exister   // la mémoire doit exister ; nom nettoyé et tronqué
 bool eraseDivisional (Library&, int divisionalKeyValue);                // les mêmes gestes pour les divisionnels (clef = divisionalKey)
 bool renameDivisional (Library&, int divisionalKeyValue, std::string name);
 

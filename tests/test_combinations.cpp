@@ -932,7 +932,8 @@ TEST_CASE ("scenes: a scene has a text besides its name, kept by a new recording
     set.set (router::switchParam (0), 1.0);
     c.arm (true);
     c.general (lib, set, 3);
-    CHECK (setGeneralText (lib, generalKey (0, 3), "  Chopin  ", "  Élève : Marie  "));
+    CHECK (setGeneralText (lib, generalKey (0, 3), "  Chopin  ", "  Élève : Marie  ", " Valse op. 64 "));
+    CHECK (lib.general (0, 3)->note2 == "Valse op. 64");
     CHECK (lib.general (0, 3)->name == "Chopin");
     CHECK (lib.general (0, 3)->note == "Élève : Marie");
     CHECK_FALSE (setGeneralText (lib, generalKey (0, 4), "x", "y"));   // une scène vide n'a pas de texte
@@ -944,6 +945,7 @@ TEST_CASE ("scenes: a scene has a text besides its name, kept by a new recording
 
     const auto back = fromJson (toJson (lib));
     CHECK (back.general (0, 3)->note == "Élève : Marie");
+    CHECK (back.general (0, 3)->note2 == "Valse op. 64");
     CHECK (back == lib);
 
     CHECK (setGeneralText (lib, generalKey (0, 3), "A", std::string (500, 'x')));

@@ -833,7 +833,7 @@ TEST_CASE ("facade: a scene grid keeps its columns, rows, colour, temperament an
 #include <fstream>
 #include <sstream>
 
-TEST_CASE ("facade: the Concert example (scene grid, volumes, mutes, stepper) loads as written")
+TEST_CASE ("facade: the Concert example (scene grid, four volume knobs, general mute, stepper) loads as written")
 {
     using namespace neptune::core::facade;
     std::ifstream in (std::string (NEPTUNE_SOURCE_DIR) + "/docs/exemple-facade/concert-scenes/facade.json");
@@ -846,19 +846,19 @@ TEST_CASE ("facade: the Concert example (scene grid, volumes, mutes, stepper) lo
     REQUIRE (at != std::string::npos);
     const auto open = doc.find ('{', at);
     const auto f = fromJson (doc.substr (open, doc.rfind ('}') - open));
-    int grids = 0, sliders = 0, buttons = 0, actions = 0;
+    int grids = 0, knobs = 0, buttons = 0, actions = 0;
     for (const auto& w : f.widgets)
     {
         grids += w.type == WidgetType::SceneGrid;
-        sliders += w.type == WidgetType::Slider;
+        knobs += w.type == WidgetType::Knob;
         buttons += w.type == WidgetType::Button;
         actions += w.type == WidgetType::Action;
     }
     CHECK (grids == 1);
-    CHECK (sliders == 5);     // Master et pistes 1 à 4
-    CHECK (buttons == 6);     // cinq muets et le muet général
+    CHECK (knobs == 4);       // Master et pistes 1 à 3
+    CHECK (buttons == 1);     // le muet général
     CHECK (actions == 3);     // précédent, suivant, annulation
-    CHECK (f.widgets.size() == 17);
+    CHECK (f.widgets.size() == 11);
     for (const auto& w : f.widgets)   // aucun widget n'a été rogné ni déplacé par les bornes
         CHECK (w.x + w.w <= canvasWidth);
 }

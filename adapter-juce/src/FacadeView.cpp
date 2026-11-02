@@ -1419,16 +1419,17 @@ private:
                     g.drawText (juce::String (static_cast<int> (i) + 1), inner.removeFromTop (c.getHeight() * 0.2f), juce::Justification::topLeft);
                     if (! used) continue;
                     const auto& sc = scenes[i];
-                    auto noteArea = sc.note.empty() ? juce::Rectangle<float>() : inner.removeFromBottom (inner.getHeight() * 0.42f);
+                    // le nom en haut, puis une ou deux lignes de texte dessous (le nom reste centré dans la place qui lui reste)
+                    const int lines = (sc.note.empty() ? 0 : 1) + (sc.note2.empty() ? 0 : 1);
+                    const float lineH = std::max (12.0f, inner.getHeight() * 0.2f);
+                    auto notesArea = lines > 0 ? inner.removeFromBottom (lineH * static_cast<float> (lines)) : juce::Rectangle<float>();
                     g.setColour (ink);
-                    g.setFont (juce::FontOptions (juce::jlimit (11.0f, 26.0f, c.getHeight() * 0.24f), juce::Font::bold));
-                    g.drawFittedText (utf8 (sc.name.empty() ? std::string() : sc.name), inner.toNearestInt(), juce::Justification::centred, 2, 0.7f);
-                    if (! sc.note.empty())
-                    {
-                        g.setColour (ink.withAlpha (0.85f));
-                        g.setFont (juce::FontOptions (juce::jlimit (10.0f, 18.0f, c.getHeight() * 0.16f)));
-                        g.drawFittedText (utf8 (sc.note), noteArea.toNearestInt(), juce::Justification::centred, 2, 0.7f);
-                    }
+                    g.setFont (juce::FontOptions (juce::jlimit (11.0f, 26.0f, c.getHeight() * (lines > 0 ? 0.2f : 0.24f)), juce::Font::bold));
+                    g.drawFittedText (utf8 (sc.name), inner.toNearestInt(), lines > 0 ? juce::Justification::centredTop : juce::Justification::centred, 2, 0.7f);
+                    g.setColour (ink.withAlpha (0.85f));
+                    g.setFont (juce::FontOptions (juce::jlimit (10.0f, 17.0f, lineH * 0.72f)));
+                    for (const auto* line : { &sc.note, &sc.note2 })
+                        if (! line->empty()) g.drawFittedText (utf8 (*line), notesArea.removeFromTop (lineH).toNearestInt(), juce::Justification::centred, 1, 0.6f);
                 }
                 break;
             }
@@ -3645,12 +3646,13 @@ void FacadeView::editSceneText (int piston)
     auto* w = new juce::AlertWindow (text ("facade.grid_text_title") + " " + juce::String (piston + 1), text ("facade.grid_text_prompt"), juce::MessageBoxIconType::NoIcon, this);
     w->addTextEditor ("name", utf8 (cells[static_cast<std::size_t> (piston)].name), text ("facade.grid_name"));
     w->addTextEditor ("note", utf8 (cells[static_cast<std::size_t> (piston)].note), text ("facade.grid_note"));
+    w->addTextEditor ("note2", utf8 (cells[static_cast<std::size_t> (piston)].note2), text ("facade.grid_note2"));
     w->addButton (text ("grp.ok"), 1, juce::KeyPress (juce::KeyPress::returnKey));
     w->addButton (text ("mix.cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
     w->enterModalState (true, juce::ModalCallbackFunction::create ([w, key, safe = juce::Component::SafePointer<FacadeView> (this)] (int result)
     {
         if (result != 1 || safe == nullptr) return;
-        safe->processor_.uiCombiSetText (key, w->getTextEditorContents ("name").toStdString(), w->getTextEditorContents ("note").toStdString());
+        safe->processor_.uiCombiSetText (key, w->getTextEditorContents ("name").toStdString(), w->getTextEditorContents ("note").toStdString(), w->getTextEditorContents ("note2").toStdString());
     }), true);
 }
 

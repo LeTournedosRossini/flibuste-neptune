@@ -231,10 +231,10 @@ public:
     };
     CombiStatus combiStatus() const;
     // Les scènes d'une banque pour la grille de la Façade (sans copier toute la bibliothèque) : les `count` premières, nom et texte compris.
-    struct SceneCell { bool used = false; std::string name, note; };
+    struct SceneCell { bool used = false; std::string name, note, note2; };
     std::vector<SceneCell> sceneCells (int bank, int count) const;
     neptune::core::combi::Result uiCombiScene (int piston);                                  // rappelle la scène `piston` de la banque courante (l'enregistre si Set est armé)
-    bool uiCombiSetText (int generalKeyValue, std::string name, std::string note);          // nom et texte en plus d'une scène existante (annulable)
+    bool uiCombiSetText (int generalKeyValue, std::string name, std::string note, std::string note2);   // nom et deux lignes de texte d'une scène existante (annulable)
     // Dernier rappel qui a ignoré des inserts (emplacements en insertSlotKey) ; `serial` change à chaque fois (fil de message seulement).
     struct SceneNotice { std::uint32_t serial = 0; std::vector<int> skippedSlots; };
     const SceneNotice& sceneNotice() const noexcept { return sceneNotice_; }
