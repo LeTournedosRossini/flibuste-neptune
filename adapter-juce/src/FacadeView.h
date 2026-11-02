@@ -18,6 +18,8 @@
 class FacadeView : public juce::Component, public juce::FileDragAndDropTarget, private juce::Timer
 {
 public:
+    bool isCollapsed() const { return ! editMode_ && sideHidden_; }   // barre repliée : l'éditeur donne alors toute la largeur à la Façade
+    std::function<void()> onCollapsedChanged;
     FacadeView (NeptuneProcessor&, const neptune::core::theme::Palette&, const neptune::core::i18n::Translator&,
                 neptune::core::theme::KnobStyle, NeptuneKnob::OpenModal);
     ~FacadeView() override;
@@ -116,6 +118,7 @@ private:
     juce::TextButton linkButton_, textButton_, duplicateButton_, deleteButton_, captureButton_, alignButton_, helpButton_, sameSizeButton_, layoutButton_, zoneAlignButton_, zoneGapButton_, kbChannelButton_, kbFirstButton_, kbHoldButton_, kbWheelsButton_, kbVelocityButton_;
     std::unique_ptr<Canvas> canvas_;
     std::string liveMergeKey_;                 // non vide pendant un réglage en direct : une seule entrée d'annulation pour tout le geste
+    bool lastCollapsed_ = false;
     bool sideHidden_ = false;                  // jeu : la barre d'onglets (à gauche) est repliée, la Façade prend toute la place
     juce::Rectangle<int> toolbarRect_;   // conteneur arrondi des rangées d'onglets et de boutons
     std::unique_ptr<Picker> picker_;
