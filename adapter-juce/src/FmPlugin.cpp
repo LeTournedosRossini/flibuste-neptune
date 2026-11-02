@@ -387,6 +387,7 @@ void NovaFmPluginEditor::buildContent()
     const auto& def = theme::definition (id);
     NovaFmEditor::Options opt;
     opt.brand = true;
+    opt.stretchAuto = true;   // fenêtre étirable en largeur
     opt.noBypass = true;
     opt.moduleName = "fm6op";
     opt.sampleRate = [&p] { return p.getSampleRate() > 0.0 ? p.getSampleRate() : 48000.0; };

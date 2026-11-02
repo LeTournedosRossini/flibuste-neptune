@@ -390,6 +390,7 @@ void NovaSynthPluginEditor::buildContent()
     const auto& def = theme::definition (id);
     NovaSynthEditor::Options opt;
     opt.brand = true;
+    opt.stretchAuto = true;   // fenêtre étirable en largeur
     opt.noBypass = true;
     opt.moduleName = "analogsynth";
     opt.sampleRate = [&p] { return p.getSampleRate() > 0.0 ? p.getSampleRate() : 48000.0; };
