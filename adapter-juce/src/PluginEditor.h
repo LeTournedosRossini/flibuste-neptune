@@ -20,7 +20,7 @@
 #include "neptune/core/Theme.h"
 
 // Fenêtre de sonde : paramètres en direct, et ce que l'hôte envoie (transport, notes CLAP, expressions, modulation).
-class NeptuneEditor : public juce::AudioProcessorEditor, private juce::Timer
+class NeptuneEditor : public juce::Component, private juce::Timer
 {
 public:
     explicit NeptuneEditor (NeptuneProcessor&);
@@ -29,6 +29,11 @@ public:
     void resized() override;
     void paintContent (juce::Graphics&); // dessiné dans la racine mise à l'échelle
     bool keyPressed (const juce::KeyPress&) override; // Ctrl/Cmd+Z : annuler ; Ctrl/Cmd+Maj+Z ou Ctrl+Y : rétablir
+    // Thème, contraste ou langue changés : le cadre (NeptunePluginEditor) reconstruit l'éditeur avec la nouvelle palette ; la page courante est conservée.
+    std::function<void()> onLookChanged;
+    int viewIndex() const noexcept { return showMixer_ ? 0 : showProbe_ ? 5 : showFacade_ ? 2 : showMod_ ? 3 : showRouter_ ? 4 : 1; }
+    void restoreView (int index) { setView (index == 0, index == 5, index == 2, index == 3, index == 4); }
+    static juce::Point<int> initialSize();
 
 private:
     void timerCallback() override;
@@ -38,6 +43,8 @@ private:
     juce::TextButton controlButton_;    // contrôleurs MIDI (CC) : interrupteur et assignations par défaut
     juce::TextButton oscButton_;        // serveur OSC : interrupteur, réseau local, port
     juce::TextButton midiSendButton_;   // fenêtre d'envoi de messages MIDI à la main (CC, notes, SysEx...)
+    juce::TextButton lookButton_;       // thème, contraste, langue
+    void showLookMenu();
     std::unique_ptr<MidiMessagePanel> midiSendPanel_;
     juce::TextButton combiButton_;      // écran des combinaisons d'orgue : généraux de la banque et séquence
     std::unique_ptr<CombinationsPanel> combiPanel_;
@@ -154,4 +161,20 @@ private:
     bool recoveryShown_ = false;
     void updateRecoveryBanner();
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NeptuneEditor)
+};
+
+// Le cadre que l'hôte reçoit : redimensionnable, il contient l'éditeur de Neptune et le reconstruit quand thème, contraste ou langue changent
+// (toutes les vues gardent leur propre copie de la palette ; reconstruire est plus sûr que de les mettre à jour une à une).
+class NeptunePluginEditor : public juce::AudioProcessorEditor
+{
+public:
+    explicit NeptunePluginEditor (NeptuneProcessor&);
+    void resized() override { if (content_ != nullptr) content_->setBounds (getLocalBounds()); }
+    void paint (juce::Graphics& g) override { g.fillAll (juce::Colours::black); }
+    bool keyPressed (const juce::KeyPress& k) override { return content_ != nullptr && content_->keyPressed (k); }
+
+private:
+    void build (int view);
+    NeptuneProcessor& processor_;
+    std::unique_ptr<NeptuneEditor> content_;
 };

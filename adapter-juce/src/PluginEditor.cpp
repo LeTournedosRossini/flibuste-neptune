@@ -65,7 +65,7 @@ juce::Colour NeptuneEditor::colour (Token t) const
 }
 
 NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
-    : juce::AudioProcessorEditor (p), processor_ (p), tr_ (p.settings().language), palette_ (makePalette (p.settings()))
+    : processor_ (p), tr_ (p.settings().language), palette_ (makePalette (p.settings()))
 {
     setWantsKeyboardFocus (true);
 
@@ -89,6 +89,10 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     midiSendButton_.setTooltip (text ("midi.send_title"));
     midiSendButton_.onClick = [this] { openMidiSend(); };
     addAndMakeVisible (midiSendButton_);
+    lookButton_.setButtonText (text ("look.button"));
+    lookButton_.setTooltip (text ("look.tip"));
+    lookButton_.onClick = [this] { showLookMenu(); };
+    addAndMakeVisible (lookButton_);
     voiceCountButton_.setTooltip (text ("voices.global_limit"));
     voiceCountButton_.onClick = [this]
     {
@@ -243,18 +247,79 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     novaLook_.setPopupScale (1.25f);   // menus de la barre et du mixeur : plus lisibles
     root_.setLookAndFeel (&novaLook_);
     root_.adopt (*this); // tout le contenu dans la racine mise à l'échelle
-    setResizable (true, true);
-    setResizeLimits (420, 300, 3000, 2000); // en dessous de la taille de conception, l'interface est réduite (voir resized)
+    const auto size = initialSize();
+    setSize (size.x, size.y);
+}
+
+// taille de départ : celle de conception, mais jamais plus grande que 90 % de l'écran utile
+juce::Point<int> NeptuneEditor::initialSize()
+{
+    int w = 1160, h = 960;
+    if (const auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
     {
-        // taille de départ : celle de conception, mais jamais plus grande que 90 % de l'écran utile
-        int w = 1160, h = 960;
-        if (const auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
-        {
-            w = juce::jmin (w, d->userArea.getWidth() * 9 / 10);
-            h = juce::jmin (h, d->userArea.getHeight() * 85 / 100);
-        }
-        setSize (juce::jmax (420, w), juce::jmax (300, h));
+        w = juce::jmin (w, d->userArea.getWidth() * 9 / 10);
+        h = juce::jmin (h, d->userArea.getHeight() * 85 / 100);
     }
+    return { juce::jmax (420, w), juce::jmax (300, h) };
+}
+
+NeptunePluginEditor::NeptunePluginEditor (NeptuneProcessor& p) : juce::AudioProcessorEditor (p), processor_ (p)
+{
+    setResizable (true, true);
+    setResizeLimits (420, 300, 3000, 2000); // en dessous de la taille de conception, l'interface est réduite (voir NeptuneEditor::resized)
+    build (0);
+    const auto size = NeptuneEditor::initialSize();
+    setSize (size.x, size.y);
+}
+
+void NeptunePluginEditor::build (int view)
+{
+    const auto bounds = getLocalBounds();
+    content_.reset();
+    content_ = std::make_unique<NeptuneEditor> (processor_);
+    content_->onLookChanged = [safe = juce::Component::SafePointer<NeptunePluginEditor> (this)]
+    {
+        juce::MessageManager::callAsync ([safe]
+        {
+            if (safe == nullptr || safe->content_ == nullptr) return;
+            safe->build (safe->content_->viewIndex());
+        });
+    };
+    addAndMakeVisible (*content_);
+    if (! bounds.isEmpty()) content_->setBounds (bounds);
+    content_->restoreView (view);
+    resized();
+}
+
+void NeptuneEditor::showLookMenu()
+{
+    const auto& st = processor_.settings();
+    struct Choice { const char* id; const char* key; };
+    static const Choice themes[] = { { "dark", "look.theme_dark" }, { "light", "look.theme_light" }, { "hc", "look.theme_hc" }, { "hammond", "look.theme_wood" } };
+    juce::PopupMenu menu;
+    menu.addSectionHeader (text ("look.theme"));
+    for (int i = 0; i < 4; ++i) menu.addItem (1 + i, text (themes[i].key), true, st.theme == themes[i].id);
+    menu.addSeparator();
+    menu.addSectionHeader (text ("look.contrast"));
+    for (int c = 0; c <= 4; ++c) menu.addItem (11 + c, juce::String (c), st.theme != "hc", st.contrast == c);   // sans effet sur le thème à contraste élevé
+    menu.addSeparator();
+    menu.addSectionHeader (text ("look.language"));
+    menu.addItem (21, "English", true, st.language == "en");
+    menu.addItem (22, juce::String::fromUTF8 ("Fran\xc3\xa7" "ais"), true, st.language == "fr");
+    menu.setLookAndFeel (&lookButton_.getLookAndFeel());
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&lookButton_), [this] (int chosen)
+    {
+        if (chosen <= 0) return;
+        const auto& now = processor_.settings();
+        auto theme = now.theme, language = now.language;
+        int contrast = now.contrast;
+        if (chosen >= 1 && chosen <= 4) theme = themes[chosen - 1].id;
+        else if (chosen >= 11 && chosen <= 15) contrast = chosen - 11;
+        else if (chosen == 21) language = "en";
+        else if (chosen == 22) language = "fr";
+        processor_.uiSetLook (theme, contrast, language);
+        if (onLookChanged) onLookChanged();   // le cadre reconstruit l'éditeur avec la nouvelle palette
+    });
 }
 
 void NeptuneEditor::openMidiSend()
@@ -1076,7 +1141,7 @@ void NeptuneEditor::resized()
 {
     // Taille logique d'au moins 1100 x 760 ; en dessous, tout le contenu est réduit d'un même facteur.
     {
-        const auto logical = root_.fit (getWidth(), getHeight(), 1100, 760);
+        const auto logical = root_.fit (getWidth(), getHeight(), 1180, 760);
         lw_ = logical.getWidth();
         lh_ = logical.getHeight();
     }
@@ -1109,7 +1174,7 @@ void NeptuneEditor::resized()
         unlockButton_.setBounds (left, barY, fit (unlockButton_, 120), barH);
         trackBox_.setBounds (left, barY, 80, barH);
         left += 80 + gap + 2;
-        for (auto* b : { &midiFilterButton_, &controlButton_, &oscButton_, &midiSendButton_ })
+        for (auto* b : { &midiFilterButton_, &controlButton_, &oscButton_, &midiSendButton_, &lookButton_ })
         {
             const int w = fit (*b, 44);
             b->setBounds (left, barY, w, barH);

@@ -1936,6 +1936,15 @@ void NeptuneProcessor::uiSetReducedHostList (bool on)
     neptune::core::settings::saveFile (settingsFile_, settings_, &error);   // lu au prochain chargement du plugin
 }
 
+void NeptuneProcessor::uiSetLook (const std::string& theme, int contrast, const std::string& language)
+{
+    settings_.theme = theme;
+    settings_.contrast = juce::jlimit (0, 4, contrast);
+    settings_.language = language;
+    std::string error;
+    neptune::core::settings::saveFile (settingsFile_, settings_, &error);   // la bascule du profil Live / Studio, elle, n'est jamais écrite ici : settings_.profile reste celui du démarrage
+}
+
 void NeptuneProcessor::uiSetShowDiagnostics (bool on)
 {
     if (settings_.showDiagnostics == on) return;
@@ -2599,6 +2608,6 @@ void NeptuneProcessor::addOutboundEventsToQueue (const clap_output_events* out, 
     numPendingEnds_ = 0;
 }
 
-juce::AudioProcessorEditor* NeptuneProcessor::createEditor() { return new NeptuneEditor (*this); }
+juce::AudioProcessorEditor* NeptuneProcessor::createEditor() { return new NeptunePluginEditor (*this); }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new NeptuneProcessor(); }
