@@ -795,3 +795,70 @@ TEST_CASE ("facade: the wheels option of a keyboard round-trips, is written only
     f.widgets[0].wheels = 0;
     CHECK (facade::sanitised (f).widgets[0].wheels == 0);
 }
+
+TEST_CASE ("facade: a scene grid keeps its columns, rows, colour, temperament and bank bar through JSON, and is bounded")
+{
+    using namespace neptune::core::facade;
+    Facade f;
+    auto w = defaultWidget (WidgetType::SceneGrid, 1, 20, 20);
+    CHECK (w.columns == 4);
+    CHECK (w.rows == 4);
+    w.columns = 8;
+    w.rows = 6;
+    w.hue = 210;
+    w.vivid = 90;
+    w.header = 0;
+    f.widgets.push_back (w);
+    const auto back = fromJson (toJson (f));
+    REQUIRE (back.widgets.size() == 1);
+    CHECK (back.widgets[0].type == WidgetType::SceneGrid);
+    CHECK (back.widgets[0].columns == 8);
+    CHECK (back.widgets[0].rows == 6);
+    CHECK (back.widgets[0].hue == 210);
+    CHECK (back.widgets[0].vivid == 90);
+    CHECK (back.widgets[0].header == 0);
+    CHECK (back == f);
+
+    f.widgets[0].columns = 99;
+    f.widgets[0].rows = 1;
+    f.widgets[0].hue = -30;
+    f.widgets[0].vivid = 500;
+    const auto clean = sanitised (f);
+    CHECK (clean.widgets[0].columns == 8);   // 4 à 8
+    CHECK (clean.widgets[0].rows == 4);
+    CHECK (clean.widgets[0].hue == 330);
+    CHECK (clean.widgets[0].vivid == 100);
+}
+
+#include <fstream>
+#include <sstream>
+
+TEST_CASE ("facade: the Concert example (scene grid, volumes, mutes, stepper) loads as written")
+{
+    using namespace neptune::core::facade;
+    std::ifstream in (std::string (NEPTUNE_SOURCE_DIR) + "/docs/exemple-facade/concert-scenes/facade.json");
+    REQUIRE (in.good());
+    std::stringstream text;
+    text << in.rdbuf();
+    // le fichier est « {format, track, facade: {...}} » : on lit la Façade interne
+    const auto doc = text.str();
+    const auto at = doc.find ("\"facade\"");
+    REQUIRE (at != std::string::npos);
+    const auto open = doc.find ('{', at);
+    const auto f = fromJson (doc.substr (open, doc.rfind ('}') - open));
+    int grids = 0, sliders = 0, buttons = 0, actions = 0;
+    for (const auto& w : f.widgets)
+    {
+        grids += w.type == WidgetType::SceneGrid;
+        sliders += w.type == WidgetType::Slider;
+        buttons += w.type == WidgetType::Button;
+        actions += w.type == WidgetType::Action;
+    }
+    CHECK (grids == 1);
+    CHECK (sliders == 5);     // Master et pistes 1 à 4
+    CHECK (buttons == 6);     // cinq muets et le muet général
+    CHECK (actions == 3);     // précédent, suivant, annulation
+    CHECK (f.widgets.size() == 17);
+    for (const auto& w : f.widgets)   // aucun widget n'a été rogné ni déplacé par les bornes
+        CHECK (w.x + w.w <= canvasWidth);
+}

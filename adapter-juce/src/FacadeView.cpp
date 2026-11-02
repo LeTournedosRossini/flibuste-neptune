@@ -80,6 +80,49 @@ int keyAtPoint (const neptune::core::facade::Widget& w, juce::Point<float> p)
     return -1;
 }
 
+
+// ---- Grille de scènes : géométrie (partagée par le dessin et les clics), dans les coordonnées du canevas
+struct SceneGridGeometry
+{
+    juce::Rectangle<float> prev, next, label, setPill;   // barre de banque (vides sans barre)
+    std::vector<juce::Rectangle<float>> cells;            // une par scène, de gauche à droite et de haut en bas
+};
+
+SceneGridGeometry sceneGridGeometry (const neptune::core::facade::Widget& w)
+{
+    SceneGridGeometry g;
+    const juce::Rectangle<float> b (static_cast<float> (w.x), static_cast<float> (w.y), static_cast<float> (w.w), static_cast<float> (w.h));
+    auto area = b.reduced (4.0f);
+    if (w.header != 0)
+    {
+        auto bar = area.removeFromTop (34.0f);
+        area.removeFromTop (6.0f);
+        g.prev = bar.removeFromLeft (44.0f);
+        g.setPill = bar.removeFromRight (76.0f);
+        g.next = bar.removeFromRight (44.0f);
+        g.label = bar;
+    }
+    const int cols = std::clamp (w.columns, 4, 8), rows = std::clamp (w.rows, 4, 8);
+    const float gap = 6.0f;
+    const float cw = (area.getWidth() - gap * static_cast<float> (cols - 1)) / static_cast<float> (cols);
+    const float ch = (area.getHeight() - gap * static_cast<float> (rows - 1)) / static_cast<float> (rows);
+    for (int r = 0; r < rows; ++r)
+        for (int c = 0; c < cols; ++c)
+            g.cells.push_back ({ area.getX() + static_cast<float> (c) * (cw + gap), area.getY() + static_cast<float> (r) * (ch + gap), cw, ch });
+    return g;
+}
+
+// Couleurs d'une case : une teinte, et un « tempérament » (douce à vive) qui règle la saturation et la luminosité ; la scène rappelée est la plus claire.
+juce::Colour sceneColour (const neptune::core::facade::Widget& w, bool lit)
+{
+    const float v = static_cast<float> (std::clamp (w.vivid, 0, 100)) / 100.0f;
+    const float hue = static_cast<float> (w.hue % 360) / 360.0f;
+    return lit ? juce::Colour::fromHSV (hue, 0.35f + 0.60f * v, 0.65f + 0.35f * v, 1.0f)
+               : juce::Colour::fromHSV (hue, 0.25f + 0.55f * v, 0.26f + 0.24f * v, 1.0f);
+}
+
+juce::Colour readableOn (juce::Colour fill) { return fill.getPerceivedBrightness() > 0.55f ? juce::Colours::black.withAlpha (0.88f) : juce::Colours::white.withAlpha (0.95f); }
+
 constexpr float curveTitleHeight = 24.0f;   // hauteur (dans le canevas) de la légende d'un widget Courbe
 
 int snapped (int v) { return (v + 2) / 4 * 4; } // aimantation sur une grille de 4
@@ -400,6 +443,7 @@ public:
         const auto* w = widgetAt (p);
         if (w == nullptr) return;
         if (w->type == fc::WidgetType::Keyboard) { if (! e.mods.isPopupMenu()) keyDown (e, *w); return; }
+        if (w->type == fc::WidgetType::SceneGrid) { sceneGridDown (e, *w); return; }
         if (w->type == fc::WidgetType::Midi)
         {
             if (e.mods.isPopupMenu()) return;
@@ -999,6 +1043,39 @@ private:
     // Piste visée par un divisionnel : celle de la Façade, ou la piste sélectionnée pour la Façade globale.
     int combiTrack() const { return owner_.global_ ? owner_.processor_.selectedTrack() : owner_.track_; }
 
+    // Grille de scènes (jeu) : flèches de banque, SET, un clic sur une case rappelle la scène (ou l'enregistre si SET est armé), clic droit : texte ou effacement.
+    void sceneGridDown (const juce::MouseEvent& e, const fc::Widget& w)
+    {
+        namespace cb = neptune::core::combi;
+        auto& o = owner_;
+        const auto p = toCanvas (e.position);
+        const auto geo = sceneGridGeometry (w);
+        if (w.header != 0 && ! e.mods.isPopupMenu())
+        {
+            if (geo.prev.contains (p)) { o.processor_.uiCombiCommand (cb::kCommandBankPrevious, combiTrack()); repaint(); return; }
+            if (geo.next.contains (p)) { o.processor_.uiCombiCommand (cb::kCommandBankNext, combiTrack()); repaint(); return; }
+            if (geo.setPill.contains (p)) { o.processor_.uiCombiArm (! o.processor_.combiArmed()); repaint(); return; }
+        }
+        for (std::size_t i = 0; i < geo.cells.size(); ++i)
+        {
+            if (! geo.cells[i].contains (p)) continue;
+            const int piston = static_cast<int> (i);
+            if (! e.mods.isPopupMenu()) { o.processor_.uiCombiScene (piston); repaint(); return; }
+            juce::PopupMenu menu;
+            menu.addItem (1, o.text ("facade.grid_text"));
+            menu.addItem (2, o.text ("facade.grid_erase"));
+            menu.setLookAndFeel (&o.getLookAndFeel());
+            menu.showMenuAsync (juce::PopupMenu::Options(), [safe = juce::Component::SafePointer<FacadeView> (&o), piston] (int chosen)
+            {
+                if (safe == nullptr || chosen <= 0) return;
+                if (chosen == 1) { safe->editSceneText (piston); return; }
+                auto lib = safe->processor_.combinations();
+                if (cb::eraseGeneral (lib, cb::generalKey (safe->processor_.combiStatus().bank, piston))) safe->processor_.uiEditCombinations (std::move (lib), "Scene: erase");
+            });
+            return;
+        }
+    }
+
     // Texte d'un bouton de combinaison : « G3 », « D3 », « GC », « Set », et la banque ou le pas courant pour les boutons qui les changent.
     juce::String combiCaption (int command) const
     {
@@ -1288,6 +1365,71 @@ private:
                     else g.drawVerticalLine (juce::roundToInt (area.getX() + f * area.getWidth()), area.getY(), area.getBottom());
                 }
                 if (! w.text.empty()) drawStyledText (g, nullptr, utf8 (w.text), b, 0.12f, o.colour (Token::TextDim), juce::Justification::centredTop);
+                break;
+            }
+            case fc::WidgetType::SceneGrid:
+            {
+                namespace cb = neptune::core::combi;
+                const auto geo = sceneGridGeometry (w);
+                const auto status = o.processor_.combiStatus();
+                const auto scenes = o.processor_.sceneCells (status.bank, static_cast<int> (geo.cells.size()));
+                const int lit = status.lastKey >= 0 && status.lastKey / cb::kPistons == status.bank ? status.lastKey % cb::kPistons : -1;
+                g.setColour (o.colour (Token::BgApp));
+                g.fillRoundedRectangle (b, 8.0f);
+                g.setColour (o.colour (Token::Border));
+                g.drawRoundedRectangle (b.reduced (0.5f), 8.0f, 1.0f);
+                if (w.header != 0)
+                {
+                    auto arrow = [&] (juce::Rectangle<float> r, bool left)
+                    {
+                        g.setColour (o.colour (Token::Pb));
+                        g.fillRoundedRectangle (r, 6.0f);
+                        g.setColour (o.colour (Token::Text));
+                        juce::Path tri;
+                        const auto c = r.getCentre();
+                        if (left) tri.addTriangle (c.x + 6.0f, c.y - 8.0f, c.x + 6.0f, c.y + 8.0f, c.x - 7.0f, c.y); else tri.addTriangle (c.x - 6.0f, c.y - 8.0f, c.x - 6.0f, c.y + 8.0f, c.x + 7.0f, c.y);
+                        g.fillPath (tri);
+                    };
+                    arrow (geo.prev, true);
+                    arrow (geo.next, false);
+                    g.setColour (o.colour (Token::Text));
+                    g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+                    g.drawText (juce::String::fromUTF8 (o.tr_.format ("facade.grid_bank", { std::to_string (status.bank + 1), std::to_string (cb::kBanks) }).c_str()), geo.label, juce::Justification::centred);
+                    const bool armed = status.setArmed;
+                    g.setColour (armed ? o.colour (Token::KnobHot) : o.colour (Token::Pb));
+                    g.fillRoundedRectangle (geo.setPill, 6.0f);
+                    g.setColour (armed ? juce::Colours::white : o.colour (Token::TextDim));
+                    g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+                    g.drawText ("SET", geo.setPill, juce::Justification::centred);
+                }
+                for (std::size_t i = 0; i < geo.cells.size(); ++i)
+                {
+                    const auto c = geo.cells[i];
+                    const bool used = i < scenes.size() && scenes[i].used;
+                    const bool isLit = static_cast<int> (i) == lit && used;
+                    const auto fill = used ? sceneColour (w, isLit) : o.colour (Token::BgCard);
+                    g.setColour (fill);
+                    g.fillRoundedRectangle (c, 8.0f);
+                    g.setColour (isLit ? juce::Colours::white : (used ? fill.brighter (0.25f) : o.colour (Token::Border)));
+                    g.drawRoundedRectangle (c.reduced (0.5f), 8.0f, isLit ? 3.0f : 1.0f);
+                    const auto ink = used ? readableOn (fill) : o.colour (Token::TextDim2);
+                    auto inner = c.reduced (6.0f, 4.0f);
+                    g.setColour (ink.withAlpha (0.65f));
+                    g.setFont (juce::FontOptions (juce::jlimit (10.0f, 14.0f, c.getHeight() * 0.16f)));
+                    g.drawText (juce::String (static_cast<int> (i) + 1), inner.removeFromTop (c.getHeight() * 0.2f), juce::Justification::topLeft);
+                    if (! used) continue;
+                    const auto& sc = scenes[i];
+                    auto noteArea = sc.note.empty() ? juce::Rectangle<float>() : inner.removeFromBottom (inner.getHeight() * 0.42f);
+                    g.setColour (ink);
+                    g.setFont (juce::FontOptions (juce::jlimit (11.0f, 26.0f, c.getHeight() * 0.24f), juce::Font::bold));
+                    g.drawFittedText (utf8 (sc.name.empty() ? std::string() : sc.name), inner.toNearestInt(), juce::Justification::centred, 2, 0.7f);
+                    if (! sc.note.empty())
+                    {
+                        g.setColour (ink.withAlpha (0.85f));
+                        g.setFont (juce::FontOptions (juce::jlimit (10.0f, 18.0f, c.getHeight() * 0.16f)));
+                        g.drawFittedText (utf8 (sc.note), noteArea.toNearestInt(), juce::Justification::centred, 2, 0.7f);
+                    }
+                }
                 break;
             }
             case fc::WidgetType::Midi:
@@ -2919,6 +3061,10 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     setupAdd (setKeyButton_, "facade.add_set", fc::WidgetType::Set);
     setupAdd (midiButton_, "facade.add_midi", fc::WidgetType::Midi);
     setupAdd (meterButton_, "facade.add_meter", fc::WidgetType::Meter);
+    setupAdd (gridButton_, "facade.add_grid", fc::WidgetType::SceneGrid);
+    gridOptionsButton_.setButtonText (text ("facade.grid_options"));
+    gridOptionsButton_.setTooltip (text ("facade.tip_grid_options"));
+    gridOptionsButton_.onClick = [this] { showGridMenu(); };
     meterSourceButton_.setButtonText (text ("facade.meter_source"));
     meterSourceButton_.setTooltip (text ("facade.tip_meter_source"));
     meterSourceButton_.onClick = [this] { showMeterSourceMenu(); };
@@ -3033,11 +3179,12 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     setKeyButton_.setTooltip (text ("facade.tip_set"));
     midiButton_.setTooltip (text ("facade.tip_midi"));
     meterButton_.setTooltip (text ("facade.tip_meter"));
+    gridButton_.setTooltip (text ("facade.tip_grid"));
     labelButton_.setTooltip (text ("facade.tip_label"));
     captureButton_.setTooltip (text ("facade.tip_capture"));
     alignButton_.setTooltip (text ("facade.tip_align"));
 
-    for (auto* b : { &editButton_, &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &lampSourceButton_, &setKeyButton_, &actionModeButton_, &midiButton_, &midiEditButton_, &meterButton_, &meterSourceButton_, &imageButton_, &fitButton_, &clearImageButton_,
+    for (auto* b : { &editButton_, &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &lampSourceButton_, &setKeyButton_, &actionModeButton_, &midiButton_, &midiEditButton_, &meterButton_, &meterSourceButton_, &gridButton_, &gridOptionsButton_, &imageButton_, &fitButton_, &clearImageButton_,
                      &sliderButton_, &stylesButton_, &styleButton_, &orientButton_, &notchesButton_, &scaleButton_, &invertButton_, &saveFacadeButton_, &loadFacadeButton_, &relocateButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbWheelsButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_, &helpButton_ })
         addAndMakeVisible (*b);
     refresh();
@@ -3059,7 +3206,7 @@ void FacadeView::updateButtons()
 {
     pruneSelection();
     const auto* one = facade_.find (single());
-    for (auto* b : { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &setKeyButton_, &midiButton_, &meterButton_, &sliderButton_, &stylesButton_, &imageButton_, &fitButton_, &clearImageButton_, &saveFacadeButton_, &loadFacadeButton_ }) b->setVisible (editMode_);
+    for (auto* b : { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &setKeyButton_, &midiButton_, &meterButton_, &gridButton_, &sliderButton_, &stylesButton_, &imageButton_, &fitButton_, &clearImageButton_, &saveFacadeButton_, &loadFacadeButton_ }) b->setVisible (editMode_);
     relocateButton_.setVisible (missing_ > 0);
     addPageButton_.setVisible (editMode_);
     pageMenuButton_.setVisible (editMode_);
@@ -3071,6 +3218,7 @@ void FacadeView::updateButtons()
     actionModeButton_.setVisible (editMode_ && one != nullptr && one->type == fc::WidgetType::Action);
     midiEditButton_.setVisible (editMode_ && one != nullptr && one->type == fc::WidgetType::Midi);
     meterSourceButton_.setVisible (editMode_ && one != nullptr && one->type == fc::WidgetType::Meter);
+    gridOptionsButton_.setVisible (editMode_ && one != nullptr && one->type == fc::WidgetType::SceneGrid);
     duplicateButton_.setVisible (any);
     deleteButton_.setVisible (any);
     alignButton_.setVisible (editMode_ && selection_.size() >= 2);
@@ -3164,8 +3312,8 @@ void FacadeView::resized()
     area.removeFromTop (gap);
     if (editMode_)
     {
-        flow ({ &knobButton_, &buttonButton_, &menuButton_, &sliderButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &setKeyButton_, &midiButton_, &meterButton_ });
-        flow ({ &linkButton_, &textButton_, &styleButton_, &meterSourceButton_, &midiEditButton_, &actionModeButton_, &lampSourceButton_, &orientButton_, &notchesButton_, &scaleButton_, &invertButton_, &captureButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbWheelsButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
+        flow ({ &knobButton_, &buttonButton_, &menuButton_, &sliderButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &setKeyButton_, &midiButton_, &meterButton_, &gridButton_ });
+        flow ({ &linkButton_, &textButton_, &styleButton_, &meterSourceButton_, &gridOptionsButton_, &midiEditButton_, &actionModeButton_, &lampSourceButton_, &orientButton_, &notchesButton_, &scaleButton_, &invertButton_, &captureButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbWheelsButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
     }
     toolbarRect_ = juce::Rectangle<int> (whole.getX(), whole.getY(), whole.getWidth(), area.getY() - whole.getY());
     canvas_->setBounds (whole.withTop (toolbarRect_.getBottom() + 4));
@@ -3452,6 +3600,58 @@ void FacadeView::showMeterSourceMenu()
         if (safe == nullptr || choice <= 0) return;
         safe->applySingle ([choice] (fc::Widget& w) { w.source = choice - 1; }, "Facade: meter source");
     });
+}
+
+void FacadeView::showGridMenu()
+{
+    const auto* g = facade_.find (single());
+    if (g == nullptr || g->type != fc::WidgetType::SceneGrid) return;
+    juce::PopupMenu menu, cols, rows, colour, vivid;
+    for (int n = 4; n <= 8; ++n)
+    {
+        cols.addItem (100 + n, juce::String (n), true, g->columns == n);
+        rows.addItem (200 + n, juce::String (n), true, g->rows == n);
+    }
+    for (int i = 0; i < 12; ++i) colour.addItem (300 + i, text (("facade.hue_" + std::to_string (i)).c_str()), true, g->hue == i * 30);
+    const int levels[4] = { 15, 40, 65, 90 };
+    for (int i = 0; i < 4; ++i) vivid.addItem (400 + i, text (("facade.vivid_" + std::to_string (i)).c_str()), true, g->vivid == levels[i]);
+    menu.addSubMenu (text ("facade.grid_cols"), cols);
+    menu.addSubMenu (text ("facade.grid_rows"), rows);
+    menu.addSubMenu (text ("facade.grid_colour"), colour);
+    menu.addSubMenu (text ("facade.grid_vivid"), vivid);
+    menu.addItem (500, text ("facade.grid_header"), true, g->header != 0);
+    menu.setLookAndFeel (&getLookAndFeel());
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&gridOptionsButton_), [safe = juce::Component::SafePointer<FacadeView> (this), levels] (int choice)
+    {
+        if (safe == nullptr || choice <= 0) return;
+        safe->applySingle ([choice, levels] (fc::Widget& w)
+        {
+            if (choice >= 100 && choice < 200) w.columns = choice - 100;
+            else if (choice >= 200 && choice < 300) w.rows = choice - 200;
+            else if (choice >= 300 && choice < 400) w.hue = (choice - 300) * 30;
+            else if (choice >= 400 && choice < 500) w.vivid = levels[choice - 400];
+            else if (choice == 500) w.header = w.header != 0 ? 0 : 1;
+        }, "Facade: scene grid");
+    });
+}
+
+void FacadeView::editSceneText (int piston)
+{
+    namespace cb = neptune::core::combi;
+    const int bank = processor_.combiStatus().bank;
+    const auto cells = processor_.sceneCells (bank, piston + 1);
+    if (piston < 0 || piston >= static_cast<int> (cells.size()) || ! cells[static_cast<std::size_t> (piston)].used) return;   // une scène vide n'a pas de nom : on l'enregistre d'abord
+    const int key = cb::generalKey (bank, piston);
+    auto* w = new juce::AlertWindow (text ("facade.grid_text_title") + " " + juce::String (piston + 1), text ("facade.grid_text_prompt"), juce::MessageBoxIconType::NoIcon, this);
+    w->addTextEditor ("name", utf8 (cells[static_cast<std::size_t> (piston)].name), text ("facade.grid_name"));
+    w->addTextEditor ("note", utf8 (cells[static_cast<std::size_t> (piston)].note), text ("facade.grid_note"));
+    w->addButton (text ("grp.ok"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton (text ("mix.cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([w, key, safe = juce::Component::SafePointer<FacadeView> (this)] (int result)
+    {
+        if (result != 1 || safe == nullptr) return;
+        safe->processor_.uiCombiSetText (key, w->getTextEditorContents ("name").toStdString(), w->getTextEditorContents ("note").toStdString());
+    }), true);
 }
 
 void FacadeView::showActionModeMenu()

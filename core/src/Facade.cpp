@@ -107,6 +107,7 @@ Widget defaultWidget (WidgetType type, int id, int x, int y)
         case WidgetType::Set:    w.w = 90;  w.h = 44;  break;
         case WidgetType::Midi:   w.w = 150; w.h = 44;  break;
         case WidgetType::Meter:  w.w = 44;  w.h = 180; w.vertical = 1; break;
+        case WidgetType::SceneGrid: w.w = 640; w.h = 400; w.columns = 4; w.rows = 4; break;
     }
     w.x = x;
     w.y = y;
@@ -281,7 +282,11 @@ Facade sanitisedPage (Facade f)
         w.align = std::clamp (w.align, 0, 2);
         w.justify = std::clamp (w.justify, 0, 3);
         w.gap = std::clamp (w.gap, 0, maxZoneGap);
-        w.columns = std::clamp (w.columns, 1, maxZoneColumns);
+        w.columns = w.type == WidgetType::SceneGrid ? std::clamp (w.columns, 4, 8) : std::clamp (w.columns, 1, maxZoneColumns);
+        w.rows = std::clamp (w.rows, 4, 8);
+        w.hue = ((w.hue % 360) + 360) % 360;
+        w.vivid = std::clamp (w.vivid, 0, 100);
+        w.header = w.header != 0 ? 1 : 0;
         w.channel = std::clamp (w.channel, 1, 16);
         w.firstNote = std::clamp (w.firstNote, 0, 120);
         w.hold = w.hold != 0 ? 1 : 0;
@@ -709,6 +714,7 @@ json pageJson (const Facade& f)
         if (w.type == WidgetType::Lamp) { e["source"] = w.source; e["ch"] = w.channel; }
         if (w.type == WidgetType::Meter) e["source"] = w.source;
         if (w.type == WidgetType::Action && w.actionMode != 0) e["mode"] = w.actionMode;
+        if (w.type == WidgetType::SceneGrid) { e["cols"] = w.columns; e["rows"] = w.rows; e["hue"] = w.hue; e["vivid"] = w.vivid; e["header"] = w.header; }
         if (! w.mirror.empty()) e["mirror"] = w.mirror;
         if (w.type == WidgetType::Midi)
         {
@@ -858,7 +864,11 @@ Facade pageFromJson (const json& o)
             w.align = intOf (e, "align", 0);
             w.justify = intOf (e, "justify", 0);
             w.gap = intOf (e, "gap", 8);
-            w.columns = intOf (e, "cols", 2);
+            w.columns = intOf (e, "cols", w.type == WidgetType::SceneGrid ? 4 : 2);
+            w.rows = intOf (e, "rows", 4);
+            w.hue = intOf (e, "hue", 30);
+            w.vivid = intOf (e, "vivid", 55);
+            w.header = intOf (e, "header", 1);
             w.style = intOf (e, "style", 0);
             w.stepMode = intOf (e, "steps", 0);
             w.invert = intOf (e, "invert", 0);

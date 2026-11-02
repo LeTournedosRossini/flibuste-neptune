@@ -26,6 +26,7 @@ constexpr int kFacadePistons = 10;       // les commandes G1..G10 et D1..D10 des
 constexpr int kTracks = 16;              // claviers (pistes) qui ont des divisionnels
 constexpr int kMaxSequence = 256;         // pas du séquenceur
 constexpr std::size_t kMaxName = 64;
+constexpr std::size_t kMaxNote = 120;       // texte en plus du nom (nom de l'élève, du morceau...)
 constexpr std::size_t kMaxValues = 8192; // valeurs d'une mémoire (1024 avant les scènes : un modèle « Tout » en demande davantage)
 
 // Clefs de stockage (clairsemé : seules les mémoires enregistrées existent).
@@ -74,7 +75,8 @@ struct Memory
     std::string name;
     std::vector<std::pair<ParamId, double>> values;      // valeurs réelles (les paramètres d'insert : identifiants composés, voir insertParam)
     std::map<int, std::string> insertTypes;               // pour chaque emplacement dont la mémoire porte des valeurs : le module qui y était (insertSlotKey) ; au rappel, un autre module ne reçoit rien
-    bool operator== (const Memory& o) const noexcept { return used == o.used && name == o.name && values == o.values && insertTypes == o.insertTypes; }
+    std::string note;                                    // texte en plus du nom, montré dans la grille de scènes de la Façade (nom de l'élève, morceau...)
+    bool operator== (const Memory& o) const noexcept { return used == o.used && name == o.name && values == o.values && insertTypes == o.insertTypes && note == o.note; }
 };
 
 // Modèle de capture : ce qu'un enregistrement (Set + piston) mémorise. Les mémoires déjà enregistrées gardent leurs propres valeurs : le modèle ne sert qu'à enregistrer
@@ -117,7 +119,8 @@ bool sequenceAdd (Library&, int generalKeyValue);                 // ajoute un p
 bool sequenceRemove (Library&, int index);
 bool sequenceMove (Library&, int index, int delta);               // échange le pas avec son voisin (delta -1 ou +1) ; faux hors de la liste
 bool eraseGeneral (Library&, int generalKeyValue);                // efface la mémoire (les pas de la séquence qui la visent restent, ils sont « vides »)
-bool renameGeneral (Library&, int generalKeyValue, std::string name);   // la mémoire doit exister ; nom nettoyé et tronqué
+bool renameGeneral (Library&, int generalKeyValue, std::string name);
+bool setGeneralText (Library&, int generalKeyValue, std::string name, std::string note);   // nom et texte en plus ; la mémoire doit exister   // la mémoire doit exister ; nom nettoyé et tronqué
 bool eraseDivisional (Library&, int divisionalKeyValue);                // les mêmes gestes pour les divisionnels (clef = divisionalKey)
 bool renameDivisional (Library&, int divisionalKeyValue, std::string name);
 
@@ -183,6 +186,7 @@ public:
     void setInsertAccess (InsertAccess* access) noexcept { inserts_ = access; }   // paramètres des inserts (l'adaptateur) ; nul : les scènes ne les touchent pas   // utilisé par recall et l'annulation générale
 
     int bank() const noexcept { return bank_; }
+    int lastRecalled() const noexcept { return lastKey_; }   // clef (generalKey) du dernier général rappelé, -1 : aucun
     void setBank (int bank) noexcept;                 // bornée 0..kBanks-1
     bool nextBank() noexcept;                         // false aux extrémités (pas de bouclage)
     bool previousBank() noexcept;
@@ -230,5 +234,6 @@ private:
     int bank_ = 0;
     bool held_ = false, armed_ = false;
     int seq_ = -1;
+    int lastKey_ = -1;
 };
 } // namespace neptune::core::combi

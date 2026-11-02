@@ -32,6 +32,7 @@ namespace
 void cleanMemory (Memory& m)
 {
     if (m.name.size() > kMaxName) m.name.resize (kMaxName);
+    if (m.note.size() > kMaxNote) m.note.resize (kMaxNote);
     m.values.erase (std::remove_if (m.values.begin(), m.values.end(), [] (const auto& v) { return v.first == 0 || ! std::isfinite (v.second); }), m.values.end());
     if (m.values.size() > kMaxValues) m.values.resize (kMaxValues);
 }
@@ -61,6 +62,7 @@ json memoryToJson (const Memory& m)
 {
     json o;
     if (! m.name.empty()) o["name"] = m.name;
+    if (! m.note.empty()) o["note"] = m.note;
     json values = json::array();
     for (const auto& [id, v] : m.values) values.push_back (json::array ({ id, v }));
     o["values"] = std::move (values);
@@ -78,6 +80,7 @@ Memory memoryFromJson (const json& o)
     Memory m;
     m.used = true;
     if (const auto f = o.find ("name"); f != o.end() && f->is_string()) m.name = f->get<std::string>();
+    if (const auto f = o.find ("note"); f != o.end() && f->is_string()) m.note = f->get<std::string>();
     if (const auto f = o.find ("values"); f != o.end() && f->is_array())
         for (const auto& v : *f)
             if (v.is_array() && v.size() == 2 && v[0].is_number_unsigned() && v[1].is_number() && m.values.size() < kMaxValues)
@@ -291,6 +294,16 @@ bool renameIn (std::map<int, Memory>& memories, int key, std::string name)
 } // namespace
 
 bool renameGeneral (Library& lib, int key, std::string name) { return renameIn (lib.generals, key, std::move (name)); }
+
+bool setGeneralText (Library& lib, int key, std::string name, std::string note)
+{
+    if (! renameIn (lib.generals, key, std::move (name))) return false;
+    const auto first = note.find_first_not_of (" \t\r\n");
+    note = first == std::string::npos ? std::string() : note.substr (first, note.find_last_not_of (" \t\r\n") - first + 1);
+    if (note.size() > kMaxNote) note.resize (kMaxNote);
+    lib.generals[key].note = std::move (note);
+    return true;
+}
 bool renameDivisional (Library& lib, int key, std::string name) { return renameIn (lib.divisionals, key, std::move (name)); }
 bool eraseDivisional (Library& lib, int key) { return lib.divisionals.erase (key) > 0; }
 
@@ -568,7 +581,8 @@ Memory captureWithInserts (const ParameterSet& set, const CaptureSpec& spec, int
 
 Outcome storeInto (Memory& slot, Memory fresh)
 {
-    fresh.name = slot.name;   // l'enregistrement garde le nom existant
+    fresh.name = slot.name;   // l'enregistrement garde le nom et le texte existants
+    fresh.note = slot.note;
     slot = std::move (fresh);
     Outcome out;
     out.result = Result::Stored;
@@ -600,7 +614,9 @@ Outcome Controller::general (Library& lib, ParameterSet& set, int piston)
     const int key = generalKey (bank_, piston);
     const auto it = std::find (lib.sequence.begin(), lib.sequence.end(), key);
     if (it != lib.sequence.end() && lib.general (bank_, piston) != nullptr) seq_ = static_cast<int> (it - lib.sequence.begin());
-    return recallMemory (lib.general (bank_, piston), set, writer_, inserts_);
+    auto out = recallMemory (lib.general (bank_, piston), set, writer_, inserts_);
+    if (out.result == Result::Recalled) lastKey_ = key;   // la grille de scènes de la Façade allume la dernière scène rappelée
+    return out;
 }
 
 Outcome Controller::divisional (Library& lib, ParameterSet& set, int track, int piston)
@@ -650,7 +666,9 @@ bool Controller::sequenceDeleteCurrent (Library& lib)
 
 Outcome Controller::recallKey (const Library& lib, ParameterSet& set, int key)
 {
-    return recallMemory (lib.general (key / kPistons, key % kPistons), set, writer_, inserts_);
+    auto out = recallMemory (lib.general (key / kPistons, key % kPistons), set, writer_, inserts_);
+    if (out.result == Result::Recalled) lastKey_ = key;
+    return out;
 }
 
 Outcome Controller::sequenceNext (const Library& lib, ParameterSet& set)

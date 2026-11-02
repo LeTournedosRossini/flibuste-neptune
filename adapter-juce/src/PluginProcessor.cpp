@@ -593,8 +593,36 @@ NeptuneProcessor::CombiStatus NeptuneProcessor::combiStatus() const
     s.bank = combi_.bank();
     s.setArmed = combi_.armed();
     s.sequencePosition = combi_.sequencePosition();
-    s.sequenceLength = static_cast<int> (combinations().sequence.size());
+    {
+        const juce::ScopedLock lock (instrumentLock_);   // sans copier la bibliothèque : la Façade interroge à chaque image
+        s.sequenceLength = static_cast<int> (mixer_.combinations.sequence.size());
+    }
+    s.lastKey = combi_.lastRecalled();
     return s;
+}
+
+std::vector<NeptuneProcessor::SceneCell> NeptuneProcessor::sceneCells (int bank, int count) const
+{
+    std::vector<SceneCell> out (static_cast<std::size_t> (juce::jlimit (0, neptune::core::combi::kPistons, count)));
+    const juce::ScopedLock lock (instrumentLock_);
+    for (std::size_t i = 0; i < out.size(); ++i)
+        if (const auto* m = mixer_.combinations.general (bank, static_cast<int> (i)))
+            out[i] = { true, m->name, m->note };
+    return out;
+}
+
+neptune::core::combi::Result NeptuneProcessor::uiCombiScene (int piston)
+{
+    using namespace neptune::core;
+    return combiExecute ([this, piston] (combi::Library& lib) { return combi_.general (lib, params_, piston); });
+}
+
+bool NeptuneProcessor::uiCombiSetText (int key, std::string name, std::string note)
+{
+    auto lib = combinations();
+    if (! neptune::core::combi::setGeneralText (lib, key, std::move (name), std::move (note))) return false;
+    uiEditCombinations (std::move (lib), "Scene: text");
+    return true;
 }
 
 // Les scènes lisent et écrivent les paramètres locaux des inserts par un identifiant composé (voir combi::insertParam) ; les écritures passent par la pile d'annulation.

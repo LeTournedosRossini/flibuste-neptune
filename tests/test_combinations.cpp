@@ -923,3 +923,35 @@ TEST_CASE ("scenes: a recall reports the insert slots it skipped")
     CHECK (std::find (skipped.begin(), skipped.end(), insertSlotKey (0, 0)) != skipped.end());
     CHECK (std::find (skipped.begin(), skipped.end(), insertSlotKey (32, 1)) != skipped.end());
 }
+
+TEST_CASE ("scenes: a scene has a text besides its name, kept by a new recording and saved with the project")
+{
+    auto set = makeSet();
+    Library lib;
+    Controller c;
+    set.set (router::switchParam (0), 1.0);
+    c.arm (true);
+    c.general (lib, set, 3);
+    CHECK (setGeneralText (lib, generalKey (0, 3), "  Chopin  ", "  Élève : Marie  "));
+    CHECK (lib.general (0, 3)->name == "Chopin");
+    CHECK (lib.general (0, 3)->note == "Élève : Marie");
+    CHECK_FALSE (setGeneralText (lib, generalKey (0, 4), "x", "y"));   // une scène vide n'a pas de texte
+
+    c.arm (true);
+    c.general (lib, set, 3);   // un nouvel enregistrement garde le nom et le texte
+    CHECK (lib.general (0, 3)->name == "Chopin");
+    CHECK (lib.general (0, 3)->note == "Élève : Marie");
+
+    const auto back = fromJson (toJson (lib));
+    CHECK (back.general (0, 3)->note == "Élève : Marie");
+    CHECK (back == lib);
+
+    CHECK (setGeneralText (lib, generalKey (0, 3), "A", std::string (500, 'x')));
+    CHECK (lib.general (0, 3)->note.size() == kMaxNote);
+
+    // la dernière scène rappelée
+    CHECK (c.lastRecalled() == -1);
+    set.set (router::switchParam (0), 0.0);
+    CHECK (c.general (lib, set, 3).result == Result::Recalled);
+    CHECK (c.lastRecalled() == generalKey (0, 3));
+}

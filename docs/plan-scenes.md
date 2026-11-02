@@ -41,5 +41,8 @@ Boutons « < » et « > » dans l'écran Scènes (à côté de « Pas n / m ») 
 ## Inserts ignorés (2026-11-02)
 Quand un rappel ignore des inserts (un autre module ou un emplacement vide à la place de celui de la scène), le texte du profil, dans la barre du bas, est remplacé 9 secondes par « Scène rappelée ; N insert(s) ignoré(s) ... : piste 1 insert 2, ... » (`Outcome::skippedInserts`, `NeptuneProcessor::sceneNotice`). L'écran Scènes le dit aussi dans son texte d'aide.
 
+## Grille de scènes dans la Façade (2026-11-02)
+Nouveau type de widget de Façade (`WidgetType::SceneGrid`, bouton « + Scènes ») : une grille de 4 à 8 colonnes et de 4 à 8 lignes (réglables par « Grille... »), une case par scène de la banque courante, avec le numéro, le nom et un **texte en plus** (`Memory::note`, enregistré dans le projet ; nom de l'élève, morceau...). Barre de banque (flèches, « Banque n / 32 ») et bouton SET dans le widget. Un clic rappelle la scène (avec le glissement choisi) ou l'enregistre quand SET est armé ; la dernière scène rappelée est allumée (`Controller::lastRecalled`). Clic droit : « Nom et texte... » ou effacer. Une couleur par grille (12 teintes) et un tempérament (doux, calme, vif, très vif pour la scène). Exemple : `docs/exemple-facade/Concert-scenes.neptunefacade` (script `generer-concert.py`) : grille 6 x 4, volumes Master et pistes 1 à 4, muets, muet général, Set, Précédent, Suivant, Annulation générale ; à charger dans la Façade **globale**.
+
 ## Plus tard
 Commandes « Insérer le pas » et « Supprimer le pas » pour la Façade et la couche de contrôle (aujourd'hui seulement dans l'écran) ; noms de modèles personnalisés enregistrés ; sélection par piste dans « Au choix ».

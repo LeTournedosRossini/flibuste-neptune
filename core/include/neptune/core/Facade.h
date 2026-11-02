@@ -32,8 +32,8 @@ constexpr std::size_t maxImagePath = 1024;
 // Midi : envoie un message MIDI (bouton : à chaque clic ; ou curseur : la valeur suit le geste), vers Neptune comme un clavier et/ou vers l'hôte.
 // Set : touche « Set » d'une console : une fois armée, le prochain piston (bouton Action) cliqué mémorise les valeurs courantes de ses paramètres.
 // Lamp : voyant allumé selon un paramètre (source 0), les notes d'un canal (1) ou les notes de la piste (2).
-enum class WidgetType { Knob = 0, Button = 1, Label = 2, Menu = 3, Action = 4, Curve = 5, Zone = 6, Keyboard = 7, Slider = 8, Lamp = 9, Set = 10, Midi = 11, Meter = 12 };
-constexpr int numWidgetTypes = 13;
+enum class WidgetType { Knob = 0, Button = 1, Label = 2, Menu = 3, Action = 4, Curve = 5, Zone = 6, Keyboard = 7, Slider = 8, Lamp = 9, Set = 10, Midi = 11, Meter = 12, SceneGrid = 13 };
+constexpr int numWidgetTypes = 14;
 constexpr int maxStyles = 64;
 constexpr int maxStripFrames = 512;
 constexpr std::size_t maxNotches = 128;
@@ -145,13 +145,20 @@ struct Widget
     int style = 0;                  // identifiant d'un ImageStyle de la Façade, 0 : aucun
     int vertical = 0;               // Curseur : 1, vertical
     std::vector<ParamId> mirror;    // Curseur, potard : autres paramètres qui reçoivent la même position (une boîte expressive qui commande plusieurs claviers)
+    // Grille de scènes : `columns` (4..8) colonnes et `rows` (4..8) lignes de cases (une scène par case, de la première de la banque courante) ; `hue` : teinte 0..359 ;
+    // `vivid` : de 0 (couleurs douces) à 100 (vives, pour la scène) ; `header` : 1, une barre avec la banque courante et ses flèches au-dessus des cases.
+    int rows = 4;
+    int hue = 30;
+    int vivid = 55;
+    int header = 1;
 
     bool operator== (const Widget& o) const noexcept
     {
         return id == o.id && type == o.type && x == o.x && y == o.y && w == o.w && h == o.h && param == o.param && text == o.text && snapshot == o.snapshot
             && parent == o.parent && layout == o.layout && align == o.align && justify == o.justify && gap == o.gap && columns == o.columns
             && channel == o.channel && firstNote == o.firstNote && hold == o.hold && velocity == o.velocity && wheels == o.wheels
-            && midi == o.midi && midiTarget == o.midiTarget && midiFader == o.midiFader && actionMode == o.actionMode && source == o.source && style == o.style && vertical == o.vertical && mirror == o.mirror && stepMode == o.stepMode && invert == o.invert && scale == o.scale && response == o.response && notches == o.notches;
+            && midi == o.midi && midiTarget == o.midiTarget && midiFader == o.midiFader && actionMode == o.actionMode && source == o.source && style == o.style && vertical == o.vertical && mirror == o.mirror && stepMode == o.stepMode && invert == o.invert && scale == o.scale && response == o.response && notches == o.notches
+            && rows == o.rows && hue == o.hue && vivid == o.vivid && header == o.header;
     }
 };
 
