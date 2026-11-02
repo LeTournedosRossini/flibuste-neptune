@@ -20,10 +20,11 @@
 
 namespace neptune::core::combi
 {
-constexpr int kBanks = 10;               // banques ; la banque courante est commune aux généraux et aux divisionnels
-constexpr int kPistons = 10;             // pistons par banque (numérotés 1 à 10 à l'écran, 0 à 9 ici)
+constexpr int kBanks = 32;               // banques ; la banque courante est commune aux généraux et aux divisionnels
+constexpr int kPistons = 64;             // scènes par banque (numérotées 1 à 64 à l'écran, 0 à 63 ici) ; le stockage est clairsemé : un emplacement vide ne coûte rien
+constexpr int kFacadePistons = 10;       // les commandes G1..G10 et D1..D10 des boutons de Façade et de la couche de contrôle ne visent que les dix premières scènes de la banque
 constexpr int kTracks = 16;              // claviers (pistes) qui ont des divisionnels
-constexpr int kMaxSequence = 64;         // pas du séquenceur
+constexpr int kMaxSequence = 256;         // pas du séquenceur
 constexpr std::size_t kMaxName = 64;
 constexpr std::size_t kMaxValues = 8192; // valeurs d'une mémoire (1024 avant les scènes : un modèle « Tout » en demande davantage)
 

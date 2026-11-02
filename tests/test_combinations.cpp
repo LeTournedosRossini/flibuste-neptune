@@ -89,7 +89,7 @@ TEST_CASE ("combinations: Set stores a general, the next press recalls it, a sto
     Controller c;
 
     CHECK (c.general (lib, set, 0).result == Result::Empty);
-    CHECK (c.general (lib, set, 10).result == Result::Ignored);
+    CHECK (c.general (lib, set, kPistons).result == Result::Ignored);
     CHECK (c.general (lib, set, -1).result == Result::Ignored);
 
     set.set (stop (0, 0), 0.0);
@@ -149,7 +149,7 @@ TEST_CASE ("combinations: a divisional only sets the stops of its own keyboard")
 
     CHECK (c.divisional (lib, set, 2, 2).result == Result::Empty);
     CHECK (c.divisional (lib, set, 16, 0).result == Result::Ignored);
-    CHECK (c.divisional (lib, set, 0, 10).result == Result::Ignored);
+    CHECK (c.divisional (lib, set, 0, kPistons).result == Result::Ignored);
 }
 
 TEST_CASE ("combinations: the general cancel pushes everything back and leaves the memories alone")
@@ -256,22 +256,24 @@ TEST_CASE ("combinations: a program change is a general piston, a divisional pis
     set.set (router::switchParam (7), 0.0);
     set.set (stop (1, 4), 100.0);
 
-    CHECK (c.programChange (lib, set, 2).result == Result::Recalled);            // 0..9 : général de la banque courante
+    CHECK (c.programChange (lib, set, 2).result == Result::Recalled);            // 0..63 : scène de la banque courante
     CHECK (set.get (router::switchParam (7)) == 1.0);
     CHECK (c.programChange (lib, set, 5).result == Result::Empty);
-    CHECK (c.programChange (lib, set, 13, 1).result == Result::Recalled);        // 10..19 : divisionnel 4 du clavier (piste) 1
+    CHECK (c.programChange (lib, set, 63).result == Result::Empty);
+    CHECK (c.programChange (lib, set, 99, 1).result == Result::Recalled);        // 96..127 : scène de piste 4 du clavier (piste) 1
     CHECK (set.get (stop (1, 4)) == 0.0);
-    CHECK (c.programChange (lib, set, 13, 2).result == Result::Empty);           // un autre clavier n'a rien à cet endroit
-    CHECK (c.programChange (lib, set, 13).result == Result::Ignored);            // aucune piste sur ce canal : ignoré
-    CHECK (c.programChange (lib, set, 13, 99).result == Result::Ignored);
+    CHECK (c.programChange (lib, set, 99, 2).result == Result::Empty);           // un autre clavier n'a rien à cet endroit
+    CHECK (c.programChange (lib, set, 99).result == Result::Ignored);            // aucune piste sur ce canal : ignoré
+    CHECK (c.programChange (lib, set, 99, 99).result == Result::Ignored);
     CHECK (c.bank() == 0);
-    CHECK (c.programChange (lib, set, 23).result == Result::Done);               // 20..29 : banque 4
+    CHECK (c.programChange (lib, set, 67).result == Result::Done);               // 64..95 : banque 4
     CHECK (c.bank() == 3);
-    CHECK (c.programChange (lib, set, 23).result == Result::Ignored);            // déjà dans cette banque : rien ne change
-    CHECK (c.programChange (lib, set, 20).result == Result::Done);
+    CHECK (c.programChange (lib, set, 67).result == Result::Ignored);            // déjà dans cette banque : rien ne change
+    CHECK (c.programChange (lib, set, 64).result == Result::Done);
     CHECK (c.bank() == 0);
-    CHECK (c.programChange (lib, set, 30).result == Result::Ignored);            // le reste est ignoré
-    CHECK (c.programChange (lib, set, 127).result == Result::Ignored);
+    CHECK (c.programChange (lib, set, 95).result == Result::Done);
+    CHECK (c.bank() == kBanks - 1);
+    CHECK (c.programChange (lib, set, 128).result == Result::Ignored);           // le reste est ignoré
     CHECK (c.programChange (lib, set, -1).result == Result::Ignored);
 }
 
@@ -301,7 +303,7 @@ TEST_CASE ("combinations: JSON round trip, bounds and tolerant reading")
     longName.name = std::string (500, 'x');
     longName.values.emplace_back (0, 1.0);                         // identifiant nul retiré
     bad.generals[generalKey (0, 2)] = longName;
-    bad.sequence.assign (200, generalKey (1, 1));
+    bad.sequence.assign (kMaxSequence + 40, generalKey (1, 1));
     bad.sequence.push_back (-5);
     const auto clean = sanitised (bad);
     CHECK (clean.generals.size() == 1);
@@ -886,4 +888,17 @@ TEST_CASE ("scenes: the glide time is saved, bounded, and absent when instantane
     lib.glideMs = 999999;
     CHECK (sanitised (lib).glideMs == kMaxGlideMs);
     CHECK (fromJson ("{\"glide_ms\": -5}").glideMs == 0);
+}
+
+TEST_CASE ("scenes: 32 banks of 64 scenes, files keep addressing scenes by bank and number")
+{
+    CHECK (kBanks == 32);
+    CHECK (kPistons == 64);
+    const auto lib = fromJson ("{\"capture\":{\"template\":\"organ_console\"},\"generals\":[{\"bank\":2,\"piston\":5,\"name\":\"Ancien\",\"values\":[[1,1.0]]},{\"bank\":31,\"piston\":63,\"name\":\"Dernier\",\"values\":[]},{\"bank\":32,\"piston\":0,\"name\":\"Hors\",\"values\":[]}]}");
+    REQUIRE (lib.general (2, 5) != nullptr);
+    CHECK (lib.general (2, 5)->name == "Ancien");
+    REQUIRE (lib.general (31, 63) != nullptr);
+    CHECK (lib.generals.size() == 2);                      // la banque 33 n'existe pas
+    CHECK (fromJson (toJson (lib)) == lib);
+    CHECK (generalKey (31, 63) == numGeneralKeys - 1);
 }

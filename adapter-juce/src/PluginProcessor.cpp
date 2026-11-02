@@ -814,8 +814,9 @@ void NeptuneProcessor::drainCombinationPrograms()
 bool NeptuneProcessor::combiLit (int command, int track) const
 {
     using namespace neptune::core;
-    if (command < combi::kCommandGeneral || command >= combi::kCommandDivisional + combi::kPistons) return false;
-    const auto lib = combinations();
+    if (command < combi::kCommandGeneral || command >= combi::kCommandDivisional + combi::kFacadePistons) return false;
+    const juce::ScopedLock lock (instrumentLock_);   // pas de copie de toute la bibliothèque : les voyants interrogent à chaque affichage
+    const auto& lib = mixer_.combinations;
     const auto* memory = command < combi::kCommandDivisional ? lib.general (combi_.bank(), command - combi::kCommandGeneral)
                                                               : lib.divisional (track, combi_.bank(), command - combi::kCommandDivisional);
     SceneInserts inserts (const_cast<NeptuneProcessor&> (*this), 0);

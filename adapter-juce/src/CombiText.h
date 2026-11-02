@@ -10,9 +10,9 @@ inline juce::String combiCommandText (const std::function<juce::String (const ch
 {
     namespace cb = neptune::core::combi;
     const juce::String prefix = text ("combi.prefix");
-    if (command >= cb::kCommandGeneral && command < cb::kCommandGeneral + cb::kPistons)
+    if (command >= cb::kCommandGeneral && command < cb::kCommandGeneral + cb::kFacadePistons)
         return prefix + text ("combi.general") + " " + juce::String (command - cb::kCommandGeneral + 1);
-    if (command >= cb::kCommandDivisional && command < cb::kCommandDivisional + cb::kPistons)
+    if (command >= cb::kCommandDivisional && command < cb::kCommandDivisional + cb::kFacadePistons)
         return prefix + text ("combi.divisional") + " " + juce::String (command - cb::kCommandDivisional + 1);
     switch (command)
     {

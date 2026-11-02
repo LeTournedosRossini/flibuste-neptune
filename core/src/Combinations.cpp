@@ -505,8 +505,8 @@ bool matches (const ParameterSet& set, const Memory& m, InsertAccess* inserts)
 
 std::string commandKey (int command)
 {
-    if (command >= kCommandGeneral && command < kCommandGeneral + kPistons) return "combi_general_" + std::to_string (command - kCommandGeneral + 1);
-    if (command >= kCommandDivisional && command < kCommandDivisional + kPistons) return "combi_divisional_" + std::to_string (command - kCommandDivisional + 1);
+    if (command >= kCommandGeneral && command < kCommandGeneral + kFacadePistons) return "combi_general_" + std::to_string (command - kCommandGeneral + 1);
+    if (command >= kCommandDivisional && command < kCommandDivisional + kFacadePistons) return "combi_divisional_" + std::to_string (command - kCommandDivisional + 1);
     switch (command)
     {
         case kCommandCancel: return "combi_cancel";
@@ -521,8 +521,8 @@ std::string commandKey (int command)
 
 std::string commandLabel (int command)
 {
-    if (command >= kCommandGeneral && command < kCommandGeneral + kPistons) return "G" + std::to_string (command - kCommandGeneral + 1);
-    if (command >= kCommandDivisional && command < kCommandDivisional + kPistons) return "D" + std::to_string (command - kCommandDivisional + 1);
+    if (command >= kCommandGeneral && command < kCommandGeneral + kFacadePistons) return "G" + std::to_string (command - kCommandGeneral + 1);
+    if (command >= kCommandDivisional && command < kCommandDivisional + kFacadePistons) return "D" + std::to_string (command - kCommandDivisional + 1);
     switch (command)
     {
         case kCommandCancel: return "GC";
@@ -667,8 +667,8 @@ Outcome Controller::sequencePrevious (const Library& lib, ParameterSet& set)
 
 Outcome Controller::run (int command, Library& lib, ParameterSet& set, int track)
 {
-    if (command >= kCommandGeneral && command < kCommandGeneral + kPistons) return general (lib, set, command - kCommandGeneral);
-    if (command >= kCommandDivisional && command < kCommandDivisional + kPistons) return divisional (lib, set, track, command - kCommandDivisional);
+    if (command >= kCommandGeneral && command < kCommandGeneral + kFacadePistons) return general (lib, set, command - kCommandGeneral);
+    if (command >= kCommandDivisional && command < kCommandDivisional + kFacadePistons) return divisional (lib, set, track, command - kCommandDivisional);
     Outcome done;
     switch (command)
     {
@@ -684,12 +684,14 @@ Outcome Controller::run (int command, Library& lib, ParameterSet& set, int track
 
 Outcome Controller::programChange (Library& lib, ParameterSet& set, int program, int track)
 {
+    // 0..63 : scène de la banque courante ; 64..95 : banque 1..32 ; 96..127 : scène de piste 1..32 du clavier du canal
+    constexpr int bankBase = kPistons, divisionalBase = kPistons + kBanks;
     if (program >= 0 && program < kPistons) return general (lib, set, program);
-    if (program >= kPistons && program < 2 * kPistons) return divisional (lib, set, track, program - kPistons);   // piste invalide : ignoré
-    if (program >= 2 * kPistons && program < 2 * kPistons + kBanks)
+    if (program >= divisionalBase && program < 128) return divisional (lib, set, track, program - divisionalBase);   // piste invalide : ignoré
+    if (program >= bankBase && program < bankBase + kBanks)
     {
         Outcome out;
-        const int bank = program - 2 * kPistons;
+        const int bank = program - bankBase;
         if (bank != bank_) out.result = Result::Done;
         setBank (bank);
         return out;

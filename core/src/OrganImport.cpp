@@ -431,13 +431,13 @@ private:
             b.style = packStyle (last, "piston");
         };
         int g = 0;
-        for (int piston = 0; piston < combi::kPistons; ++piston)
+        for (int piston = 0; piston < combi::kFacadePistons; ++piston)
             if (result_.combinations.general (0, piston) != nullptr) command (left + (g++) * 108, 0, combi::kCommandGeneral + piston);
         command (left, 1, combi::kCommandCancel);
         command (left + 108, 1, combi::kCommandPrevious);
         command (left + 216, 1, combi::kCommandNext);
         int d = 0;
-        for (int piston = 0; piston < combi::kPistons; ++piston)
+        for (int piston = 0; piston < combi::kFacadePistons; ++piston)
         {
             bool any = false;
             for (std::size_t k = 0; k < result_.keyboards.size(); ++k)
@@ -620,7 +620,7 @@ private:
                 else if (type.rfind ("general", 0) == 0 && type.size() > 7)
                 {
                     const int piston = std::atoi (type.c_str() + 7) - 1;
-                    if (piston < 0 || piston >= combi::kPistons || result_.combinations.general (0, piston) == nullptr) { ++unresolved; continue; }
+                    if (piston < 0 || piston >= combi::kFacadePistons || result_.combinations.general (0, piston) == nullptr) { ++unresolved; continue; }
                     auto* widget = addWidget (fc::WidgetType::Action, x, y, w, h);
                     if (widget == nullptr) continue;
                     widget->actionMode = 1 + combi::kCommandGeneral + piston;
