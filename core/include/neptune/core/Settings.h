@@ -19,7 +19,7 @@ struct GlobalSettings
 {
     std::string language = "en";  // code de langue : "en" par défaut, "fr" disponible
     std::string theme = "dark";   // "dark", "light", "hc" (haut contraste), "hammond" (bois) : identifiants de la maquette
-    int contrast = 0;             // 0..4, confort visuel (sans effet sur le thème "hc")
+    int contrast = 1;             // 0..4, confort visuel (sans effet sur le thème "hc") ; 1 par défaut (décision de l'utilisateur, 2026-11-02)
     PerformanceProfile profile = PerformanceProfile::Live;
 
     // Dossiers par défaut ; vide = emplacement par défaut choisi par l'adaptateur.

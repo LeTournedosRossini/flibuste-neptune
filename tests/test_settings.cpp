@@ -30,7 +30,7 @@ TEST_CASE ("settings defaults match the documented ones")
     const settings::GlobalSettings s;
     CHECK (s.language == "en");
     CHECK (s.theme == "dark");
-    CHECK (s.contrast == 0);
+    CHECK (s.contrast == 1);
     CHECK (s.profile == settings::PerformanceProfile::Live);
     CHECK (s.autosaveIntervalSeconds == 60);
     CHECK (s.autosaveKeepDays == 30);
@@ -70,7 +70,7 @@ TEST_CASE ("invalid settings fall back to defaults field by field")
 
     CHECK (s.language == "fr");                     // valide : conservé
     CHECK (s.theme == "dark");                      // inconnu
-    CHECK (s.contrast == 0);                        // hors bornes
+    CHECK (s.contrast == 1);                        // hors bornes : la valeur par défaut
     CHECK (s.profile == settings::PerformanceProfile::Live);
     CHECK (s.samplesDir.empty());                   // mauvais type
     CHECK (s.autosaveIntervalSeconds == 60);        // sous le minimum
