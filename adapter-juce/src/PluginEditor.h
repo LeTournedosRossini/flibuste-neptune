@@ -1,4 +1,5 @@
 #pragma once
+#include "BarIcons.h"
 #include "PluginProcessor.h"
 #include "CombinationsPanel.h"
 #include "ControlPanel.h"
@@ -80,11 +81,14 @@ private:
     juce::Label latencyLabel_;
     juce::Label recoveryLabel_;
     juce::Label profileLabel_;
-    juce::TextButton profileSwitchButton_, profileLockButton_;
+    IconButton profileSwitchButton_, profileLockButton_;
     void updateProfileControls();
 
     std::unique_ptr<KnobModal> modal_;
-    juce::TextButton undoButton_, redoButton_;
+    IconButton undoButton_, redoButton_;
+    IconButton prevStepButton_, nextStepButton_;   // pas précédent / suivant des scènes
+    juce::Label stepLabel_;
+    int lastStepPosition_ = -2, lastStepLength_ = -1;
 
     juce::TextButton voiceCountButton_; // « Voix : n / limite » ; un clic règle la limite globale de voix
     int lastVoiceCount_ = -1;

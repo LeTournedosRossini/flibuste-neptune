@@ -125,10 +125,16 @@ public:
         insertStep_.onClick = [this] { insertStep(); };
         deleteStep_.setButtonText (text ("comb.delete_step"));
         deleteStep_.onClick = [this] { processor_.uiCombiSequenceDeleteCurrent(); refresh (true); };
+        prevStepButton_.setButtonText ("<");
+        nextStepButton_.setButtonText (">");
+        prevStepButton_.setTooltip (text ("comb.prev_step"));
+        nextStepButton_.setTooltip (text ("comb.next_step"));
+        prevStepButton_.onClick = [this] { processor_.uiCombiCommand (neptune::core::combi::kCommandPrevious, track_); refresh (true); };
+        nextStepButton_.onClick = [this] { processor_.uiCombiCommand (neptune::core::combi::kCommandNext, track_); refresh (true); };
         stepLabel_.setFont (juce::FontOptions (14.0f, juce::Font::bold));
         stepLabel_.setColour (juce::Label::textColourId, colour (neptune::core::theme::Token::Accent));
         stepLabel_.setJustificationType (juce::Justification::centredRight);
-        for (auto* c : std::initializer_list<juce::Component*> { &captureLabel_, &captureBox_, &captureEdit_, &glideLabel_, &glideBox_, &insertStep_, &deleteStep_, &stepLabel_ }) addAndMakeVisible (*c);
+        for (auto* c : std::initializer_list<juce::Component*> { &captureLabel_, &captureBox_, &captureEdit_, &glideLabel_, &glideBox_, &insertStep_, &deleteStep_, &prevStepButton_, &nextStepButton_, &stepLabel_ }) addAndMakeVisible (*c);
 
         generals_.setModel (&generalsModel_);
         generals_.setRowHeight (30);
@@ -211,6 +217,8 @@ public:
         {
             auto titleRow = right.removeFromTop (26);
             stepLabel_.setBounds (titleRow.removeFromRight (120));
+            nextStepButton_.setBounds (titleRow.removeFromRight (34).reduced (2, 0));
+            prevStepButton_.setBounds (titleRow.removeFromRight (34).reduced (2, 0));
             sequenceTitle_.setBounds (titleRow);
         }
         auto stepButtons = right.removeFromBottom (36);
@@ -520,7 +528,7 @@ private:
     static constexpr int glideTimes[] = { 0, 50, 100, 200, 300, 500, 1000, 2000 };
     juce::Label keyboardLabel_, captureLabel_, glideLabel_, stepLabel_;
     juce::ComboBox keyboardBox_, captureBox_, glideBox_;
-    juce::TextButton captureEdit_, insertStep_, deleteStep_, store_;
+    juce::TextButton captureEdit_, insertStep_, deleteStep_, prevStepButton_, nextStepButton_, store_;
     juce::Label title_, hint_, bankLabel_, generalsTitle_, sequenceTitle_;
     juce::TextButton prevBank_, nextBank_, recall_, rename_, erase_, addToSequence_, up_, down_, remove_, clear_, close_;
     juce::ListBox generals_, sequence_;

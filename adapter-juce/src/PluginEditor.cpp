@@ -191,8 +191,10 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     };
     addAndMakeVisible (trackBox_);
 
-    undoButton_.setButtonText (text ("undo.undo"));
-    redoButton_.setButtonText (text ("undo.redo"));
+    undoButton_.setIcon (IconButton::Icon::Left);
+    redoButton_.setIcon (IconButton::Icon::Right);
+    undoButton_.setTooltip (text ("undo.undo"));
+    redoButton_.setTooltip (text ("undo.redo"));
     undoButton_.onClick = [this] { processor_.uiUndo(); };
     redoButton_.onClick = [this] { processor_.uiRedo(); };
     addAndMakeVisible (undoButton_);
@@ -209,7 +211,9 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
 
     profileLabel_.setColour (juce::Label::textColourId, colour (Token::Accent));
     addAndMakeVisible (profileLabel_);
-    profileSwitchButton_.setButtonText (text ("profile.switch"));
+    profileSwitchButton_.setIcon (IconButton::Icon::Cycle);
+    profileSwitchButton_.setButtonText (text ("profile.switch_short"));
+    profileSwitchButton_.setTooltip (text ("profile.switch"));
     profileSwitchButton_.onClick = [this]
     {
         auto& shared = processor_.profile().shared();
@@ -226,6 +230,16 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
         processor_.notifyStateChanged();
     };
     addAndMakeVisible (profileLockButton_);
+
+    prevStepButton_.setIcon (IconButton::Icon::Left);
+    nextStepButton_.setIcon (IconButton::Icon::Right);
+    prevStepButton_.setTooltip (text ("comb.prev_step"));
+    nextStepButton_.setTooltip (text ("comb.next_step"));
+    prevStepButton_.onClick = [this] { processor_.uiCombiCommand (neptune::core::combi::kCommandPrevious, processor_.selectedTrack()); };
+    nextStepButton_.onClick = [this] { processor_.uiCombiCommand (neptune::core::combi::kCommandNext, processor_.selectedTrack()); };
+    stepLabel_.setColour (juce::Label::textColourId, colour (Token::Accent));
+    stepLabel_.setJustificationType (juce::Justification::centred);
+    for (auto* c : std::initializer_list<juce::Component*> { &prevStepButton_, &stepLabel_, &nextStepButton_ }) addAndMakeVisible (*c);
 
     latencyLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
     addAndMakeVisible (latencyLabel_);
@@ -492,7 +506,7 @@ void NeptuneEditor::applyConsoleLock()
     const bool visible = ! consoleLocked_;
     for (auto* c : std::initializer_list<juce::Component*> { &viewButton_, &routerButton_, &modButton_, &facadeButton_, &mappingButton_, &mixerButton_, &midiFilterButton_,
                                                               &controlButton_, &oscButton_, &midiSendButton_, &combiButton_, &consoleButton_, &splitButton_, &globalPresetButton_, &profileSwitchButton_,
-                                                              &profileLockButton_, &voiceCountButton_, &latencyLabel_, &profileLabel_, &trackBox_ })
+                                                              &profileLockButton_, &prevStepButton_, &stepLabel_, &nextStepButton_, &voiceCountButton_, &latencyLabel_, &profileLabel_, &trackBox_ })
         c->setVisible (visible);
     unlockButton_.setVisible (consoleLocked_);
     facadeView_->setScopeVisible (! consoleLocked_);
@@ -1088,7 +1102,8 @@ void NeptuneEditor::updateProfileControls()
     profileLabel_.setText (juce::String::fromUTF8 (tr_.format ("profile.status",
                                { name (p.shared().get()), name (p.effective()), locked ? tr_.tr ("profile.locked_suffix") : std::string_view() }).c_str()),
                            juce::dontSendNotification);
-    profileLockButton_.setButtonText (text (locked ? "profile.unlock" : "profile.lock"));
+    profileLockButton_.setIcon (locked ? IconButton::Icon::LockClosed : IconButton::Icon::LockOpen);
+    profileLockButton_.setTooltip (text (locked ? "profile.unlock" : "profile.lock"));
     controlButton_.setToggleState (processor_.ccEnabled(), juce::dontSendNotification); // allumé : les CC agissent
     oscButton_.setToggleState (processor_.oscEnabled(), juce::dontSendNotification);     // allumé : le serveur OSC est demandé
 }
@@ -1117,6 +1132,17 @@ void NeptuneEditor::timerCallback()
         {
             lastVoiceCount_ = voices;
             voiceCountButton_.setButtonText (text ("analog.voices") + " " + juce::String (voices) + " / " + juce::String (processor_.masterSettings().maxVoices));
+        }
+    }
+    {
+        const auto status = processor_.combiStatus();
+        if (status.sequencePosition != lastStepPosition_ || status.sequenceLength != lastStepLength_)
+        {
+            lastStepPosition_ = status.sequencePosition;
+            lastStepLength_ = status.sequenceLength;
+            stepLabel_.setText (juce::String::fromUTF8 (tr_.format ("comb.step", { std::to_string (status.sequencePosition + 1), std::to_string (status.sequenceLength) }).c_str()), juce::dontSendNotification);
+            prevStepButton_.setEnabled (status.sequenceLength > 0);
+            nextStepButton_.setEnabled (status.sequenceLength > 0);
         }
     }
     repaint();
@@ -1232,24 +1258,31 @@ void NeptuneEditor::resized()
             for (const auto& t : texts) w = std::max (w, font.getStringWidthFloat (t));
             return juce::roundToInt (std::ceil (w)) + pad;
         };
-        redoButton_.setBounds (lw_ - 32 - 64, rowY, 64, rowH);
-        undoButton_.setBounds (lw_ - 32 - 64 - 4 - 64, rowY, 64, rowH);
+        const int arrowW = 34;
+        redoButton_.setBounds (lw_ - 32 - arrowW, rowY, arrowW, rowH);
+        undoButton_.setBounds (lw_ - 32 - arrowW - 4 - arrowW, rowY, arrowW, rowH);
         const int presetW = widthOf ({ globalPresetButton_.getButtonText() });
-        globalPresetButton_.setBounds (lw_ - 32 - 64 - 4 - 64 - 12 - presetW, rowY, presetW, rowH);
+        globalPresetButton_.setBounds (undoButton_.getX() - 12 - presetW, rowY, presetW, rowH);
         const int consoleW = widthOf ({ consoleButton_.getButtonText() });   // le mode console est dans la barre du bas, à gauche de Preset global (la barre du haut était pleine)
         consoleButton_.setBounds (globalPresetButton_.getX() - gap - consoleW, rowY, consoleW, rowH);
         const int splitW = widthOf ({ splitButton_.getButtonText() });
         splitButton_.setBounds (consoleButton_.getX() - gap - splitW, rowY, splitW, rowH);
         const int combiW = widthOf ({ combiButton_.getButtonText() });
         combiButton_.setBounds (splitButton_.getX() - gap - combiW, rowY, combiW, rowH);
-        auto row = juce::Rectangle<int> (32, rowY, combiButton_.getX() - 32 - 8, rowH);
+        {   // le stepper des scènes, juste avant le bouton Scènes : < Pas n / m >
+            nextStepButton_.setBounds (combiButton_.getX() - gap - arrowW, rowY, arrowW, rowH);
+            const int labelW = widthOf ({ juce::String::fromUTF8 (tr_.format ("comb.step", { "99", "99" }).c_str()) }) - pad + 8;
+            stepLabel_.setBounds (nextStepButton_.getX() - 2 - labelW, rowY, labelW, rowH);
+            prevStepButton_.setBounds (stepLabel_.getX() - 2 - arrowW, rowY, arrowW, rowH);
+        }
+        auto row = juce::Rectangle<int> (32, rowY, prevStepButton_.getX() - 32 - 8, rowH);
         latencyLabel_.setBounds (row.removeFromLeft (widthOf ({ juce::String::fromUTF8 (tr_.format ("latency.reported", { "99999" }).c_str()) }) - pad + 12));   // la plus longue forme du texte
         row.removeFromLeft (gap);
-        profileSwitchButton_.setBounds (row.removeFromLeft (widthOf ({ profileSwitchButton_.getButtonText() })));
+        profileSwitchButton_.setBounds (row.removeFromLeft (profileSwitchButton_.preferredWidth (rowH, font)));
         row.removeFromLeft (gap);
-        profileLockButton_.setBounds (row.removeFromLeft (widthOf ({ text ("profile.lock"), text ("profile.unlock") })));
+        profileLockButton_.setBounds (row.removeFromLeft (arrowW));
         row.removeFromLeft (gap);
-        voiceCountButton_.setBounds (row.removeFromLeft (widthOf ({ text ("analog.voices") + " 1024 / 1024" })));
+        voiceCountButton_.setBounds (row.removeFromLeft (widthOf ({ text ("analog.voices") + " 888 / 1024" })));
         row.removeFromLeft (gap + 6);
         profileLabel_.setBounds (row);
     }
