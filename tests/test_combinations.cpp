@@ -674,11 +674,17 @@ TEST_CASE ("scenes: a scene can hold more than a thousand values")
     CHECK (back.capture == everything);
 }
 
-TEST_CASE ("scenes: the capture template is saved with the project, and absent for the original organ template")
+TEST_CASE ("scenes: the default template is the whole of Neptune, and projects from before the templates stay organ consoles")
 {
     Library lib;
+    CHECK (lib.capture.tpl == Template::Everything);
+    CHECK (toJson (lib).find ("capture") == std::string::npos);   // bibliothèque vide : rien à écrire
     lib.generals[generalKey (0, 0)] = Memory { true, "A", { { 1, 1.0 } } };
-    CHECK (toJson (lib).find ("capture") == std::string::npos);   // anciens projets : inchangés
+    CHECK (fromJson (toJson (lib)).capture.tpl == Template::Everything);   // les scènes enregistrées avec le modèle par défaut le gardent
+    const auto old = fromJson ("{\"generals\":[{\"bank\":0,\"piston\":0,\"used\":true,\"name\":\"A\",\"values\":[[1,1.0]]}]}");
+    CHECK (old.capture.tpl == Template::OrganConsole);            // ancien projet : sans champ « capture »
+    lib.capture.tpl = Template::OrganConsole;
+    CHECK (fromJson (toJson (lib)).capture.tpl == Template::OrganConsole);
     lib.capture.tpl = Template::Mixer;
     CHECK (fromJson (toJson (lib)).capture.tpl == Template::Mixer);
     lib.capture.tpl = Template::Custom;
@@ -687,7 +693,7 @@ TEST_CASE ("scenes: the capture template is saved with the project, and absent f
     const auto back = fromJson (toJson (lib));
     CHECK (back.capture == lib.capture);
     CHECK (back.capture.families == 5u);
-    CHECK (fromJson ("{\"capture\":{\"template\":\"nonsense\"}}").capture.tpl == Template::OrganConsole);   // inconnu : modèle d'origine
+    CHECK (fromJson ("{\"capture\":{\"template\":\"nonsense\"}}").capture.tpl == Template::Everything);   // inconnu : modèle par défaut
 }
 
 TEST_CASE ("scenes: the general cancel returns the template's parameters to their defaults, organ templates to zero")

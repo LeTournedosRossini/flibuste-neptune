@@ -94,7 +94,7 @@ constexpr int kMaxGlideMs = 5000;
 
 struct Library
 {
-    CaptureSpec capture;                  // le modèle d'enregistrement courant (dans le projet)
+    CaptureSpec capture { Template::Everything };   // le modèle d'enregistrement courant (dans le projet) ; un nouveau projet enregistre tout Neptune, un ancien projet sans ce champ garde le modèle d'orgue (voir fromJson)
     int glideMs = 0;                      // durée du glissement des valeurs continues au rappel (0 = instantané, au plus kMaxGlideMs)
     std::map<int, Memory> generals;       // generalKey
     std::map<int, Memory> divisionals;    // divisionalKey
@@ -102,7 +102,7 @@ struct Library
 
     const Memory* general (int bank, int piston) const;
     const Memory* divisional (int track, int bank, int piston) const;
-    bool empty() const noexcept { return generals.empty() && divisionals.empty() && sequence.empty() && capture == CaptureSpec {} && glideMs == 0; }
+    bool empty() const noexcept { return generals.empty() && divisionals.empty() && sequence.empty() && capture == Library {}.capture && glideMs == 0; }
     bool operator== (const Library& o) const noexcept { return generals == o.generals && divisionals == o.divisionals && sequence == o.sequence && capture == o.capture && glideMs == o.glideMs; }
     bool operator!= (const Library& o) const noexcept { return ! (*this == o); }
 };

@@ -6,7 +6,7 @@
 class IconButton : public juce::TextButton
 {
 public:
-    enum class Icon { Cycle, LockOpen, LockClosed, Left, Right };
+    enum class Icon { Cycle, LockOpen, LockClosed, Left, Right, Cross };
 
     void setIcon (Icon i) { if (icon_ != i) { icon_ = i; repaint(); } }
     Icon icon() const noexcept { return icon_; }
@@ -46,6 +46,11 @@ private:
         {
             case Icon::Left:
                 p.startNewSubPath (x + w * 0.65f, y + h * 0.15f); p.lineTo (x + w * 0.3f, y + h * 0.5f); p.lineTo (x + w * 0.65f, y + h * 0.85f);
+                g.strokePath (p, stroke);
+                break;
+            case Icon::Cross:
+                p.startNewSubPath (x + w * 0.2f, y + h * 0.2f); p.lineTo (x + w * 0.8f, y + h * 0.8f);
+                p.startNewSubPath (x + w * 0.8f, y + h * 0.2f); p.lineTo (x + w * 0.2f, y + h * 0.8f);
                 g.strokePath (p, stroke);
                 break;
             case Icon::Right:

@@ -4,6 +4,7 @@
 #include <functional>
 #include <iterator>
 #include <string>
+#include "BarIcons.h"
 #include "PluginProcessor.h"
 #include "neptune/core/Combinations.h"
 #include "neptune/core/I18n.h"
@@ -79,19 +80,21 @@ public:
         rename_.onClick = [this] { renameSelected(); };
         erase_.setButtonText (text ("comb.erase"));
         erase_.onClick = [this] { eraseSelected(); };
-        addToSequence_.setButtonText (text ("comb.add_seq"));
+        addToSequence_.setIcon (IconButton::Icon::Right);
+        addToSequence_.setTooltip (text ("comb.add_seq_tip"));
         addToSequence_.onClick = [this] { addSelectedToSequence(); };
         up_.setButtonText (text ("comb.up"));
         up_.onClick = [this] { moveStep (-1); };
         down_.setButtonText (text ("comb.down"));
         down_.onClick = [this] { moveStep (1); };
-        remove_.setButtonText (text ("comb.remove"));
+        remove_.setIcon (IconButton::Icon::Cross);
+        remove_.setTooltip (text ("comb.remove"));
         remove_.onClick = [this] { removeStep(); };
         clear_.setButtonText (text ("comb.clear_seq"));
         clear_.onClick = [this] { clearSequence(); };
         close_.setButtonText (text ("modal.close"));
         close_.onClick = [this] { if (onClose) onClose(); };
-        for (auto* b : { &prevBank_, &nextBank_, &store_, &recall_, &rename_, &erase_, &addToSequence_, &up_, &down_, &remove_, &clear_, &close_ }) addAndMakeVisible (*b);
+        for (auto* b : std::initializer_list<juce::Component*> { &prevBank_, &nextBank_, &store_, &recall_, &rename_, &erase_, &addToSequence_, &up_, &down_, &remove_, &clear_, &close_ }) addAndMakeVisible (*b);
 
         captureLabel_.setText (text ("comb.capture"), juce::dontSendNotification);
         captureLabel_.setColour (juce::Label::textColourId, colour (neptune::core::theme::Token::Text));
@@ -199,9 +202,14 @@ public:
         r.removeFromTop (divisional_ ? 6 : 2);
         close_.setBounds (r.removeFromBottom (36).removeFromRight (140));
         r.removeFromBottom (8);
-        auto left = r.removeFromLeft (r.getWidth() / 2 - 8);
-        r.removeFromLeft (16);
+        auto left = r.removeFromLeft ((r.getWidth() - 72) / 2);
+        auto gutter = r.removeFromLeft (72);   // entre les deux listes : « → » ajoute la scène choisie au pas à pas, « ✕ » retire le pas choisi
         auto right = r;
+        {
+            const auto middle = gutter.getCentre();
+            addToSequence_.setBounds (juce::Rectangle<int> (44, 34).withCentre ({ middle.x, middle.y - 24 }));
+            remove_.setBounds (juce::Rectangle<int> (44, 34).withCentre ({ middle.x, middle.y + 24 }));
+        }
         generalsTitle_.setBounds (left.removeFromTop (26));
         auto leftButtons = left.removeFromBottom (36);
         left.removeFromBottom (4);
@@ -209,11 +217,10 @@ public:
         left.removeFromBottom (6);
         generals_.setBounds (left);
         store_.setBounds (storeRow.reduced (2, 0));
-        const int lw = leftButtons.getWidth() / 4;
+        const int lw = leftButtons.getWidth() / 3;
         recall_.setBounds (leftButtons.removeFromLeft (lw).reduced (2, 0));
         rename_.setBounds (leftButtons.removeFromLeft (lw).reduced (2, 0));
-        erase_.setBounds (leftButtons.removeFromLeft (lw).reduced (2, 0));
-        addToSequence_.setBounds (leftButtons.reduced (2, 0));
+        erase_.setBounds (leftButtons.reduced (2, 0));
         {
             auto titleRow = right.removeFromTop (26);
             stepLabel_.setBounds (titleRow.removeFromRight (120));
@@ -228,10 +235,9 @@ public:
         sequence_.setBounds (right);
         insertStep_.setBounds (stepButtons.removeFromLeft (stepButtons.getWidth() / 2).reduced (2, 0));
         deleteStep_.setBounds (stepButtons.reduced (2, 0));
-        const int rw = rightButtons.getWidth() / 4;
+        const int rw = rightButtons.getWidth() / 3;
         up_.setBounds (rightButtons.removeFromLeft (rw).reduced (2, 0));
         down_.setBounds (rightButtons.removeFromLeft (rw).reduced (2, 0));
-        remove_.setBounds (rightButtons.removeFromLeft (rw).reduced (2, 0));
         clear_.setBounds (rightButtons.reduced (2, 0));
     }
 
@@ -530,7 +536,8 @@ private:
     juce::ComboBox keyboardBox_, captureBox_, glideBox_;
     juce::TextButton captureEdit_, insertStep_, deleteStep_, prevStepButton_, nextStepButton_, store_;
     juce::Label title_, hint_, bankLabel_, generalsTitle_, sequenceTitle_;
-    juce::TextButton prevBank_, nextBank_, recall_, rename_, erase_, addToSequence_, up_, down_, remove_, clear_, close_;
+    juce::TextButton prevBank_, nextBank_, recall_, rename_, erase_, up_, down_, clear_, close_;
+    IconButton addToSequence_, remove_;
     juce::ListBox generals_, sequence_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CombinationsPanel)

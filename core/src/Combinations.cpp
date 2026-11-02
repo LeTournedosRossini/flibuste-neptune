@@ -181,7 +181,7 @@ std::string toJson (const Library& in)
     }
     for (const int key : lib.sequence) sequence.push_back ({ { "bank", key / kPistons }, { "piston", key % kPistons } });
     json doc;
-    if (lib.capture != CaptureSpec {})
+    if (lib.capture != Library {}.capture || ! lib.generals.empty() || ! lib.divisionals.empty() || ! lib.sequence.empty())   // écrit dès qu'il y a des scènes : son absence veut dire « projet d'avant les modèles »
     {
         json cap;
         cap["template"] = templateKey (lib.capture.tpl);
@@ -243,6 +243,8 @@ Library fromJson (std::string_view text)
             if (o.is_object() && lib.sequence.size() < static_cast<std::size_t> (kMaxSequence) && index (o, "bank", kBanks, bank) && index (o, "piston", kPistons, piston))
                 lib.sequence.push_back (generalKey (bank, piston));
         }
+    // Un projet enregistré avant les modèles n'a pas ce champ : ses scènes sont des combinaisons d'orgue.
+    if (doc.find ("capture") == doc.end() && (! lib.generals.empty() || ! lib.divisionals.empty() || ! lib.sequence.empty())) lib.capture.tpl = Template::OrganConsole;
     return lib;
 }
 

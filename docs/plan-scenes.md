@@ -32,5 +32,10 @@ Un réglage « Glissement » dans l'écran Scènes (Instantané, 50, 100, 200, 3
 ## Stepper dans l'interface (2026-11-02)
 Boutons « < » et « > » dans l'écran Scènes (à côté de « Pas n / m ») et, dans la barre du bas de Neptune, un stepper « < Pas n / m > » juste avant le bouton Scènes (mêmes commandes que `combi_previous` / `combi_next`, piste choisie). La barre du bas a aussi gagné de la place : icône à deux flèches + « Profil global », cadenas ouvert / fermé (infobulle), bouton Voix resserré, flèches gauche / droite pour Annuler / Rétablir (`BarIcons.h`, `IconButton`, icônes tracées en vectoriel). Pas de paramètre d'hôte pour le stepper : les commandes restent des actions de la couche de contrôle et de la Façade.
 
+## Retouches (2026-11-02, après essai dans Reaper)
+- Modèle d'enregistrement par défaut : **Tout Neptune** (nouveau projet). Un projet enregistré avant les modèles (scènes sans champ `capture`) garde « Combinaison d'orgue » ; dès qu'il y a des scènes, `capture` est toujours écrit.
+- Écran Scènes : marge plus large entre les deux listes, avec « → » (ajouter la scène choisie au pas à pas) et, dessous, « ✕ » (retirer le pas choisi) ; ils remplacent les boutons « Ajouter » et « Retirer ».
+- À décider avec Jean : plus de scènes par banque (128 proposé) et de banques (16 proposé) ; le coût dépend du nombre de scènes enregistrées, pas du nombre d'emplacements (stockage clairsemé) ; `combinations()` copie toute la bibliothèque à chaque appel (voyants) : à partager avant de monter ; changement de programme MIDI à redéfinir.
+
 ## Plus tard
 Commandes « Insérer le pas » et « Supprimer le pas » pour la Façade et la couche de contrôle (aujourd'hui seulement dans l'écran) ; noms de modèles personnalisés enregistrés ; sélection par piste dans « Au choix ».
