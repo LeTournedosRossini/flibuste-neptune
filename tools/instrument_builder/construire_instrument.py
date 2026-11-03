@@ -2,6 +2,7 @@
 """Construit un instrument pour le Sampler de Neptune à partir d'un dossier de samples (WAV) nommés  <instrument>_<note>_<dynamique>[_<dynamique>].wav
 (ex. piano_C3_pp.wav, piano_C3_v40.wav, piano_C3_v40_p7.wav). La dynamique est dite par UN OU DEUX éléments après la note :
   v40          la vélocité envoyée à l'instrument pour enregistrer ce sample (1..127)
+  rr2          le numéro d'alternance (round-robin) : plusieurs prises de la même couche (le ReaScript sampler.lua écrit rr<NN>)
   p7           le numéro du palier (7e niveau de dynamique, 1 = le plus doux) ; aussi L7, palier7 ou un nombre seul (7)
   pp mp mf ff  une nuance (ppp pp p mp mf f ff fff)
 Deux systèmes de niveaux, pour savoir quelles vélocités envoyer (voir la commande `plan`) :
@@ -46,6 +47,9 @@ def classify(token):
     m = re.fullmatch(r"v(?:el)?(\d{1,3})", t)
     if m and 1 <= int(m.group(1)) <= 127:
         return ("vel", int(m.group(1)))
+    m = re.fullmatch(r"rr(\d{1,3})", t)
+    if m:
+        return ("rr", int(m.group(1)))
     m = re.fullmatch(r"(?:l|p|palier|layer)(\d{1,3})", t) or re.fullmatch(r"(\d{1,3})", t)
     if m:
         return ("layer", int(m.group(1)))
@@ -60,7 +64,7 @@ def parse_name(stem):
     for i in range(len(parts) - 1, 0, -1):   # le dernier élément qui se lit comme une note, suivi de une ou deux dynamiques
         note = note_number(parts[i])
         rest = parts[i + 1:]
-        if note is None or not (1 <= len(rest) <= 2):
+        if note is None or not (1 <= len(rest) <= 3):
             continue
         dyn = {}
         for tok in rest:
@@ -69,7 +73,7 @@ def parse_name(stem):
                 dyn = None
                 break
             dyn[c[0]] = c[1]
-        if dyn:
+        if dyn and ("vel" in dyn or "layer" in dyn or "word" in dyn):
             return "_".join(parts[:i]), note, dyn
     return None
 
@@ -199,7 +203,7 @@ def main():
         for note, items in sorted(notes.items()):
             def rank_key(it):
                 d = it[0]
-                return (d.get("vel", 0), d.get("layer", 0), DYN_RANK.get(d.get("word"), 0))
+                return (d.get("vel", 0), d.get("layer", 0), DYN_RANK.get(d.get("word"), 0), d.get("rr", 0))
             items.sort(key=rank_key)
             for dyn, fn in items:
                 x, rate = sf.read(os.path.join(args.folder, fn), always_2d=True)
@@ -211,7 +215,7 @@ def main():
                 vel = dyn.get("vel")
                 if vel is None and vmap is not None and "layer" in dyn and 1 <= dyn["layer"] <= len(vmap):
                     vel = vmap[dyn["layer"] - 1]
-                rows.append(dict(note=note, dyn=dyn, vel=vel, file=fn, level=lvl, cents=cents, spread=spread, meas=meas))
+                rows.append(dict(note=note, dyn=dyn, vel=vel, rr=dyn.get("rr"), file=fn, level=lvl, cents=cents, spread=spread, meas=meas))
         top = [max((r for r in rows if r["note"] == n), key=lambda r: r["level"])["level"] for n in notes]
         ref = args.ref_db if args.ref_db is not None else float(np.median(top))
 
@@ -228,20 +232,30 @@ def main():
         report.append(f"{'fichier':34s} {'vél.':>5s} {'zone':>8s} {'niveau':>8s} {'LUFS':>7s} {'RMS':>7s} {'crête':>7s} {'max à':>6s} {'gain':>7s} {'écart cents':>12s} {'fiab.':>7s}  accord")
         sfz = ["// " + inst + " : construit par construire_instrument.py (gain et accord mesurés)", "<global>", "loop_mode=no_loop", ""]
         for note in keys:
-            layers = [r for r in rows if r["note"] == note]
-            n = len(layers)
-            vels = [r["vel"] for r in layers]
+            members = [r for r in rows if r["note"] == note]
+            groups = {}
+            for r in members:   # une couche = une vélocité (ou un palier / une nuance) ; ses alternances (rr) sont des variantes de la même couche
+                key = ("v", r["vel"]) if r["vel"] is not None else ("l", r["dyn"].get("layer", 0), DYN_RANK.get(r["dyn"].get("word"), 0))
+                groups.setdefault(key, []).append(r)
+            glist = list(groups.values())
+            for g in glist:
+                g.sort(key=lambda r: r["rr"] or 0)
+                if len(g) > 1 and len({r["rr"] for r in g}) != len(g):
+                    sys.exit(f"note {note} : plusieurs samples pour la même couche sans numéro d'alternance différent (rr) : {[r['file'] for r in g]}")
+            n = len(glist)
+            vels = [g[0]["vel"] for g in glist]
             if all(v is not None for v in vels):
                 order = sorted(range(n), key=lambda k: vels[k])
-                layers = [layers[k] for k in order]
+                glist = [glist[k] for k in order]
                 vels = [vels[k] for k in order]
-                if len(set(vels)) != n:
-                    sys.exit(f"note {note} : deux samples ont la même vélocité {vels}")
                 ranges = [(1 if i == 0 else (vels[i - 1] + vels[i]) // 2 + 1, 127 if i == n - 1 else (vels[i] + vels[i + 1]) // 2) for i in range(n)]
             else:
+                glist.sort(key=lambda g: (g[0]["dyn"].get("layer", 0), DYN_RANK.get(g[0]["dyn"].get("word"), 0)))
                 ranges = [(1 + (127 * i) // n, (127 * (i + 1)) // n) for i in range(n)]
-            for i, r in enumerate(layers):
+            flat = [(i, k, r) for i, g in enumerate(glist) for k, r in enumerate(g)]
+            for i, k, r in flat:
                 vlo, vhi = ranges[i]
+                seq = f" seq_length={len(glist[i])} seq_position={k + 1}" if len(glist[i]) > 1 else ""
                 gain = 0.0 if args.raw else round(ref - r["level"], 2)
                 tune, why = 0.0, "-"
                 if r["cents"] is None:
@@ -262,7 +276,7 @@ def main():
                 m = r["meas"]
                 report.append(f"{r['file']:34s} {('-' if r['vel'] is None else r['vel']):>5} {f'{vlo}-{vhi}':>8s} {r['level']:8.2f} {m['lufs']:7.2f} {m['rms_db']:7.2f} {m['peak_db']:7.2f} {m['lufs_at']:6.2f} {gain:+7.2f} {c:>12s} {s:>7s}  {why}")
                 lo, hi = key_ranges[note]
-                sfz.append(f"<region> sample={r['file']} pitch_keycenter={note} lokey={lo} hikey={hi} lovel={vlo} hivel={vhi} volume={gain} tune={tune}")
+                sfz.append(f"<region> sample={r['file']} pitch_keycenter={note} lokey={lo} hikey={hi} lovel={vlo} hivel={vhi}{seq} volume={gain} tune={tune}")
         for fn in skipped:
             report.append(f"IGNORÉ (nom non reconnu) : {fn}")
         with open(os.path.join(args.folder, inst + ".sfz"), "w") as f:

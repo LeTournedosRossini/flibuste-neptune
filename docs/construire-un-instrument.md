@@ -32,6 +32,14 @@ Deux systèmes pour décider des niveaux, que la commande `plan` imprime (palier
 
 `python3 tools/instrument_builder/construire_instrument.py --plan --plage 5:127:24` (ou `--velocites ...`). Si le nom ne porte que le palier, donner la même option au script pour qu'il en déduise la vélocité ; sans vélocité du tout, les couches se partagent également 1..127. **La zone d'un sample couvre la moitié de l'écart avec ses voisins** (la première commence à 1, la dernière finit à 127 : avec des niveaux discrets 10..60, le niveau 60 sert jusqu'à 127). Deux samples de même note et de même vélocité sont refusés ; un nom non reconnu est listé « IGNORÉ », jamais deviné. Pour des gabarits plus variés, l'import de dossier de Neptune (`ZoneImport.h`) lit d'autres noms, mais il ne mesure rien.
 
+## Enregistrer avec le ReaScript, puis construire
+
+Le ReaScript `recherche-son/sampler/sampler.lua` (hors dépôt) joue les notes à des vélocités choisies dans Reaper et rend les fichiers ; `slice.py` les découpe en un fichier par échantillon. Il sait déjà répartir les vélocités : `velocities = { count = 24, min = 5, max = 127, curve = 1.0 }` (plage) ou `velocities = { 10, 20, 30, 40, 60 }` (niveaux discrets). Dans `naming`, `{vel}` est la vélocité envoyée et `{dyn}` le numéro du palier. Config d'exemple prête pour le constructeur : `recherche-son/sampler/configs/piano_pour_neptune.lua` (noms `piano_C#3_v047_p07_rr01.wav`). Le constructeur lit aussi l'alternance `rr<NN>` (plusieurs prises de la même couche, converties en `seq_length` / `seq_position`). Le ReaScript n'a pas d'interface visuelle : il demande seulement le fichier de config puis une boîte de confirmation.
+
+## Interface visuelle
+
+`python3 tools/instrument_builder/interface_instrument.py [dossier]` (Tkinter, fourni avec Python) : dossier, dynamiques (noms / plage / niveaux discrets, bouton « Voir la carte »), mesure et fondu, puis « Construire l'instrument » et « Vérifier (balayage de vélocité) » ; le journal montre tout ce que font les outils en ligne de commande, la barre d'état dit en vert ou en rouge si l'instrument est prêt ou s'il reste des marches ou des trous.
+
 ## Comment le Sampler calcule le volume (ce qui fonde la méthode)
 
 - Chaque zone (`ZoneDescription`, `core/include/neptune/core/Instrument.h`) porte `gain_db`, `tune_cents`, `root_note`, `key_low/high`, `vel_low/high`. Chaque zone a un suivi de vélocité : le gain suit `vélocité^velExponent` (`velTrackPct` 100 % par défaut, exposant 1 par défaut).
