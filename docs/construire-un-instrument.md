@@ -15,9 +15,22 @@ Guide pour une session Claude (ou pour un humain) qui reçoit un dossier de samp
 
 Construction : `cmake --build build-core --target neptune_sampler_tool` (via `~/.local/bin/claude-build linux ...`). Python : numpy et soundfile suffisent.
 
-## Gabarit de nom
+## Dynamiques : nommer les samples et dire quelles vélocités enregistrer
 
-`<instrument>_<note>_<nuance>.wav` ; note `C3`, `F#2`, `Db4` (C4 = 60) ; nuance `ppp pp p mp mf f ff fff` ou un numéro de couche. Un nom non reconnu est listé « IGNORÉ » dans le rapport, jamais deviné. Pour d'autres gabarits, l'import de dossier de Neptune (`ZoneImport.h`) sait lire des noms plus variés, mais il ne mesure rien : ici on produit un SFZ.
+Gabarit : `<instrument>_<note>_<dynamique>[_<dynamique>].wav` ; note `C3`, `F#2`, `Db4` (C4 = 60). La dynamique s'écrit avec **un ou deux éléments** après la note :
+
+| Élément | Sens | Exemple |
+|---|---|---|
+| `v40` | **vélocité envoyée** à l'instrument pour enregistrer ce sample (1..127) | `piano_C3_v40.wav` |
+| `p7` (ou `L7`, `palier7`, `7`) | **numéro du palier** (1 = le plus doux) | `piano_C3_p7.wav` |
+| `pp mp mf ff`... | nuance écrite (`ppp pp p mp mf f ff fff`) | `piano_C3_pp.wav` |
+| les deux | vélocité et palier | `piano_C3_v40_p7.wav` |
+
+Deux systèmes pour décider des niveaux, que la commande `plan` imprime (palier, vélocité à envoyer, suffixe de nom, zone couverte) :
+- **Plage** : `--plage 5:127:24` = 24 paliers répartis de la vélocité 5 à 127 (noms `_v<vélocité>_p<palier>`) ;
+- **Niveaux discrets** : `--velocites 10,20,30,40,60` (noms `_v<vélocité>`).
+
+`python3 tools/instrument_builder/construire_instrument.py --plan --plage 5:127:24` (ou `--velocites ...`). Si le nom ne porte que le palier, donner la même option au script pour qu'il en déduise la vélocité ; sans vélocité du tout, les couches se partagent également 1..127. **La zone d'un sample couvre la moitié de l'écart avec ses voisins** (la première commence à 1, la dernière finit à 127 : avec des niveaux discrets 10..60, le niveau 60 sert jusqu'à 127). Deux samples de même note et de même vélocité sont refusés ; un nom non reconnu est listé « IGNORÉ », jamais deviné. Pour des gabarits plus variés, l'import de dossier de Neptune (`ZoneImport.h`) lit d'autres noms, mais il ne mesure rien.
 
 ## Comment le Sampler calcule le volume (ce qui fonde la méthode)
 
