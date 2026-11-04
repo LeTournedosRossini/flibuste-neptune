@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <limits>
 #include "PluginProcessor.h"
 #include "neptune/core/MemoryBudget.h"
 #include "FacadeBundle.h"
@@ -2493,6 +2494,7 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
 
     engine_.setProfile (profile_.effective()); // lecture atomique, sans verrou
     // Entrée audio de l'hôte : copiée avant tout (les canaux 0 et 1 du tampon sont aussi la première sortie, que le moteur va écrire)
+    bool hostInReady = false;
     {
         const auto* inBus = getBus (true, 0);
         const int frames = buffer.getNumSamples();
@@ -2503,7 +2505,7 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
             std::copy (buffer.getReadPointer (0), buffer.getReadPointer (0) + frames, hostIn_[0].begin());
             const float* right = buffer.getReadPointer (channels >= 2 ? 1 : 0);   // entrée mono : dupliquée
             std::copy (right, right + frames, hostIn_[1].begin());
-            engine_.setHostInput (hostIn_[0].data(), hostIn_[1].data(), frames);
+            hostInReady = true;   // confiée au moteur tranche par tranche (setHostInput, plus bas)
             recorder_.push (hostIn_[0].data(), hostIn_[1].data(), frames);   // sans effet hors enregistrement
         }
     }
@@ -2543,9 +2545,9 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
         midiFifo_.finishedRead (size1 + size2);
     }
 
-    for (const auto metadata : midi)
+    // Un message MIDI de l'hôte, appliqué à l'instant où il tombe (le bloc est découpé à ces instants, voir plus bas)
+    auto applyMidi = [this] (const juce::MidiMessage& msg)
     {
-        const auto msg = metadata.getMessage();
         if (msg.isNoteOn())
         {
             ++hostProbe_.midiNoteOns;
@@ -2600,10 +2602,11 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
             else known = false;
             if (known) engine_.midiController (mm);
         }
-    }
+    };
 
     // Macros : une macro dont la valeur a changé (automation de l'hôte, interface, OSC) écrit les cibles qui lui sont assignées. Après le
     // chargement d'un état, on mémorise les valeurs sans rien appliquer (les cibles ont déjà leurs valeurs enregistrées).
+    auto syncMacros = [this]
     {
         const bool resync = macroResync_.exchange (false, std::memory_order_acq_rel);
         for (int m = 0; m < neptune::core::control::kMacros; ++m)
@@ -2613,9 +2616,68 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
             macroSeen_[static_cast<std::size_t> (m)] = v;
             if (! resync) control_.macroChanged (m, v, params_);
         }
-    }
+    };
 
-    engine_.process (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), buffer.getNumSamples());
+    // Notes CLAP reçues de l'hôte (handleDirectEvent) : appliquées à leur instant, comme les messages MIDI
+    auto applyNote = [this] (const QueuedNote& q)
+    {
+        const auto& n = q.note;
+        if (q.type == CLAP_EVENT_NOTE_ON)
+        {
+            engine_.noteOn (n.channel, n.key, static_cast<float> (n.velocity));
+            hostProbe_.lastNoteId = n.note_id;
+            hostProbe_.lastKey = n.key;
+            ++hostProbe_.clapNoteOns;
+        }
+        else
+        {
+            engine_.noteOff (n.channel, n.key);
+            ++hostProbe_.clapNoteOffs;
+        }
+    };
+
+    // Le moteur joue les échantillons [from, to) du bloc
+    const int numFrames = buffer.getNumSamples();
+    auto runEngine = [&] (int from, int to)
+    {
+        if (hostInReady) engine_.setHostInput (hostIn_[0].data() + from, hostIn_[1].data() + from, to - from);
+        if (from == 0)
+        {
+            engine_.process (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), to);
+            return;
+        }
+        std::array<float*, 128> shifted {};
+        const int channels = std::min (buffer.getNumChannels(), static_cast<int> (shifted.size()));
+        for (int c = 0; c < channels; ++c) shifted[static_cast<std::size_t> (c)] = buffer.getWritePointer (c) + from;
+        engine_.process (shifted.data(), channels, to - from);
+    };
+
+    // Le bloc est découpé aux instants des événements (notes CLAP et MIDI, fusionnés par ordre d'instant) : le son jusqu'à l'événement, puis
+    // l'événement, puis la suite. Sans événement en cours de bloc, un seul appel du moteur, comme avant. À instant égal : notes CLAP d'abord.
+    {
+        std::stable_sort (queuedNotes_.begin(), queuedNotes_.begin() + numQueuedNotes_, [] (const QueuedNote& a, const QueuedNote& b) { return a.offset < b.offset; });
+        const int lastFrame = std::max (0, numFrames - 1);
+        auto clampPos = [lastFrame] (int pos) { return std::clamp (pos, 0, lastFrame); };
+        auto mit = midi.begin();
+        int ni = 0, cursor = 0;
+        while (mit != midi.end() || ni < numQueuedNotes_)
+        {
+            const int midiPos = mit != midi.end() ? clampPos ((*mit).samplePosition) : std::numeric_limits<int>::max();
+            const int notePos = ni < numQueuedNotes_ ? clampPos (queuedNotes_[static_cast<std::size_t> (ni)].offset) : std::numeric_limits<int>::max();
+            const int pos = std::min (midiPos, notePos);
+            if (pos > cursor)
+            {
+                syncMacros();
+                runEngine (cursor, pos);
+                cursor = pos;
+            }
+            if (notePos <= midiPos) applyNote (queuedNotes_[static_cast<std::size_t> (ni++)]);
+            else { applyMidi ((*mit).getMessage()); ++mit; }
+        }
+        numQueuedNotes_ = 0;
+        syncMacros();
+        runEngine (cursor, numFrames);
+    }
     midi.clear();   // Neptune n'a pas de sortie MIDI « de passage » : seuls les messages envoyés à la main partent vers l'hôte (addOutboundEventsToQueue)
 #ifdef NEPTUNE_STANDALONE_APP
     // Application autonome : pas d'hôte CLAP (addOutboundEventsToQueue n'est jamais appelée) ; les messages envoyés à la main partent par la sortie MIDI choisie dans les options
@@ -2707,29 +2769,33 @@ bool NeptuneProcessor::supportsDirectEvent (uint16_t spaceId, uint16_t type)
         || type == CLAP_EVENT_NOTE_EXPRESSION;
 }
 
-// Thread audio, appelé par le wrapper au milieu du bloc, avant processBlock.
-void NeptuneProcessor::handleDirectEvent (const clap_event_header_t* event, int)
+// Thread audio, appelé par le wrapper avant processBlock. Les notes sont mises en file avec leur instant : processBlock les applique à cet
+// instant (le wrapper, réglé sur le bloc entier, les donne toutes avant le bloc). Si la file est pleine, la note part tout de suite.
+void NeptuneProcessor::handleDirectEvent (const clap_event_header_t* event, int sampleOffset)
 {
     switch (event->type)
     {
         case CLAP_EVENT_NOTE_ON:
-        {
-            const auto* n = reinterpret_cast<const clap_event_note*> (event);
-            engine_.noteOn (n->channel, n->key, static_cast<float> (n->velocity));
-            hostProbe_.lastNoteId = n->note_id;
-            hostProbe_.lastKey = n->key;
-            ++hostProbe_.clapNoteOns;
-            break;
-        }
         case CLAP_EVENT_NOTE_OFF:
         case CLAP_EVENT_NOTE_CHOKE:
         {
             const auto* n = reinterpret_cast<const clap_event_note*> (event);
-            engine_.noteOff (n->channel, n->key);
-            ++hostProbe_.clapNoteOffs;
-            // Le moteur ne produit pas encore de son : la note est terminée tout de suite.
-            if (numPendingEnds_ < static_cast<int> (pendingEnds_.size()))
-                pendingEnds_[static_cast<size_t> (numPendingEnds_++)] = { n->note_id, n->port_index, n->channel, n->key };
+            QueuedNote q;
+            q.offset = std::max (0, static_cast<int> (event->time) - sampleOffset);
+            q.type = event->type == CLAP_EVENT_NOTE_ON ? CLAP_EVENT_NOTE_ON : CLAP_EVENT_NOTE_OFF;
+            q.note = *n;
+            if (numQueuedNotes_ < static_cast<int> (queuedNotes_.size()))
+                queuedNotes_[static_cast<std::size_t> (numQueuedNotes_++)] = q;
+            else if (q.type == CLAP_EVENT_NOTE_ON)
+                engine_.noteOn (n->channel, n->key, static_cast<float> (n->velocity));
+            else
+                engine_.noteOff (n->channel, n->key);
+            if (event->type != CLAP_EVENT_NOTE_ON)
+            {
+                // Le moteur ne produit pas encore de son : la note est terminée tout de suite.
+                if (numPendingEnds_ < static_cast<int> (pendingEnds_.size()))
+                    pendingEnds_[static_cast<size_t> (numPendingEnds_++)] = { n->note_id, n->port_index, n->channel, n->key };
+            }
             break;
         }
         case CLAP_EVENT_NOTE_EXPRESSION:

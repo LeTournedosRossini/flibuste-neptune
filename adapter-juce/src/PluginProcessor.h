@@ -539,5 +539,10 @@ private:
     struct PendingNoteEnd { std::int32_t noteId; std::int16_t port, channel, key; };
     std::array<PendingNoteEnd, 256> pendingEnds_ {};
     int numPendingEnds_ = 0;
+
+    // Notes CLAP reçues avant le bloc, avec leur instant dans le bloc ; vidées par processBlock. Thread audio uniquement.
+    struct QueuedNote { int offset = 0; std::uint16_t type = 0; clap_event_note note {}; };
+    std::array<QueuedNote, 256> queuedNotes_ {};
+    int numQueuedNotes_ = 0;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NeptuneProcessor)
 };
