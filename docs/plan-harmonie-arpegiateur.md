@@ -74,3 +74,13 @@ Carte peut aussi **jouer** l'accord en cours comme des notes sur une piste que l
 - Choix de l'unité de temps dans la carte (flottants ou rationnels) : à fixer avant le format.
 - Noms définitifs des plugins ; palette et place dans la suite.
 - Versions : un changement de format après publication casse les anciens lecteurs ; prévoir la version dès le début et un comportement « format inconnu = pas de carte ».
+
+## Suite demandée pour Carte (Jean, 5 novembre 2026, après l'essai de la phase 1)
+
+À faire avant ou avec la phase 3, dans cet ordre probable :
+
+1. **Plages de gammes indépendantes des accords** : un conteneur « gamme » a son propre début et sa propre durée ; il peut couvrir plusieurs accords, ou plusieurs gammes peuvent se suivre sous un seul accord. Une deuxième ligne dans la timeline. Conséquence sur le format partagé : aujourd'hui 2 types (accord, tonalité) ; il faut un type **gamme** (masque de classes de hauteur + fondamentale) : **format v2** (`kKinds = 3`, taille de zone changée). Les lecteurs v1 traiteront la v2 comme « pas de carte » (version inconnue) : prévoir de réinstaller toute la suite d'un bloc.
+2. **Tonalité** : une tonalité globale (réglage de Carte) et des **marqueurs de tonalité** placés sur la timeline (changement de tonalité en cours de morceau). Le conteneur `Key` existe déjà dans le format.
+3. **Copier / coller / dupliquer** et sélection multiple (rectangle, Maj + clic) ; dupliquer = copie juste après, ou répétition n fois.
+4. **Constructeur d'accords** : fenêtre qui s'ouvre au double-clic, trois colonnes : fondamentales (à gauche), qualités (au milieu : majeur, mineur, 7, maj7, m7, dim, aug, sus, extensions...), basses (à droite, « /X »). Remplace la saisie du nom au clavier, qui reste possible. Le nom en lettres ou en notes françaises suit le réglage de notation.
+5. Ensuite seulement : traduction, script Reaper pour remplir depuis les marqueurs.
