@@ -266,7 +266,7 @@ TEST_CASE ("overdrive tames the highs compared with a bare waveshaper (less hars
 {
     // sinus de 220 Hz fortement poussé : énergie des harmoniques entre 3 et 12 kHz, rapportée au fondamental, pour le module et pour la seule courbe statique
     constexpr double f0 = 220.0, amp = 0.5;
-    auto bandRatio = [] (const std::vector<float>& x, double rate)
+    auto bandRatio = [f0] (const std::vector<float>& x, double rate)
     {
         const std::size_t n = static_cast<std::size_t> (rate);   // 1 s : nombre entier de périodes
         const double fundamental = component (x, f0, n, rate);

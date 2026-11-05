@@ -216,6 +216,7 @@ TEST_CASE ("wavpack: a file named .wav that holds WavPack decodes exactly, with 
     CHECK (reader.read (chunk.data(), 100) == 100);
     CHECK (chunk[0] == Approx (static_cast<float> (pcm[20]) / 32768.0f).margin (1e-7));
     CHECK (chunk[1] == Approx (static_cast<float> (pcm[21]) / 32768.0f).margin (1e-7));
+    reader.close();   // Windows refuse de supprimer un fichier encore ouvert
     std::filesystem::remove (path);
 }
 
@@ -300,6 +301,7 @@ TEST_CASE ("wavpack: only the start is loaded when streaming, the rest is read w
     REQUIRE (reader.seek (frames - 100));
     CHECK (reader.read (chunk.data(), 600) == 100);
     CHECK (reader.read (chunk.data(), 600) == 0);
+    reader.close();   // Windows refuse de supprimer un fichier encore ouvert
     std::filesystem::remove (path);
 }
 #endif
