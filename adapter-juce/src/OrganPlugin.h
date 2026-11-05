@@ -167,7 +167,7 @@ private:
     Ticker ticker_ { *this };
     std::atomic<bool> carteFollow_ { false }, carteLed_ { true };
     std::atomic<int> carteApproach_ { 0 };
-    std::atomic<int> carteChannel_ { 1 }, chordChannel_ { 1 }, bassChannel_ { 0 }, carteOctave_ { 3 };
+    std::atomic<int> carteChannel_ { 1 }, chordChannel_ { 1 }, bassChannel_ { 3 }, carteOctave_ { 3 };
     // Motifs (fil de messages : motifs_ sous verrou ; fil audio : copie audioMotifs_ refaite quand la version change)
     mutable juce::SpinLock motifLock_;
     neptune::core::arp::ChordMapEnvironment::Slots motifs_, audioMotifs_;

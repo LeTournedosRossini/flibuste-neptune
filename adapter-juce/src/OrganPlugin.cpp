@@ -294,7 +294,7 @@ void OrganProcessor::setStateInformation (const void* data, int size)
             carteFollow_.store (c.value ("follow", false));
             carteChannel_.store (juce::jlimit (1, 8, c.value ("channel", 1)));
             chordChannel_.store (juce::jlimit (1, 16, c.value ("chordChannel", 1)));
-            bassChannel_.store (juce::jlimit (0, 16, c.value ("bassChannel", 0)));
+            bassChannel_.store (juce::jlimit (0, 16, c.value ("bassChannel", 3)));
             carteOctave_.store (juce::jlimit (1, 6, c.value ("octave", 3)));
             carteLed_.store (c.value ("led", true));
             motifSlot_.store (juce::jlimit (0, kMotifSlots, c.value ("motifSlot", 0)));
@@ -543,6 +543,8 @@ void NovaOrganPluginEditor::buildContent()
     {
         juce::PopupMenu m, ch, chord, bass, oct, play, load, appr;
         const auto library = motifs::files();   // lu à l'ouverture du menu
+        auto* look = &anchor->getLookAndFeel();   // le style de la suite pour le menu et ses sous-menus (sinon celui de JUCE)
+        for (auto* menu : { &m, &ch, &chord, &bass, &oct, &play, &load, &appr }) menu->setLookAndFeel (look);
         m.addItem (1, juce::String::fromUTF8 ("Suivre les accords de Carte"), true, p.carteFollow());
         for (int i = 1; i <= 8; ++i) ch.addItem (100 + i, juce::String (i), true, p.carteChannel() == i);
         for (int i = 1; i <= 16; ++i) chord.addItem (200 + i, juce::String (i), true, p.chordMidiChannel() == i);
@@ -556,6 +558,7 @@ void NovaOrganPluginEditor::buildContent()
             const auto name = p.motifName (i);
             play.addItem (500 + 1 + i, juce::String (i + 1) + " : " + (p.motifUsed (i) ? name : juce::String::fromUTF8 ("(vide)")), p.motifUsed (i), p.motifSlot() == i + 1);
             juce::PopupMenu files;
+            files.setLookAndFeel (look);
             files.addItem (10000 + i * 256, juce::String::fromUTF8 ("vider l'emplacement"), p.motifUsed (i));
             for (int f = 0; f < library.size() && f < 200; ++f) files.addItem (10000 + i * 256 + 1 + f, library[f].getFileNameWithoutExtension());
             if (library.isEmpty()) files.addItem (-1, juce::String::fromUTF8 ("(le dossier des motifs est vide)"), false);
