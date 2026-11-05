@@ -4,15 +4,16 @@
 #include <memory>
 #include <vector>
 #include "NovaKit.h"
+#include "neptune/core/CarteScore.h"
 #include "neptune/core/ChordTimeline.h"
 #include "neptune/core/Settings.h"
 #include "neptune/core/SharedChordMap.h"
 #include "neptune/core/Theme.h"
 #include "neptune/core/Undo.h"
 
-// « Carte » (nom provisoire) : timeline d'accords que l'utilisateur place sur une piste. Les accords sont des conteneurs en temps de l'hôte, publiés dans la
-// carte partagée (SharedChordMap.h) pour les autres plugins de la suite ; la carte est enregistrée dans l'état du plugin (donc dans le projet).
-// Le son passe sans changement. Voir docs/plan-harmonie-arpegiateur.md (phase 1 : accords seuls).
+// « Carte » (nom provisoire) : timeline d'accords, de gammes, de tonalités et de motifs d'Arpège que l'utilisateur place sur une piste, avec les mesures réelles
+// du morceau (importées de Scorsaire). Tout est publié dans la carte partagée (SharedChordMap.h, format v2) pour les autres plugins de la suite ; la carte est
+// enregistrée dans l'état du plugin (donc dans le projet). Le son passe sans changement. Voir docs/plan-harmonie-arpegiateur.md.
 class CarteProcessor : public juce::AudioProcessor
 {
 public:
@@ -42,11 +43,11 @@ public:
     void setStateInformation (const void*, int) override;
 
     // ---- la carte (thread de message)
-    std::vector<neptune::core::chords::Item> items() const;
+    neptune::core::carte::Score score() const;
     // Remplace la carte ; `publish` faux pendant un glissement (une seule publication à la fin).
-    void setItems (std::vector<neptune::core::chords::Item>, bool publish = true);
+    void setScore (neptune::core::carte::Score, bool publish = true);
     // Changement annulable : `before` -> `after`.
-    void commit (const std::vector<neptune::core::chords::Item>& before, const std::vector<neptune::core::chords::Item>& after, const char* name);
+    void commit (const neptune::core::carte::Score& before, const neptune::core::carte::Score& after, const char* name);
     neptune::core::UndoManager& undo() { return undo_; }
 
     int channel() const noexcept { return channel_.load(); }
@@ -78,7 +79,7 @@ private:
 
     neptune::core::chordmap::Writer writer_;
     mutable juce::CriticalSection lock_;
-    std::vector<neptune::core::chords::Item> items_;
+    neptune::core::carte::Score score_;
     neptune::core::UndoManager undo_;
     neptune::core::settings::GlobalSettings settings_;
     std::atomic<int> channel_ { 1 }, naming_ { 0 }, writerStatus_ { -1 };
@@ -101,15 +102,27 @@ public:
 
 private:
     class TimelineView;
+    class Popup;
     void timerCallback() override;
     void layoutAndScale();
     void refreshPills();
+    // fenêtres de choix (au-dessus de la timeline)
+    void showChordBuilder (double start, double length, int index);
+    void showScalePicker (double start, double length, int index);
+    void showKeyPicker (double start, int index);
+    void showPatternPicker (double start, double length, int index);
+    void showGlobalKeyPicker();
+    void importFile();
+    void closePopup();
 
     CarteProcessor& proc_;
     nova::Skin skin_;
     juce::ComponentBoundsConstrainer constrainer_;
     nova::Pill channelPill_, gridPill_, namingPill_, zoomOut_, zoomIn_, followPill_, undoPill_, redoPill_;
+    nova::Pill copyPill_, pastePill_, dupPill_, importPill_, keyPill_, clearBarsPill_;
     std::unique_ptr<TimelineView> view_;
+    std::unique_ptr<Popup> popup_;
+    std::unique_ptr<juce::FileChooser> chooser_;
     juce::String hint_;
     std::uint64_t lastUndoRevision_ = ~0ull;
 };

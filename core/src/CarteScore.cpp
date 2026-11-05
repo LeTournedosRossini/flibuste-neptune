@@ -113,7 +113,7 @@ std::string scaleName (const ScaleItem& s, chords::Naming naming)
     chords::Chord c;
     c.root = s.root;
     c.sharp = s.sharp;
-    c.rel = 1;
+    c.rel = 0x091;   // majeur : le nom s'écrit sans suffixe
     const auto root = chords::formatChord (c, naming);
     const auto& md = scaleMode (s.mode);
     return root + " " + (naming == chords::Naming::French ? md.nameFr : md.nameEn);
@@ -123,7 +123,7 @@ std::string keyName (const KeyItem& k, chords::Naming naming)
     chords::Chord c;
     c.root = k.root;
     c.sharp = k.sharp;
-    c.rel = 1;
+    c.rel = 0x091;   // majeur : le nom s'écrit sans suffixe
     const auto root = chords::formatChord (c, naming);
     if (naming == chords::Naming::French) return root + (k.minor ? " mineur" : " majeur");
     return root + (k.minor ? " minor" : " major");

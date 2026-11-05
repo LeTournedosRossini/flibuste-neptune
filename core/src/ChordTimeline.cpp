@@ -138,6 +138,16 @@ bool readNote (const std::string& s, std::size_t& pos, int& pc, bool& sharp)
 }
 } // namespace
 
+const std::vector<std::string>& qualitySuffixes()
+{
+    static const std::vector<std::string> v = [] {
+        std::vector<std::string> r;
+        for (const auto& q : kQualities) r.push_back (q.suffix);
+        return r;
+    }();
+    return v;
+}
+
 bool parseChord (const std::string& textIn, Chord& out)
 {
     std::string text;

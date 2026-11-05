@@ -25,6 +25,8 @@ struct Chord
 bool parseChord (const std::string& text, Chord& out);
 // Écrit l'accord ; texte UTF-8. En lettres, le résultat est relu à l'identique par parseChord.
 std::string formatChord (const Chord& c, Naming naming = Naming::Letters);
+// Les suffixes de qualité qu'on écrit (le premier de chaque famille ; « » = majeur), dans l'ordre de la table : pour le constructeur d'accords.
+const std::vector<std::string>& qualitySuffixes();
 // Les notes de l'accord comme masque de classes de hauteur absolues (do = 0), basse comprise.
 std::uint16_t absoluteMask (const Chord& c);
 

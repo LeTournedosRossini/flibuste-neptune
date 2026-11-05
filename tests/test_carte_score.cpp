@@ -206,3 +206,12 @@ TEST_CASE ("carte : import refusé clairement, jamais tronqué", "[carte]")
     CHECK (odd.score.chords[0].chord.bass == 9);      // Bbb = la
     CHECK (odd.score.chords[0].chord.rel == 1);
 }
+
+TEST_CASE ("carte : noms de gammes et de tonalités", "[carte]")
+{
+    CHECK (carte::keyName ({ 0.0, 0, false, false }, chords::Naming::French) == "Do majeur");
+    CHECK (carte::keyName ({ 0.0, 9, true, false }, chords::Naming::Letters) == "A minor");
+    CHECK (carte::keyName ({ 0.0, 3, false, true }, chords::Naming::Letters) == "D# major");
+    CHECK (carte::scaleName ({ 0.0, 4.0, 2, 4, false }, chords::Naming::Letters) == "D dorian");
+    CHECK (carte::scaleName ({ 0.0, 4.0, 10, 9, false }, chords::Naming::French) == "Sib pentatonique majeure");
+}
