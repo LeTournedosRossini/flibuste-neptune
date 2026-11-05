@@ -657,6 +657,46 @@ target_link_libraries(EssaiCarte
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
 
+# ---- Carte : timeline d'accords (conteneurs en temps de l'hôte) publiée dans la carte partagée, plugin CLAP effet transparent ---------------------------------
+# Voir docs/plan-harmonie-arpegiateur.md (phase 1 : accords seuls). Cœur : ChordTimeline + SharedChordMap.
+set(CARTE_CLAP_ID "com.tournedosrossini.carte" CACHE STRING "Identifiant CLAP de Carte")
+
+juce_add_plugin(Carte
+  COMPANY_NAME                "Le Tournedos Rossini"
+  PRODUCT_NAME                "Carte"
+  PLUGIN_MANUFACTURER_CODE    Trss
+  PLUGIN_CODE                 Cart
+  IS_SYNTH                    FALSE
+  NEEDS_MIDI_INPUT            FALSE
+  FORMATS                     Standalone)
+
+clap_juce_extensions_plugin(
+  TARGET        Carte
+  CLAP_ID       "${CARTE_CLAP_ID}"
+  CLAP_FEATURES audio-effect utility stereo)
+
+target_sources(Carte PRIVATE
+  src/CartePlugin.cpp
+  src/NovaKit.cpp
+  src/NeptuneKnob.cpp
+  src/KnobModal.cpp)
+
+target_compile_definitions(Carte PUBLIC
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+  JUCE_VST3_CAN_REPLACE_VST2=0)
+
+target_link_libraries(Carte
+  PRIVATE
+    neptune_core
+    juce::juce_audio_utils
+    juce::juce_audio_plugin_client
+    clap_juce_extensions
+  PUBLIC
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_lto_flags
+    juce::juce_recommended_warning_flags)
+
 # ---- Mirador : mesure et visualisation (sonie EBU R128 par libebur128, niveaux, stéréo, spectre), plugin CLAP effet transparent indépendant ------------------
 # Cœur : Mirador (mesures) + LoudnessMeter ; interface NOVA (NovaMiradorEditor), spectre de l'égaliseur (SpectrumAnalyzer).
 set(MIRADOR_CLAP_ID "com.tournedosrossini.mirador" CACHE STRING "Identifiant CLAP de Mirador")

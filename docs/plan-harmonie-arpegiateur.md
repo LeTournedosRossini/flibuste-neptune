@@ -1,6 +1,6 @@
 # Plan : timeline d'accords et arpégiateur (cahier des charges, 5 novembre 2026)
 
-Statut : **projet, rien n'est écrit.** Noms provisoires : **Carte** (timeline d'accords et de tonalité) et **Arpège** (arpégiateur / séquenceur MIDI). À renommer avant la première version.
+Statut (5 novembre 2026) : **phase 0 faite** (mémoire partagée, plugin d'essai, essayé dans Reaper) ; **phase 1 en cours** (Carte minimale : accords seuls, `ChordTimeline` dans le cœur, plugin `CartePlugin`). Noms provisoires : **Carte** (timeline d'accords et de tonalité) et **Arpège** (arpégiateur / séquenceur MIDI). À renommer avant la première version.
 
 ## But
 
