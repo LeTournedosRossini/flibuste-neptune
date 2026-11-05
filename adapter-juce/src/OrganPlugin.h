@@ -3,6 +3,7 @@
 JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wunused-parameter", "-Wextra-semi", "-Wnon-virtual-dtor")
 #include <clap-juce-extensions/clap-juce-extensions.h>
 JUCE_END_IGNORE_WARNINGS_GCC_LIKE
+#include <array>
 #include <atomic>
 #include <memory>
 #include <string>
@@ -14,6 +15,8 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "PresetHost.h"
 #include "NovaOrganEditor.h"
 #include "PresetManager.h"
+#include "neptune/core/ChordFollower.h"
+#include "neptune/core/ChordMapEnvironment.h"
 #include "neptune/core/I18n.h"
 #include "neptune/core/OrganPreset.h"
 #include "neptune/core/OrganSynth.h"
@@ -30,7 +33,7 @@ class OrganProcessor : public juce::AudioProcessor,
 {
 public:
     OrganProcessor();
-    ~OrganProcessor() override { cancelPendingUpdate(); }
+    ~OrganProcessor() override { ticker_.stopTimer(); cancelPendingUpdate(); }
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -76,6 +79,18 @@ public:
     const neptune::core::preset::Preset* currentPreset() const override { return currentPresetId_.empty() ? nullptr : library_->find (currentPresetId_); }
     std::uint32_t presetRevision() const override { return presetRevision_; }
     void touchPresets() override { ++presetRevision_; }
+    // ---- Carte : l'orgue tient l'accord de la carte partagée pendant la lecture (voir docs/plan-harmonie-arpegiateur.md)
+    bool carteFollow() const noexcept { return carteFollow_.load(); }
+    void setCarteFollow (bool on) { carteFollow_.store (on); }
+    int carteChannel() const noexcept { return carteChannel_.load(); }                 // canal de liaison, 1..8
+    void setCarteChannel (int c) { carteChannel_.store (juce::jlimit (1, 8, c)); tick(); }
+    int chordMidiChannel() const noexcept { return chordChannel_.load(); }             // canal MIDI des accords, 1..16
+    void setChordMidiChannel (int c) { chordChannel_.store (juce::jlimit (1, 16, c)); }
+    int bassMidiChannel() const noexcept { return bassChannel_.load(); }               // canal MIDI de la basse, 0 : pas de basse, 1..16
+    void setBassMidiChannel (int c) { bassChannel_.store (juce::jlimit (0, 16, c)); }
+    int carteOctave() const noexcept { return carteOctave_.load(); }                   // octave de base, 1..6 (3 = do 48)
+    void setCarteOctave (int o) { carteOctave_.store (juce::jlimit (1, 6, o)); }
+    juce::String carteText() const;                                                    // « Carte : ON · canal 1 · Dm7 »
     bool ccEnabled() const noexcept { return ccEnabled_.load(); }
     void uiSetCcEnabled (bool on) { ccEnabled_.store (on); }
     bool loadPreset (const std::string& id) override;
@@ -123,6 +138,24 @@ private:
     int heldPerChannel_[16] {};   // fil audio seulement
     std::atomic<bool> ccEnabled_ { false }; // contrôleurs MIDI (hors banque et notes) : désactivés par défaut
     std::atomic<int> pendingBank_ { -1 }, pendingProgram_ { -1 };
+
+    // Carte : lecteur de la carte partagée (relevé depuis le fil de messages, consulté sans verrou par le fil audio)
+    struct Ticker : juce::Timer
+    {
+        explicit Ticker (OrganProcessor& p) : owner (p) {}
+        void timerCallback() override { owner.tick(); }
+        OrganProcessor& owner;
+    };
+    void tick();
+    neptune::core::chordmap::Reader reader_;
+    neptune::core::arp::ChordMapEnvironment::Slots noSlots_;
+    std::unique_ptr<neptune::core::arp::ChordMapEnvironment> carteEnv_;
+    neptune::core::arp::ChordFollower follower_;
+    std::array<neptune::core::arp::FollowEvent, 64> followOut_ {};
+    Ticker ticker_ { *this };
+    std::atomic<bool> carteFollow_ { false };
+    std::atomic<int> carteChannel_ { 1 }, chordChannel_ { 1 }, bassChannel_ { 0 }, carteOctave_ { 3 };
+    std::atomic<int> carteChordNow_ { -2 };   // -2 : pas en lecture ou pas de Carte ; sinon racine | rel << 8
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OrganProcessor)
 };

@@ -27,6 +27,8 @@ struct OrganLink
     std::function<float (int channel)> outPeak;                             // crête de sortie (0 gauche, 1 droite), amplitude linéaire
     std::function<float (int channel)> midiLevel;                           // vélocité du dernier note-on du canal MIDI (0..15), 0 si aucune note tenue
     std::function<bool()> ccEnabled;
+    std::function<juce::String()> carteText;                                // « Carte : ON · canal 1 · Dm7 » (facultatif : sans lui, pas de bouton Carte)
+    std::function<void (juce::Component*)> carteMenu;
     std::function<void (bool)> setCc;
     std::function<void()> collect;                                          // libère l'orgue remplacé (facultatif)
     int track = 0;
@@ -122,6 +124,7 @@ private:
     nova::Text *tuneSection_ = nullptr, *clickSection_ = nullptr, *wiringSection_ = nullptr, *midiText_ = nullptr;
     std::vector<DescSlider*> settingsSliders_;
     MenuPill* wiringMode_ = nullptr;
-    nova::Pill *foldbackPill_ = nullptr, *ccPill_ = nullptr, *panicPill_ = nullptr;
+    juce::String carteShown_;
+    nova::Pill *foldbackPill_ = nullptr, *ccPill_ = nullptr, *panicPill_ = nullptr, *cartePill_ = nullptr;
     TaperGrid* taperGrid_ = nullptr;
 };

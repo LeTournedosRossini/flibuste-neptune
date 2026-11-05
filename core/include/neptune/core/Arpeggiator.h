@@ -53,6 +53,8 @@ struct Harmony
     std::uint16_t rel = 0x091;      // notes de l'accord relatives à la fondamentale
     bool hasScale = false;
     std::uint16_t scaleRel = 0;     // gamme en vigueur, relative à la fondamentale de l'accord
+    double startBeats = 0.0;        // début et longueur du conteneur d'accord de Carte (noires de l'hôte)
+    double lengthBeats = 0.0;
 };
 class Environment
 {
@@ -62,6 +64,7 @@ public:
     virtual const pattern::Pattern* patternAt (double) const noexcept { return nullptr; }        // motif demandé par Carte à cet instant (nullptr : celui du réglage)
     virtual bool harmonyAt (double, Harmony&) const noexcept { return false; }                   // accord (et gamme) de Carte à cet instant
     virtual bool measureAt (double, double&, double&, int&) const noexcept { return false; }     // mesure réelle : début, longueur, numéro (depuis 0)
+    virtual bool nextChordStart (double, double&) const noexcept { return false; }               // début du premier accord de Carte après cet instant
     virtual bool nextMeasureStart (double, double&) const noexcept { return false; }             // début de la première mesure de Carte après cet instant
 };
 

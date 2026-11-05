@@ -885,3 +885,103 @@ TEST_CASE ("de bout en bout : le morceau d'essai de Carte et les motifs d'essai 
     for (const auto& e : ons) CHECK (e.at < end);
     writer.close();
 }
+
+
+// ================================================================================================ suiveur d'accords (Orgamon)
+
+#include "neptune/core/ChordFollower.h"
+
+namespace
+{
+struct ChordListEnv : neptune::core::arp::Environment
+{
+    struct C { double start, length; int root; std::uint16_t rel; int bass; };
+    std::vector<C> chords;
+    bool harmonyAt (double t, neptune::core::arp::Harmony& out) const noexcept override
+    {
+        for (const auto& c : chords)
+            if (t >= c.start && t < c.start + c.length)
+            {
+                out.rootPc = c.root; out.rel = c.rel; out.bassPc = c.bass; out.startBeats = c.start; out.lengthBeats = c.length;
+                return true;
+            }
+        return false;
+    }
+    bool nextChordStart (double t, double& start) const noexcept override
+    {
+        for (const auto& c : chords) if (c.start > t) { start = c.start; return true; }
+        return false;
+    }
+};
+
+struct FEv { long long at; bool on; int ch, note; };
+std::vector<FEv> runFollower (neptune::core::arp::ChordFollower& f, const neptune::core::arp::Environment& env, long long total, int block, bool playing = true)
+{
+    using namespace neptune::core::arp;
+    std::vector<FEv> v;
+    std::vector<FollowEvent> out (64);
+    for (long long pos = 0; pos < total; pos += block)
+    {
+        const int n = (int) std::min<long long> (block, total - pos);
+        const int m = f.process (env, playing, playing, (double) pos / kSamplesPerBeat, kBpm, kSr, n, out.data(), (int) out.size());
+        for (int i = 0; i < m; ++i) v.push_back ({ pos + out[(size_t) i].offset, out[(size_t) i].on, out[(size_t) i].channel, out[(size_t) i].note });
+    }
+    return v;
+}
+}
+
+TEST_CASE ("suiveur : l'accord de Carte est tenu, change à l'échantillon près", "[arp][carte][follower]")
+{
+    ChordListEnv env;
+    env.chords = { { 0.0, 4.0, 0, 0x091, -1 }, { 4.0, 4.0, 7, 0x491, -1 } };   // do majeur, puis sol7 (0 4 7 10)
+    neptune::core::arp::ChordFollower f;
+    f.setChordChannel (0);
+    const auto ev = runFollower (f, env, (long long) (kSamplesPerBeat * 7.9), 480);
+    std::vector<int> on0, on1, off1;
+    for (const auto& e : ev)
+    {
+        if (e.on && e.at == 0) on0.push_back (e.note);
+        if (e.at == (long long) (4 * kSamplesPerBeat)) (e.on ? on1 : off1).push_back (e.note);
+    }
+    CHECK (on0 == std::vector<int> { 48, 52, 55 });                 // do mi sol, octave de base 48
+    CHECK (off1 == std::vector<int> { 48, 52, 55 });                // relâchés exactement au temps 4
+    CHECK (on1 == std::vector<int> { 55, 59, 62, 65 });             // sol si ré fa (sol placé entre 48 et 59)
+    // même résultat à toute taille de bloc
+    for (int block : { 1, 64, 1000, 4096 })
+    {
+        neptune::core::arp::ChordFollower g;
+        const auto ev2 = runFollower (g, env, (long long) (kSamplesPerBeat * 7.9), block);
+        REQUIRE (ev2.size() == ev.size());
+        for (size_t i = 0; i < ev.size(); ++i) { CHECK (ev2[i].at == ev[i].at); CHECK (ev2[i].note == ev[i].note); CHECK (ev2[i].on == ev[i].on); }
+    }
+}
+
+TEST_CASE ("suiveur : basse, trou entre deux accords, arrêt de la lecture", "[arp][carte][follower]")
+{
+    ChordListEnv env;
+    env.chords = { { 0.0, 2.0, 9, 0x489, 2 }, { 4.0, 2.0, 0, 0x091, -1 } };    // Am7/D, un trou de deux temps, puis do
+    neptune::core::arp::ChordFollower f;
+    f.setChordChannel (0);
+    f.setBassChannel (2);
+    const auto ev = runFollower (f, env, (long long) (kSamplesPerBeat * 6.5), 512);
+    int bass = -1;
+    for (const auto& e : ev) if (e.on && e.ch == 2 && e.at == 0) bass = e.note;
+    CHECK (bass == 38);                                                    // la basse est ré (pas la), sous l'octave de base
+    int offsAt2 = 0, onsBetween = 0;
+    for (const auto& e : ev)
+    {
+        if (! e.on && e.at == (long long) (2 * kSamplesPerBeat)) ++offsAt2;   // tout est relâché à la fin du premier accord
+        if (e.on && e.at > (long long) (2 * kSamplesPerBeat) && e.at < (long long) (4 * kSamplesPerBeat)) ++onsBetween;   // rien ne sonne dans le trou
+    }
+    CHECK (offsAt2 == 5);                                                  // quatre notes de l'accord + la basse
+    CHECK (onsBetween == 0);
+    // arrêt de la lecture : tout est relâché
+    neptune::core::arp::ChordFollower g;
+    runFollower (g, env, (long long) (kSamplesPerBeat * 1.0), 256);
+    CHECK (g.sounding());
+    std::vector<neptune::core::arp::FollowEvent> out (64);
+    const int m = g.process (env, false, false, 0.0, kBpm, kSr, 256, out.data(), 64);
+    CHECK (m == 4);
+    CHECK (! g.sounding());
+    for (int i = 0; i < m; ++i) CHECK (! out[(size_t) i].on);
+}

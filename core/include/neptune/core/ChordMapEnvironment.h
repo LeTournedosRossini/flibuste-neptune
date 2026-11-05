@@ -34,6 +34,8 @@ public:
         chordmap::Container c;
         if (! reader_.lookup (t, chordmap::Kind::Chord, c)) return false;
         out.rootPc = c.root;
+        out.startBeats = c.startBeats;
+        out.lengthBeats = c.lengthBeats;
         out.bassPc = c.bass <= 11 ? c.bass : -1;
         out.rel = relativeMask (c.pitchMask, c.root);
         if (out.rel == 0) out.rel = 1;
@@ -56,6 +58,14 @@ public:
         start = c.startBeats;
         length = c.lengthBeats;
         index = i;
+        return true;
+    }
+
+    bool nextChordStart (double t, double& start) const noexcept override
+    {
+        chordmap::Container c;
+        if (! reader_.next (t, chordmap::Kind::Chord, c)) return false;
+        start = c.startBeats;
         return true;
     }
 

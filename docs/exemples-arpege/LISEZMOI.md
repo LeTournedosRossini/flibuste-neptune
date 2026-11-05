@@ -30,3 +30,7 @@ Tout est déjà dans les plugins : un Arpège neuf contient les motifs d'essai d
 
 - `accords-essai.json` : les mêmes accords et mesures que le morceau d'essai, au format d'échange de Scorsaire (`flibuste-accords`). Carte : **Importer des accords...** (remplace les accords et les barres, garde gammes, tonalités et motifs). Utile pour vérifier l'import et le 3/4.
 - `motifs-essai.json` : les quatre motifs d'essai (`flibuste-motifs`). Arpège : choisissez un « Motif dessiné » puis **Importer** (le fichier remplit l'emplacement choisi et les suivants). Utile pour vérifier l'import et l'export de motifs, et la conservation de `vel`, `gate` et des variantes.
+
+## Orgamon suit la carte
+
+Avec la même Carte (le morceau d'essai), mettez **Orgamon** sur une autre piste. Dans sa page **ORGUE**, le bouton « Carte : ... » (sous le bouton des contrôleurs) ouvre un menu : cochez **Suivre les accords de Carte**. Lancez la lecture : l'orgue tient l'accord en cours, sans touche, et change d'accord à l'instant exact. Le bouton affiche « Carte : ON · canal 1 · Dm7 ». Réglages du menu : canal de Carte, canal MIDI des accords (celui d'un clavier de l'orgue : 1, 2 ou 3 selon votre routage), canal MIDI de la basse (pédalier ; « aucune basse » par défaut), octave de base. À l'arrêt de la lecture, tout est relâché.

@@ -3,6 +3,8 @@
 #include "NeptuneParameter.h"
 #include "neptune/core/Mixer.h"
 #include "neptune/core/SamplerParams.h"
+#include "neptune/core/ChordTimeline.h"
+#include <nlohmann/json.hpp>
 
 using namespace neptune::core;
 using neptune::core::theme::Token;
@@ -54,6 +56,27 @@ OrganProcessor::OrganProcessor() : juce::AudioProcessor (makeBuses())
         }
     }
     for (auto& s : modal_) s = {};
+    carteEnv_ = std::make_unique<arp::ChordMapEnvironment> (reader_, noSlots_);
+    ticker_.startTimer (500);
+}
+
+void OrganProcessor::tick()
+{
+    reader_.setChannel (carteChannel_.load());
+    reader_.poll();
+}
+
+juce::String OrganProcessor::carteText() const
+{
+    if (! carteFollow_.load()) return juce::String::fromUTF8 ("Carte : OFF");
+    juce::String s = juce::String::fromUTF8 ("Carte : ON  ·  canal ") + juce::String (carteChannel_.load());
+    if (! reader_.connected()) return s + juce::String::fromUTF8 ("  ·  non connectée");
+    const int v = carteChordNow_.load();
+    if (v < 0) return s + juce::String::fromUTF8 ("  ·  en attente de la lecture");
+    chords::Chord c;
+    c.root = v & 0xFF;
+    c.rel = static_cast<std::uint16_t> (v >> 8 & 0xFFFF);
+    return s + "  ·  " + juce::String::fromUTF8 (chords::formatChord (c, chords::Naming::Letters).c_str());
 }
 
 bool OrganProcessor::isBusesLayoutSupported (const BusesLayout& l) const
@@ -70,6 +93,32 @@ void OrganProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
     if (n <= 0 || buffer.getNumChannels() < 1) return;
     float* left = buffer.getWritePointer (0);
     float* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer (1) : nullptr;
+
+    // Carte : pendant la lecture, l'orgue tient l'accord de la carte (notes ajoutées aux événements de l'hôte, à leur instant dans le bloc)
+    {
+        bool playing = false, hasPos = false;
+        double ppq = 0.0, bpm = 120.0;
+        if (auto* head = getPlayHead())
+            if (const auto info = head->getPosition())
+            {
+                playing = info->getIsPlaying();
+                if (const auto p = info->getPpqPosition()) { hasPos = true; ppq = *p; }
+                if (const auto b = info->getBpm()) bpm = *b;
+            }
+        const bool follow = carteFollow_.load (std::memory_order_relaxed);
+        follower_.setChordChannel (chordChannel_.load (std::memory_order_relaxed) - 1);
+        follower_.setBassChannel (bassChannel_.load (std::memory_order_relaxed) - 1);
+        follower_.setBaseNote (12 * (carteOctave_.load (std::memory_order_relaxed) + 1));
+        const int m = follower_.process (*carteEnv_, follow && playing, hasPos, ppq, bpm, getSampleRate(), n, followOut_.data(), static_cast<int> (followOut_.size()));
+        for (int i = 0; i < m; ++i)
+        {
+            const auto& e = followOut_[static_cast<size_t> (i)];
+            midi.addEvent (e.on ? juce::MidiMessage::noteOn (e.channel + 1, e.note, static_cast<juce::uint8> (100)) : juce::MidiMessage::noteOff (e.channel + 1, e.note), e.offset);
+        }
+        arp::Harmony hm;
+        if (follow && playing && hasPos && reader_.connected() && carteEnv_->harmonyAt (ppq, hm)) carteChordNow_.store (hm.rootPc | static_cast<int> (hm.rel) << 8);
+        else carteChordNow_.store (-2);
+    }
 
     int pos = 0;
     for (const auto meta : midi)
@@ -128,7 +177,14 @@ void OrganProcessor::handleAsyncUpdate()
 
 void OrganProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
-    const auto text = organ::stateToJson (engine_.params(), engine_.description(), currentPresetId_, ccEnabled_.load());
+    auto text = organ::stateToJson (engine_.params(), engine_.description(), currentPresetId_, ccEnabled_.load());
+    // les réglages de Carte ne sont pas des paramètres : une clé de plus dans le document d'état (les anciens états n'en ont pas)
+    auto doc = nlohmann::json::parse (text, nullptr, false);
+    if (doc.is_object())
+    {
+        doc["carte"] = { { "follow", carteFollow_.load() }, { "channel", carteChannel_.load() }, { "chordChannel", chordChannel_.load() }, { "bassChannel", bassChannel_.load() }, { "octave", carteOctave_.load() } };
+        text = doc.dump();
+    }
     dest.append (text.data(), text.size());
 }
 
@@ -141,6 +197,18 @@ void OrganProcessor::setStateInformation (const void* data, int size)
     bool cc = false;
     if (! organ::stateFromJson (text, engine_.params(), d, presetId, &cc)) return;
     ccEnabled_.store (cc);
+    {
+        const auto doc = nlohmann::json::parse (text, nullptr, false);
+        if (doc.is_object() && doc.contains ("carte") && doc["carte"].is_object())
+        {
+            const auto& c = doc["carte"];
+            carteFollow_.store (c.value ("follow", false));
+            carteChannel_.store (juce::jlimit (1, 8, c.value ("channel", 1)));
+            chordChannel_.store (juce::jlimit (1, 16, c.value ("chordChannel", 1)));
+            bassChannel_.store (juce::jlimit (0, 16, c.value ("bassChannel", 0)));
+            carteOctave_.store (juce::jlimit (1, 6, c.value ("octave", 3)));
+        }
+    }
     engine_.setDescription (d);
     currentPresetId_ = presetId;
     undo_.clear();
@@ -367,6 +435,30 @@ void NovaOrganPluginEditor::buildContent()
     link.midiLevel = [&p] (int ch) { return p.midiLevel (ch); };
     link.ccEnabled = [&p] { return p.ccEnabled(); };
     link.setCc = [&p] (bool on) { p.uiSetCcEnabled (on); };
+    link.carteText = [&p] { return p.carteText(); };
+    link.carteMenu = [&p] (juce::Component* anchor)
+    {
+        juce::PopupMenu m, ch, chord, bass, oct;
+        m.addItem (1, juce::String::fromUTF8 ("Suivre les accords de Carte"), true, p.carteFollow());
+        for (int i = 1; i <= 8; ++i) ch.addItem (100 + i, juce::String (i), true, p.carteChannel() == i);
+        for (int i = 1; i <= 16; ++i) chord.addItem (200 + i, juce::String (i), true, p.chordMidiChannel() == i);
+        bass.addItem (300, juce::String::fromUTF8 ("aucune basse"), true, p.bassMidiChannel() == 0);
+        for (int i = 1; i <= 16; ++i) bass.addItem (300 + i, juce::String (i), true, p.bassMidiChannel() == i);
+        for (int i = 1; i <= 6; ++i) oct.addItem (400 + i, juce::String (i) + (i == 3 ? juce::String::fromUTF8 (" (do 48)") : juce::String()), true, p.carteOctave() == i);
+        m.addSeparator();
+        m.addSubMenu (juce::String::fromUTF8 ("Canal de Carte"), ch);
+        m.addSubMenu (juce::String::fromUTF8 ("Canal MIDI des accords"), chord);
+        m.addSubMenu (juce::String::fromUTF8 ("Canal MIDI de la basse (pédalier)"), bass);
+        m.addSubMenu (juce::String::fromUTF8 ("Octave de base"), oct);
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor), [&p] (int r)
+        {
+            if (r == 1) p.setCarteFollow (! p.carteFollow());
+            else if (r > 100 && r <= 108) p.setCarteChannel (r - 100);
+            else if (r > 200 && r <= 216) p.setChordMidiChannel (r - 200);
+            else if (r >= 300 && r <= 316) p.setBassMidiChannel (r - 300);
+            else if (r > 400 && r <= 406) p.setCarteOctave (r - 400);
+        });
+    };
     link.collect = [&p] { p.engine().collect(); };
     link.track = 0;
     link.volumeId = organ::synthVolume;

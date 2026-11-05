@@ -736,6 +736,11 @@ void NovaOrganEditor::buildSettingsExtras()
     ccPill_ = add<nova::Pill> (page, skin());
     ccPill_->onClick = [this] { link_.setCc (! link_.ccEnabled()); };
     addInfo (page, ccPill_, "hlp.og_cc");
+    if (link_.carteMenu)
+    {
+        cartePill_ = add<nova::Pill> (page, skin());
+        cartePill_->onClick = [this] { link_.carteMenu (cartePill_); };
+    }
     panicPill_ = add<nova::Pill> (page, skin());
     panicPill_->setText (tx ("panic.button"));
     panicPill_->onClick = [this] { link_.panic(); keyboard_->releaseAll(); };
@@ -846,6 +851,7 @@ void NovaOrganEditor::layout()
     taperGrid_->setBounds (R (560, 176, 570, 260));
     ccPill_->setBounds (R (560, 462, 270, 34));
     panicPill_->setBounds (R (850, 462, 200, 34));
+    if (cartePill_ != nullptr) cartePill_->setBounds (R (560, 504, 490, 34));
     midiText_->setBounds (R (220, 540, 910, 80));
 
     // ---- barre du bas, en-tête, gestionnaire
@@ -907,6 +913,12 @@ void NovaOrganEditor::tick()
         foldbackPill_->setAlpha (desc_.extended ? 1.0f : 0.4f);
         ccPill_->setText (tx ("control.button") + "  " + (link_.ccEnabled() ? "ON" : "OFF"));
         ccPill_->setOn (link_.ccEnabled());
+        if (cartePill_ != nullptr && link_.carteText)
+        {
+            const auto t = link_.carteText();
+            if (t != carteShown_) { carteShown_ = t; cartePill_->setText (t); }
+            cartePill_->setOn (t.startsWith (juce::String::fromUTF8 ("Carte : ON")));
+        }
     }
 }
 
