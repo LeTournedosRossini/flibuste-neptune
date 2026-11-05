@@ -45,6 +45,26 @@ struct Transport
     double beatsPerBar = 4.0;    // longueur d'une mesure en noires
 };
 
+// Ce que Carte dit à l'arpégiateur à chaque instant (en noires de l'hôte). Appelé depuis le fil audio : sans verrou, sans allocation.
+struct Harmony
+{
+    int rootPc = 0;                 // fondamentale (0..11)
+    int bassPc = -1;                // basse (0..11) ou -1
+    std::uint16_t rel = 0x091;      // notes de l'accord relatives à la fondamentale
+    bool hasScale = false;
+    std::uint16_t scaleRel = 0;     // gamme en vigueur, relative à la fondamentale de l'accord
+};
+class Environment
+{
+public:
+    virtual ~Environment() = default;
+    virtual bool hasPatterns() const noexcept { return false; }                                  // la voie des motifs de Carte a des éléments
+    virtual const pattern::Pattern* patternAt (double) const noexcept { return nullptr; }        // motif demandé par Carte à cet instant (nullptr : celui du réglage)
+    virtual bool harmonyAt (double, Harmony&) const noexcept { return false; }                   // accord (et gamme) de Carte à cet instant
+    virtual bool measureAt (double, double&, double&, int&) const noexcept { return false; }     // mesure réelle : début, longueur, numéro (depuis 0)
+    virtual bool nextMeasureStart (double, double&) const noexcept { return false; }             // début de la première mesure de Carte après cet instant
+};
+
 class Arpeggiator
 {
 public:
@@ -61,6 +81,8 @@ public:
         absent_ = absent;
     }
     const pattern::Pattern* pattern() const { return pattern_; }
+    // Environnement de Carte (accord, gamme, motif, mesures) ; nullptr : seulement les notes tenues et les mesures de l'hôte.
+    void setEnvironment (const Environment* e) { env_ = e; }
 
     void setSampleRate (double sr) { sampleRate_ = sr > 0.0 ? sr : 44100.0; }
 
@@ -134,7 +156,8 @@ public:
         int ie = 0;
         const double blockBeats = numSamples * bps;
         int dueN = 0, di = 0;
-        if (pattern_ != nullptr) dueN = collectDue (start, blockBeats, bps, numSamples, tr);
+        const bool patternMode = pattern_ != nullptr || (env_ != nullptr && env_->hasPatterns());
+        if (patternMode) dueN = collectDue (start, blockBeats, bps, numSamples, tr);
         for (;;)
         {
             int nextOff = -1, offAt = numSamples;
@@ -142,7 +165,7 @@ public:
                 if (pending_[i].at < offAt) { offAt = pending_[i].at; nextOff = i; }
             const int inAt = ie < nIn ? std::clamp (in[ie].offset, 0, numSamples - 1) : numSamples;
             int stepAt = numSamples;
-            if (pattern_ != nullptr)
+            if (patternMode)
             {
                 if (di < dueN) stepAt = due_[di].at;
             }
@@ -166,7 +189,7 @@ public:
             }
             else if (stepAt < numSamples)
             {
-                if (pattern_ != nullptr)
+                if (patternMode)
                 {
                     doPatternHit (due_[di], bps);
                     ++di;
@@ -182,7 +205,7 @@ public:
         }
 
         for (int i = 0; i < pendingCount_; ++i) pending_[i].at -= numSamples;
-        if (pattern_ != nullptr && dueN > 0) lastHitT_ = std::max (lastHitT_, due_[dueN - 1].t);
+        if (patternMode && dueN > 0) lastHitT_ = std::max (lastHitT_, due_[dueN - 1].t);
         expectedNext_ = start + blockBeats;
         if (! syncHost) clock_ = expectedNext_;
         return outN_;
@@ -195,40 +218,69 @@ private:
         double t = 0.0;        // temps de l'hôte (noires)
         int at = 0;            // instant dans le bloc (échantillons)
         int hit = 0;           // indice du coup dans le motif
+        const pattern::Pattern* pat = nullptr;
         double durBeats = 0.0; // longueur (noires), coupée à la barre
     };
     static constexpr int kMaxDue = 2048;
 
-    // Coups du motif dont l'instant tombe dans [start, start + blockBeats), triés. Règle de Scorsaire : la mesure k joue la mesure k modulo `bars` du motif,
-    // le motif se répète pour remplir la mesure, un coup qui dépasse la barre est coupé.
+    // Coups des motifs dont l'instant tombe dans [start, start + blockBeats), triés. Règle de Scorsaire : la mesure k joue la mesure k modulo `bars` du motif,
+    // le motif se répète pour remplir la mesure, un coup qui dépasse la barre est coupé. Les mesures sont celles de Carte (réelles : anacrouse, 3/4...) si elle est là,
+    // sinon celles de l'hôte ; le motif de chaque mesure est celui que Carte demande à son début, sinon celui du réglage.
     int collectDue (double start, double blockBeats, double bps, int numSamples, const Transport& tr)
     {
-        const auto& pat = *pattern_;
         const double bb = std::max (0.25, tr.beatsPerBar);
-        const double origin = tr.barStartPpq - std::floor (tr.barStartPpq / bb + 0.5) * bb;   // décalage de la grille des mesures (0 en général)
-        const double barBeats = pat.barLength().toBeats();
-        if (barBeats <= 0.0 || pat.hits.empty()) return 0;
-        const int bars = std::max (1, pat.bars);
+        const double origin = tr.barStartPpq - std::floor (tr.barStartPpq / bb + 0.5) * bb;   // décalage de la grille des mesures de l'hôte (0 en général)
+        const double end = start + blockBeats;
         int n = 0;
-        const auto m0 = (long long) std::floor ((start - origin) / bb), m1 = (long long) std::floor ((start + blockBeats - origin) / bb);
-        for (long long mi = m0; mi <= m1; ++mi)
+        double t = start - bps;   // une demi-mesure d'avance suffit : on cherche la mesure qui contient le début du bloc
+        for (int guard = 0; guard < 64; ++guard)
         {
-            const int bar = (int) (((mi % bars) + bars) % bars);
-            const double first = barBeats * bar, last = first + barBeats;
-            const double measureStart = origin + (double) mi * bb, measureEnd = measureStart + bb;
-            for (int hi = 0; hi < (int) pat.hits.size(); ++hi)
+            double mStart = 0.0, mLen = 0.0;
+            int mIndex = 0;
+            bool skip = false;
+            if (env_ == nullptr || ! env_->measureAt (std::max (0.0, t), mStart, mLen, mIndex) || mLen <= 0.0)
             {
-                const auto& h = pat.hits[(size_t) hi];
-                const double hAt = h.at.toBeats();
-                if (hAt < first - 1e-9 || hAt >= last - 1e-9) continue;
-                for (double rep = 0.0; rep + (hAt - first) < bb - 1e-9; rep += barBeats)
+                const auto mi = (long long) std::floor ((t - origin) / bb + 1e-9);   // grille de l'hôte (avant et après les mesures de Carte)
+                mStart = origin + (double) mi * bb;
+                mLen = bb;
+                mIndex = (int) mi;
+                if (env_ != nullptr)
                 {
-                    const double t = measureStart + rep + (hAt - first);
-                    const long long sample = std::llround ((t - start) / bps);
-                    if (sample < -1 || sample >= numSamples || t <= lastHitT_ + 1e-9 || n >= kMaxDue) continue;
-                    due_[n++] = { t, (int) std::max<long long> (sample, 0), hi, std::min (h.dur.toBeats(), measureEnd - t) };
+                    double es = 0.0, el = 0.0;
+                    int ei = 0;
+                    if (env_->measureAt (std::max (0.0, mStart + 1e-9), es, el, ei)) skip = true;          // cette mesure de l'hôte commence dans une mesure de Carte : déjà jouée
+                    double ns = 0.0;
+                    if (env_->nextMeasureStart (std::max (0.0, mStart + 1e-9), ns) && ns > mStart) mLen = std::min (mLen, ns - mStart);   // coupée au début des mesures de Carte
                 }
             }
+            if (mStart >= end) break;
+            const pattern::Pattern* pat = env_ != nullptr ? env_->patternAt (mStart + 1e-9) : nullptr;
+            if (pat == nullptr) pat = pattern_;
+            if (! skip && pat != nullptr && ! pat->hits.empty())
+            {
+                const double barBeats = pat->barLength().toBeats();
+                const int bars = std::max (1, pat->bars);
+                const int bar = ((mIndex % bars) + bars) % bars;
+                const double first = barBeats * bar, last = first + barBeats;
+                const double mEnd = mStart + mLen;
+                if (barBeats > 0.0)
+                    for (int hi = 0; hi < (int) pat->hits.size(); ++hi)
+                    {
+                        const auto& h = pat->hits[(size_t) hi];
+                        const double hAt = h.at.toBeats();
+                        if (hAt < first - 1e-9 || hAt >= last - 1e-9) continue;
+                        for (double rep = 0.0; rep + (hAt - first) < mLen - 1e-9; rep += barBeats)
+                        {
+                            const double ht = mStart + rep + (hAt - first);
+                            const long long sample = std::llround ((ht - start) / bps);
+                            if (sample < -1 || sample >= numSamples || ht <= lastHitT_ + 1e-9 || n >= kMaxDue) continue;
+                            due_[n++] = { ht, (int) std::max<long long> (sample, 0), hi, pat, std::min (h.dur.toBeats(), mEnd - ht) };
+                        }
+                    }
+            }
+            const double next = mStart + mLen;
+            if (next <= t) break;
+            t = next;
         }
         std::sort (due_.begin(), due_.begin() + n, [] (const Due& a, const Due& b) { return a.t < b.t || (a.t == b.t && a.hit < b.hit); });
         return n;
@@ -236,15 +288,29 @@ private:
 
     void doPatternHit (const Due& d, double bps)
     {
-        if (heldCount_ == 0) return;
-        const auto& h = pattern_->hits[(size_t) d.hit];
+        if (heldCount_ == 0 || d.pat == nullptr) return;
+        const auto& h = d.pat->hits[(size_t) d.hit];
         int notes[kMaxHeld];
         int vsum = 0;
         for (int i = 0; i < heldCount_; ++i) { notes[i] = held_[i].note; vsum += held_[i].velocity; }
         std::array<int, kMaxHeld> sorted {};
         for (int i = 0; i < heldCount_; ++i) sorted[(size_t) i] = notes[i];
         std::sort (sorted.begin(), sorted.begin() + heldCount_);
-        const auto ctx = pattern::contextFromNotes (notes, heldCount_);
+        // l'accord : celui de Carte s'il y en a un, sinon reconnu dans les notes tenues
+        pattern::ChordContext ctx;
+        Harmony hm;
+        if (! d.pat->notesMode && env_ != nullptr && env_->harmonyAt (d.t, hm))
+        {
+            const int low = sorted[0];
+            int root = low - (((low - hm.rootPc) % 12) + 12) % 12;       // la fondamentale la plus proche en dessous (ou égale) de la note la plus grave
+            if (low - root > 6) root += 12;                              // ... ou au-dessus si c'est plus près
+            ctx.rootMidi = root;
+            ctx.rel = hm.rel;
+            ctx.bassPc = hm.bassPc;
+            ctx.scaleRel = hm.hasScale ? hm.scaleRel : 0;
+        }
+        else
+            ctx = pattern::contextFromNotes (notes, heldCount_);
         const int heldVel = std::clamp (vsum / heldCount_, 1, 127);
         int vel = h.vel > 0 ? h.vel : (params_.fixedVelocity ? params_.velocity : heldVel);
         if (h.accent) vel += params_.accentBoost;
@@ -254,7 +320,7 @@ private:
         for (const auto& part : h.parts)
         {
             int out[16];
-            const int n = pattern_->notesMode ? pattern::resolveRank (part, sorted.data(), heldCount_, out, 16) : pattern::resolvePart (part, ctx, absent_, out, 16);
+            const int n = d.pat->notesMode ? pattern::resolveRank (part, sorted.data(), heldCount_, out, 16) : pattern::resolvePart (part, ctx, absent_, out, 16);
             for (int k = 0; k < n; ++k) startNote (d.at, std::clamp (out[k] + params_.transpose, 0, 127), vel, len);
         }
     }
@@ -418,6 +484,7 @@ private:
     bool clockValid_ = false, wasSync_ = false;
     std::uint32_t rng_ = 2463534242u;
     const pattern::Pattern* pattern_ = nullptr;
+    const Environment* env_ = nullptr;
     pattern::Absent absent_ = pattern::Absent::Skip;
     double lastHitT_ = -1e300;
     std::array<Due, kMaxDue> due_ {};

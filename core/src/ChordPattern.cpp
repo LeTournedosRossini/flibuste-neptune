@@ -396,7 +396,7 @@ int degreeOfInterval (int semi, std::uint16_t rel)
 }
 }
 
-int degreeSemitones (const Part& part, std::uint16_t rel, Absent absent)
+int degreeSemitones (const Part& part, std::uint16_t rel, Absent absent, std::uint16_t scaleRel)
 {
     const int n = part.degree;
     if (part.signedDegree) return majorInterval (n) + part.accidental;
@@ -407,7 +407,10 @@ int degreeSemitones (const Part& part, std::uint16_t rel, Absent absent)
     // 9, 11, 13 : notes au-delà de l'octave de l'accord (bits 12..15 : 12 + k)
     for (int s = 12; s < 16; ++s)
         if (((rel >> s) & 1) != 0 && degreeOfInterval (s - 12, rel) == base && octaves == 1) return s;
-    return absent == Absent::Play ? majorInterval (n) : -1;
+    if (absent == Absent::Scale && scaleRel != 0)   // la note de la gamme qui porte ce degré
+        for (int s = 0; s < 12; ++s)
+            if (((scaleRel >> s) & 1) != 0 && degreeOfInterval (s, scaleRel) == base) return s + 12 * octaves;
+    return absent == Absent::Skip ? -1 : majorInterval (n);
 }
 
 int resolveRank (const Part& part, const int* sorted, int count, int* out, int cap)
@@ -453,7 +456,7 @@ int resolvePart (const Part& part, const ChordContext& chord, Absent absent, int
             break;
         case Part::Kind::Degree:
         {
-            const int semi = degreeSemitones (part, chord.rel, absent);
+            const int semi = degreeSemitones (part, chord.rel, absent, chord.scaleRel);
             if (semi >= 0) put (chord.rootMidi + semi + 12 * part.octave);
             break;
         }

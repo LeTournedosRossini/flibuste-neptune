@@ -7,7 +7,10 @@
 #include <vector>
 #include "NovaKit.h"
 #include "neptune/core/Arpeggiator.h"
+#include "neptune/core/ChordMapEnvironment.h"
 #include "neptune/core/ChordPattern.h"
+#include "neptune/core/ChordTimeline.h"
+#include "neptune/core/SharedChordMap.h"
 #include "neptune/core/Settings.h"
 #include "neptune/core/Theme.h"
 
@@ -18,7 +21,7 @@ class ArpegeProcessor : public juce::AudioProcessor
 {
 public:
     ArpegeProcessor();
-    ~ArpegeProcessor() override = default;
+    ~ArpegeProcessor() override;
 
     void prepareToPlay (double sampleRate, int) override;
     void releaseResources() override {}
@@ -48,7 +51,9 @@ public:
     juce::AudioParameterFloat *gate = nullptr, *swing = nullptr;
     juce::AudioParameterBool* hold = nullptr;
     juce::AudioParameterInt* slot = nullptr;           // 0 : motifs automatiques ; 1..16 : motif dessiné dans la matrice
-    juce::AudioParameterChoice* absentMode = nullptr;  // degré absent de l'accord : sauter / jouer la note par défaut
+    juce::AudioParameterChoice* absentMode = nullptr;  // degré absent de l'accord : sauter / jouer la note par défaut / prendre la note de la gamme (Carte)
+    juce::AudioParameterChoice* source = nullptr;      // 0 : notes tenues et mesures de l'hôte ; 1 : Carte (accord, gamme, motif, mesures)
+    juce::AudioParameterInt* carteChannel = nullptr;   // canal de liaison de Carte, 1 à 8
 
     static constexpr int kSlots = 16;
     // Emplacements de motifs (fil de messages). `slotPattern` : copie du motif (vide : emplacement libre).
@@ -60,6 +65,9 @@ public:
 
     const neptune::core::settings::GlobalSettings& settings() const { return settings_; }
     int heldCount() const noexcept { return held_.load(); }
+    // Ce que Carte dit : -1 pas connectée (ou source « notes tenues »), 0 connectée sans accord ici, sinon 1 ; `chordText` : l'accord en cours.
+    int carteState() const noexcept { return carteState_.load(); }
+    juce::String carteChordText() const;
     bool hostPlaying() const noexcept { return playing_.load(); }
 
     static const std::array<double, 8>& rateBeats();
@@ -78,8 +86,23 @@ private:
     std::array<std::shared_ptr<const neptune::core::pattern::Pattern>, kSlots> slots_;
     std::vector<std::shared_ptr<const neptune::core::pattern::Pattern>> retired_;   // gardés en vie : le fil audio peut encore les lire
     std::atomic<int> slotsVersion_ { 0 };
-    std::shared_ptr<const neptune::core::pattern::Pattern> active_;                 // fil audio
+    neptune::core::arp::ChordMapEnvironment::Slots audioSlots_;   // fil audio : copie des emplacements
+    const neptune::core::pattern::Pattern* activePattern_ = nullptr;
     int activeSlot_ = -1, activeVersion_ = -1;
+
+    // Carte : lecteur de la carte partagée (relevé et connecté depuis le fil de messages, consulté sans verrou par le fil audio)
+    struct Ticker : juce::Timer
+    {
+        explicit Ticker (ArpegeProcessor& p) : owner (p) {}
+        void timerCallback() override { owner.tick(); }
+        ArpegeProcessor& owner;
+    };
+    void tick();
+    neptune::core::chordmap::Reader reader_;
+    std::unique_ptr<neptune::core::arp::ChordMapEnvironment> env_;
+    Ticker ticker_ { *this };
+    std::atomic<int> carteState_ { -1 };
+    std::atomic<std::uint32_t> carteChord_ { 0 };   // racine | basse << 8 | rel << 16 ; 0 : aucun accord
     std::atomic<bool> playing_ { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ArpegeProcessor)

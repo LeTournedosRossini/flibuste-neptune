@@ -95,17 +95,19 @@ struct ChordContext
     int rootMidi = 48;         // fondamentale (note MIDI) du degré 1
     std::uint16_t rel = 0x091; // notes de l'accord relatives à la fondamentale, bit n = n demi-tons (défaut : majeur 0-4-7)
     int bassPc = -1;           // classe de hauteur de la basse (0..11) ou -1 : la fondamentale
+    std::uint16_t scaleRel = 0; // gamme en vigueur, relative à la fondamentale de l'accord (bit n = n demi-tons) ; 0 : pas de gamme
 };
 // Accord à partir de notes tenues (notes MIDI) : la fondamentale est cherchée parmi les notes (la plus grave d'abord) de façon que l'ensemble des classes de
 // hauteur soit une qualité connue (majeur, mineur, 7, maj7, m7, dim, sus...). Renversement : `bassPc` = la note la plus grave. Sinon la plus grave est la
 // fondamentale et `rel` reprend les intervalles réellement tenus (les degrés se lisent alors comme les notes : 1, puis ce qui ressemble à 3, 5, 7...).
 ChordContext contextFromNotes (const int* notes, int count);
-enum class Absent { Skip, Play };
+// Degré absent de l'accord : sauté, ou la note par défaut du degré, ou la note de la gamme en vigueur (sinon la note par défaut).
+enum class Absent { Skip, Play, Scale };
 // Mode « notes » : `sorted` = notes tenues triées, plus grave d'abord (count >= 1). Rang r (part « r » : 1 = la plus grave) ; au-delà du nombre de notes, on
 // remonte d'une octave en repartant de la plus grave (4 sur trois notes = la plus grave plus une octave). « B » : la plus grave, une octave plus bas ; « C » : toutes.
 int resolveRank (const Part& part, const int* sorted, int count, int* out, int cap);
 // Demi-tons au-dessus de la fondamentale du degré (octave comprise), ou -1 si le degré est absent de l'accord et que `absent` = Skip.
-int degreeSemitones (const Part& part, std::uint16_t rel, Absent absent);
+int degreeSemitones (const Part& part, std::uint16_t rel, Absent absent, std::uint16_t scaleRel = 0);
 // Notes MIDI d'une part (vide : rien ne sonne). Basse : sous la fondamentale ; accord : toutes les notes de l'accord (12 premiers demi-tons).
 int resolvePart (const Part& part, const ChordContext& chord, Absent absent, int* out, int cap);
 } // namespace neptune::core::pattern

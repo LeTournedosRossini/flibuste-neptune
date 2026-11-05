@@ -8,7 +8,7 @@ namespace arp = neptune::core::arp;
 
 namespace
 {
-constexpr int kDesignW = 880, kDesignH = 560;
+constexpr int kDesignW = 1000, kDesignH = 560;
 
 std::filesystem::path configDirectory()
 {
@@ -108,7 +108,9 @@ ArpegeProcessor::ArpegeProcessor() : juce::AudioProcessor (BusesProperties())
     addParameter (transpose = new juce::AudioParameterInt (juce::ParameterID { "transpose", 1 }, "Transposition", -24, 24, 0));
 
     addParameter (slot = new juce::AudioParameterInt (juce::ParameterID { "slot", 1 }, "Motif", 0, kSlots, 0, juce::AudioParameterIntAttributes().withStringFromValueFunction ([] (int v, int) { return v == 0 ? juce::String ("Auto") : juce::String (v); })));
-    addParameter (absentMode = new juce::AudioParameterChoice (juce::ParameterID { "absent", 1 }, "Degre absent", juce::StringArray { "Sauter", "Jouer" }, 0));
+    addParameter (absentMode = new juce::AudioParameterChoice (juce::ParameterID { "absent", 1 }, "Degre absent", juce::StringArray { "Sauter", "Jouer", "Gamme" }, 0));
+    addParameter (source = new juce::AudioParameterChoice (juce::ParameterID { "source", 1 }, "Source", juce::StringArray { "Notes tenues", "Carte" }, 0));
+    addParameter (carteChannel = new juce::AudioParameterInt (juce::ParameterID { "carteChannel", 1 }, "Canal de Carte", 1, chordmap::kChannels, 1));
 
     {
         const auto b = builtinPatterns();
@@ -118,6 +120,27 @@ ArpegeProcessor::ArpegeProcessor() : juce::AudioProcessor (BusesProperties())
     settings_ = settings::loadFile (configDirectory() / "settings.json", &warnings);
     in_.reserve (1024);
     out_.resize (4096);
+    env_ = std::make_unique<arp::ChordMapEnvironment> (reader_, audioSlots_);
+    ticker_.startTimer (500);
+}
+
+ArpegeProcessor::~ArpegeProcessor() { ticker_.stopTimer(); }
+
+void ArpegeProcessor::tick()
+{
+    reader_.setChannel (carteChannel->get());
+    reader_.poll();
+}
+
+juce::String ArpegeProcessor::carteChordText() const
+{
+    const auto v = carteChord_.load();
+    if (v == 0) return {};
+    chords::Chord c;
+    c.root = static_cast<int> (v & 0xFF);
+    c.bass = (v >> 8 & 0xFF) <= 11 ? static_cast<int> (v >> 8 & 0xFF) : -1;
+    c.rel = static_cast<std::uint16_t> (v >> 16 & 0xFFFF);
+    return juce::String::fromUTF8 (chords::formatChord (c, chords::Naming::Letters).c_str());
 }
 
 arp::Params ArpegeProcessor::currentParams() const
@@ -197,12 +220,15 @@ void ArpegeProcessor::processBlock (juce::AudioBuffer<float>& audio, juce::MidiB
             const juce::SpinLock::ScopedTryLockType l (slotLock_);
             if (l.isLocked())
             {
-                active_ = s > 0 ? slots_[(size_t) s - 1] : nullptr;
+                audioSlots_ = slots_;
                 activeSlot_ = s;
                 activeVersion_ = ver;
             }
         }
-        arp_.setPattern (active_.get(), absentMode->getIndex() == 1 ? pattern::Absent::Play : pattern::Absent::Skip);
+        activePattern_ = (s > 0 && activeSlot_ == s) ? audioSlots_[(size_t) s - 1].get() : nullptr;
+        const int am = absentMode->getIndex();
+        arp_.setPattern (activePattern_, am == 2 ? pattern::Absent::Scale : (am == 1 ? pattern::Absent::Play : pattern::Absent::Skip));
+        arp_.setEnvironment (source->getIndex() == 1 ? env_.get() : nullptr);
     }
 
     arp::Transport tr;
@@ -221,6 +247,19 @@ void ArpegeProcessor::processBlock (juce::AudioBuffer<float>& audio, juce::MidiB
             if (const auto bar = pos->getPpqPositionOfLastBarStart()) tr.barStartPpq = *bar;
         }
     playing_.store (tr.playing);
+    if (source->getIndex() == 1 && reader_.connected())
+    {
+        arp::Harmony hm;
+        const double t = tr.hasPosition ? tr.ppq : 0.0;
+        if (env_->harmonyAt (t, hm)) carteChord_.store (static_cast<std::uint32_t> (hm.rootPc) | static_cast<std::uint32_t> (hm.bassPc < 0 ? 255 : hm.bassPc) << 8 | static_cast<std::uint32_t> (hm.rel) << 16);
+        else carteChord_.store (0);
+        carteState_.store (carteChord_.load() != 0 ? 1 : 0);
+    }
+    else
+    {
+        carteChord_.store (0);
+        carteState_.store (-1);
+    }
 
     in_.clear();
     scratch_.clear();
@@ -563,6 +602,8 @@ ArpegeEditor::ArpegeEditor (ArpegeProcessor& p)
     add (proc_.transpose, "Transposition");
     add (proc_.slot, "Motif n°");
     add (proc_.absentMode, "Degré absent");
+    add (proc_.source, "Source");
+    add (proc_.carteChannel, "Canal Carte");
 
     matrix_ = std::make_unique<MatrixView> (proc_, skin_);
     addAndMakeVisible (*matrix_);
@@ -688,8 +729,8 @@ void ArpegeEditor::resized()
 {
     skin_.setScale (nova::fitScale (getWidth(), getHeight(), kDesignW, kDesignH, 0.6f, 3.0f));
     const auto px = [this] (float v) { return skin_.ipx (v); };
-    const float w[] = { 260, 110, 150, 120, 120, 120, 120, 100, 190, 100, 170, 130, 130 };
-    const int rowOf[] = { 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2 };
+    const float w[] = { 260, 110, 150, 120, 120, 120, 120, 100, 190, 100, 170, 130, 150, 150, 120 };
+    const int rowOf[] = { 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 3, 3 };
     int x[4] = { px (16.0f), px (16.0f), px (16.0f), px (16.0f) };
     const int y0 = px (60.0f), h = px (30.0f), gap = px (40.0f);
     for (size_t i = 0; i < pills_.size(); ++i)
@@ -698,7 +739,7 @@ void ArpegeEditor::resized()
         pills_[i]->setBounds (x[r], y0 + r * gap, px (w[i]), h);
         x[r] += px (w[i] + 8.0f);
     }
-    const float aw[] = { 160, 130, 100, 250, 100, 100, 100, 100, 170 };
+    const float aw[] = { 160, 130, 100, 210, 90, 90, 90, 90, 170 };   // rangée 3 : Source, Canal Carte, puis ces actions
     const int aRow[] = { 2, 2, 2, 3, 3, 3, 3, 3, 2 };
     for (size_t i = 0; i < actions_.size(); ++i)
     {
@@ -716,8 +757,16 @@ void ArpegeEditor::paint (juce::Graphics& g)
     nova::paintHeaderBar (g, skin_, juce::Rectangle<float> (0.0f, 0.0f, static_cast<float> (getWidth()), skin_.px (46.0f)), juce::String::fromUTF8 ("Arpège"), juce::String::fromUTF8 ("arpégiateur"));
     g.setFont (skin_.font (13.0f));
     g.setColour (skin_.colour (theme::Token::TextDim));
+    juce::String carteInfo;
+    if (proc_.source->getIndex() == 1)
+    {
+        const int st = proc_.carteState();
+        carteInfo = juce::String::fromUTF8 ("   ·   Carte (canal ") + juce::String (proc_.carteChannel->get()) + juce::String::fromUTF8 ("), ")
+                    + (st < 0 ? juce::String::fromUTF8 ("non connectée") : (st == 0 ? juce::String::fromUTF8 ("pas d'accord ici") : juce::String::fromUTF8 ("accord ") + proc_.carteChordText()));
+    }
     const auto text = juce::String::fromUTF8 ("Notes tenues : ") + juce::String (proc_.heldCount()) + "   ·   "
                       + (proc_.hostPlaying() ? juce::String::fromUTF8 ("calé sur la lecture de l'hôte") : juce::String::fromUTF8 ("lecture arrêtée : horloge interne"))
+                      + carteInfo
                       + juce::String::fromUTF8 ("   ·   glisser : régler  ·  clic : changer  ·  double-clic : saisir  ·  matrice : clic ou glisser, bande du bas : accent");
     g.drawText (text, juce::Rectangle<float> (skin_.px (16.0f), static_cast<float> (getHeight()) - skin_.px (34.0f), static_cast<float> (getWidth()) - skin_.px (32.0f), skin_.px (24.0f)).toNearestInt(),
                 juce::Justification::centredLeft, true);

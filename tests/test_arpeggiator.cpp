@@ -475,3 +475,216 @@ TEST_CASE ("arp motif : mode notes, rangs des notes tenues, toujours un motif co
     const std::vector<Event> odd = { { 0, true, 60, 90 }, { 0, true, 61, 90 }, { 0, true, 66, 90 } };
     CHECK (onNotes (run (c, odd, (long long) (kSamplesPerBeat * 2), 256)) == std::vector<int> { 60, 61, 66, 72 });
 }
+
+// ================================================================================================ environnement de Carte
+
+namespace
+{
+using neptune::core::arp::Environment;
+using neptune::core::arp::Harmony;
+
+struct FakeEnv : Environment
+{
+    struct M { double start, length; };
+    std::vector<M> measures;
+    bool chord = false;
+    Harmony hm;
+    const Pattern* early = nullptr;
+    const Pattern* late = nullptr;
+    double switchAt = 1e9;
+
+    bool hasPatterns() const noexcept override { return early != nullptr; }
+    const Pattern* patternAt (double t) const noexcept override { return t < switchAt ? early : late; }
+    bool harmonyAt (double, Harmony& out) const noexcept override { if (chord) out = hm; return chord; }
+    bool nextMeasureStart (double t, double& start) const noexcept override
+    {
+        for (const auto& m : measures) if (m.start > t) { start = m.start; return true; }
+        return false;
+    }
+    bool measureAt (double t, double& start, double& length, int& index) const noexcept override
+    {
+        for (size_t i = 0; i < measures.size(); ++i)
+            if (t >= measures[i].start && t < measures[i].start + measures[i].length) { start = measures[i].start; length = measures[i].length; index = (int) i; return true; }
+        return false;
+    }
+};
+}
+
+TEST_CASE ("arp carte : l'accord de Carte remplace la reconnaissance des notes tenues", "[arp][carte]")
+{
+    const auto pat = patternFrom (R"({ "id": "q", "length": [1,1], "hits": [
+        { "at": [0,4], "dur": [1,4], "parts": ["1"] }, { "at": [1,4], "dur": [1,4], "parts": ["3"] },
+        { "at": [2,4], "dur": [1,4], "parts": ["5"] }, { "at": [3,4], "dur": [1,4], "parts": ["7"] } ] })");
+    FakeEnv env;
+    env.chord = true;
+    env.hm.rootPc = 2;                 // ré
+    env.hm.rel = 0x489;                // m7 : 0 3 7 10
+    auto a = make();
+    a.setPattern (&pat);
+    a.setEnvironment (&env);
+    // une seule note tenue (do 3 = 48) : sert de repère d'octave ; l'accord vient de Carte
+    const std::vector<Event> one = { { 0, true, 48, 90 } };
+    CHECK (onNotes (run (a, one, (long long) (kSamplesPerBeat * 3.9), 256)) == std::vector<int> { 50, 53, 57, 60 });
+    // sans Carte, la même note seule est « sa propre fondamentale »
+    auto b = make();
+    b.setPattern (&pat);
+    CHECK (onNotes (run (b, one, (long long) (kSamplesPerBeat * 3.9), 256)) == std::vector<int> { 48 });   // 3, 5 et 7 absents d'un accord d'une note
+}
+
+TEST_CASE ("arp carte : la gamme donne la note d'un degré absent de l'accord", "[arp][carte]")
+{
+    const auto pat = patternFrom (R"({ "id": "g", "length": [1,1], "hits": [
+        { "at": [0,4], "dur": [1,4], "parts": ["1"] }, { "at": [1,4], "dur": [1,4], "parts": ["7"] }, { "at": [2,4], "dur": [1,4], "parts": ["9"] } ] })");
+    FakeEnv env;
+    env.chord = true;
+    env.hm.rootPc = 0;
+    env.hm.rel = 0x091;                // do majeur (0 4 7)
+    env.hm.hasScale = true;
+    env.hm.scaleRel = 0x6B5;           // mixolydien : 0 2 4 5 7 9 10
+    const std::vector<Event> in = { { 0, true, 60, 90 } };
+    for (auto mode : { neptune::core::pattern::Absent::Skip, neptune::core::pattern::Absent::Play, neptune::core::pattern::Absent::Scale })
+    {
+        auto a = make();
+        a.setPattern (&pat, mode);
+        a.setEnvironment (&env);
+        const auto ons = onNotes (run (a, in, (long long) (kSamplesPerBeat * 2.9), 256));
+        if (mode == neptune::core::pattern::Absent::Skip) CHECK (ons == std::vector<int> { 60 });
+        if (mode == neptune::core::pattern::Absent::Play) CHECK (ons == std::vector<int> { 60, 71, 74 });   // 7 majeure, 9 par défaut
+        if (mode == neptune::core::pattern::Absent::Scale) CHECK (ons == std::vector<int> { 60, 70, 74 });  // la 7e du mixolydien : si bémol ; la 9e : ré
+    }
+}
+
+TEST_CASE ("arp carte : mesures réelles (anacrouse) et motif de deux mesures", "[arp][carte]")
+{
+    const auto two = patternFrom (R"({ "id": "t", "length": [2,1], "bars": 2, "hits": [
+        { "at": [0,1], "dur": [1,4], "parts": ["1"] }, { "at": [1,1], "dur": [1,4], "parts": ["3"] } ] })");
+    FakeEnv env;
+    env.measures = { { 0.0, 1.0 }, { 1.0, 4.0 }, { 5.0, 4.0 }, { 9.0, 3.0 } };   // anacrouse d'un temps, deux 4/4, un 3/4
+    env.early = &two;
+    auto a = make();
+    a.setEnvironment (&env);
+    const auto ev = run (a, kChord, (long long) (kSamplesPerBeat * 12), 300);
+    std::vector<Event> ons;
+    for (const auto& e : ev) if (e.on) ons.push_back (e);
+    REQUIRE (ons.size() == 4);
+    // mesure 0 (anacrouse) joue la mesure 0 du motif, 1 la mesure 1, 2 la mesure 0, 3 la mesure 1 (à son début)
+    CHECK (ons[0].note == 60);
+    CHECK (ons[0].at == 0);
+    CHECK (ons[1].note == 64);
+    CHECK (ons[1].at == (long long) std::llround (1.0 * kSamplesPerBeat));
+    CHECK (ons[2].note == 60);
+    CHECK (ons[2].at == (long long) std::llround (5.0 * kSamplesPerBeat));
+    CHECK (ons[3].note == 64);
+    CHECK (ons[3].at == (long long) std::llround (9.0 * kSamplesPerBeat));
+}
+
+TEST_CASE ("arp carte : le motif change quand Carte le demande, au début de la mesure", "[arp][carte]")
+{
+    const auto a1 = patternFrom (R"({ "id": "a", "length": [1,1], "hits": [ { "at": [0,1], "dur": [1,4], "parts": ["1"] } ] })");
+    const auto b1 = patternFrom (R"({ "id": "b", "length": [1,1], "hits": [ { "at": [0,1], "dur": [1,4], "parts": ["5"] } ] })");
+    FakeEnv env;
+    env.early = &a1;
+    env.late = &b1;
+    env.switchAt = 8.0;
+    auto a = make();
+    a.setEnvironment (&env);
+    for (int block : { 64, 1000 })
+    {
+        a.reset();
+        const auto ons = onNotes (run (a, kChord, (long long) (kSamplesPerBeat * 12), block));
+        CHECK (ons == std::vector<int> { 60, 60, 67 });   // mesures 0 et 1 : motif A ; mesure 2 (à partir du temps 8) : motif B
+    }
+}
+
+TEST_CASE ("arp carte : sans note tenue, rien ne sonne ; pas de note bloquée", "[arp][carte]")
+{
+    const auto pat = patternFrom (kArpeggioJson);
+    FakeEnv env;
+    env.chord = true;
+    env.early = &pat;
+    auto a = make();
+    a.setEnvironment (&env);
+    CHECK (run (a, {}, (long long) (kSamplesPerBeat * 4), 256).empty());
+    std::map<int, int> balance;
+    for (const auto& e : run (a, kChord, (long long) (kSamplesPerBeat * 3), 100)) balance[e.note] += e.on ? 1 : -1;
+    a.reset();
+    std::vector<NoteOut> out (64);
+    const int m = a.process (nullptr, 0, Transport {}, 64, out.data(), 64);
+    for (int i = 0; i < m; ++i) balance[out[i].note] += out[i].on ? 1 : -1;
+    for (const auto& kv : balance) CHECK (kv.second == 0);
+}
+
+// ================================================================================================ de bout en bout : Carte écrit, Arpège lit
+
+#include <atomic>
+#include <chrono>
+
+#include "neptune/core/CarteScore.h"
+#include "neptune/core/ChordMapEnvironment.h"
+
+TEST_CASE ("de bout en bout : la carte publiée par Carte pilote l'arpégiateur", "[arp][carte][integration]")
+{
+    using namespace neptune::core;
+    static std::atomic<int> counter { 0 };
+    const std::string tag = "arp" + std::to_string (static_cast<long> (std::chrono::steady_clock::now().time_since_epoch().count() % 1000000)) + "-" + std::to_string (counter++) + "-";
+    chordmap::Writer writer (tag);
+    chordmap::Reader reader (tag);
+    REQUIRE (writer.open (1) == chordmap::Status::Ok);
+
+    // morceau : anacrouse d'un temps, puis Dm7 (une mesure) et G7 (une mesure) en ré dorien / sol mixolydien, motif 2 sur la 2e mesure
+    carte::Score s;
+    chords::Item dm7;
+    dm7.start = 1.0; dm7.length = 4.0;
+    REQUIRE (chords::parseChord ("Dm7", dm7.chord));
+    chords::Item g7;
+    g7.start = 5.0; g7.length = 4.0;
+    REQUIRE (chords::parseChord ("G7", g7.chord));
+    s.chords = { dm7, g7 };
+    carte::placeScale (s.scales, { 1.0, 4.0, 2, 4, false });    // ré dorien
+    carte::placeScale (s.scales, { 5.0, 4.0, 7, 7, false });    // sol mixolydien
+    carte::placePattern (s.patterns, { 0.0, 5.0, 1 });          // motif 1 jusqu'au temps 5
+    carte::placePattern (s.patterns, { 5.0, 4.0, 2 });          // motif 2 ensuite
+    s.measures = { { 0.0, 1.0, 4, 4, 0 }, { 1.0, 4.0, 4, 4, 1 }, { 5.0, 4.0, 4, 4, 2 } };
+    writer.publish (carte::toContainers (s));
+    reader.poll();
+    REQUIRE (reader.connected());
+
+    const auto p1 = patternFrom (R"({ "id": "p1", "length": [1,1], "hits": [
+        { "at": [0,4], "dur": [1,4], "parts": ["1"] }, { "at": [1,4], "dur": [1,4], "parts": ["3"] }, { "at": [2,4], "dur": [1,4], "parts": ["5"] }, { "at": [3,4], "dur": [1,4], "parts": ["7"] } ] })");
+    const auto p2 = patternFrom (R"({ "id": "p2", "length": [1,1], "hits": [ { "at": [0,1], "dur": [1,1], "parts": ["B","C"] } ] })");
+    arp::ChordMapEnvironment::Slots slots;
+    slots[0] = std::make_shared<const neptune::core::pattern::Pattern> (p1);
+    slots[1] = std::make_shared<const neptune::core::pattern::Pattern> (p2);
+    arp::ChordMapEnvironment env (reader, slots);
+
+    auto a = make();
+    a.setEnvironment (&env);
+    const std::vector<Event> held = { { 0, true, 48, 90 } };   // une seule note tenue : le repère d'octave
+    const auto ev = run (a, held, (long long) (kSamplesPerBeat * 9), 480);
+    std::vector<Event> ons;
+    for (const auto& e : ev) if (e.on) ons.push_back (e);
+
+    // anacrouse (temps 0 à 1) : motif 1 sur la mesure d'un temps ; pas d'accord de Carte avant le temps 1 : accord reconnu dans la note tenue (do seul) -> 1 seulement
+    // mesure 1 (temps 1 à 5) : Dm7 en motif 1 (la mesure 1 du morceau est le rang 1, le motif a 1 mesure : alors toujours la même)
+    // 4 coups : ré fa la do (50, 53, 57, 60), aux temps 1, 2, 3, 4
+    // mesure 2 (temps 5 à 9) : motif 2 : basse + accord de G7 en une fois, au temps 5
+    std::vector<int> expectMeasure1 = { 50, 53, 57, 60 };
+    std::vector<int> got1;
+    for (const auto& e : ons)
+        if (e.at >= (long long) (1.0 * kSamplesPerBeat) && e.at < (long long) (5.0 * kSamplesPerBeat)) got1.push_back (e.note);
+    CHECK (got1 == expectMeasure1);
+    std::vector<int> got2;
+    for (const auto& e : ons)
+        if (e.at >= (long long) (5.0 * kSamplesPerBeat)) { got2.push_back (e.note); CHECK (e.at == (long long) (5.0 * kSamplesPerBeat)); }
+    // G7 (sol si ré fa) : la fondamentale la plus proche de la note tenue (do 48) est sol 43 ; la basse est sol, une octave plus bas : 31 ; puis l'accord 43 47 50 53
+    CHECK (got2 == std::vector<int> { 31, 43, 47, 50, 53 });
+    // et les instants sont ceux des mesures réelles, indépendamment de la taille des blocs
+    for (int block : { 1, 64, 1024 })
+    {
+        auto b = make();
+        b.setEnvironment (&env);
+        const auto ev2 = run (b, held, (long long) (kSamplesPerBeat * 9), block);
+        CHECK (onNotes (ev2) == onNotes (ev));
+    }
+    writer.close();
+}
