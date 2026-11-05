@@ -60,7 +60,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth, FM6Op, Orgamon, La Flèche, Compresseur, Egaliseur, Délai, Chœur, Microdécale et Convolution)
-        run: cmake --build build --config Release --parallel ${{ runner.os == 'Linux' && '2' || '4' }} --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP Compresseur_CLAP Egaliseur_CLAP Delai_CLAP Choeur_CLAP Microdecale_CLAP Convolution_CLAP Diapason_CLAP Mirador_CLAP Fournaise_CLAP
+        run: cmake --build build --config Release --parallel ${{ runner.os == 'Linux' && '2' || '4' }} --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP Compresseur_CLAP Egaliseur_CLAP Delai_CLAP Choeur_CLAP Microdecale_CLAP Convolution_CLAP Diapason_CLAP Mirador_CLAP Fournaise_CLAP Digue_CLAP Carte_CLAP Arpege_CLAP EssaiCarte_CLAP
 
       # Galerie des composants communs NOVA rendue en PNG (Linux, sous xvfb) : sert à comparer avec les maquettes HTML.
       - name: NovaGallery (Linux)
@@ -492,6 +492,102 @@ jobs:
         with:
           name: Mirador-${{ matrix.name }}
           path: dist-mir/*
+          if-no-files-found: error
+
+      # Digue séparé, archivé à part.
+      - name: Archive Digue.clap
+        shell: bash
+        run: |
+          CLAP=$(find build/adapter-juce/Digue_artefacts -name 'Digue.clap' -print -quit)
+          test -n "$CLAP" || { echo "Digue.clap introuvable"; exit 1; }
+          mkdir -p dist-dig/stage
+          cp -R "$CLAP" dist-dig/stage/
+          cd dist-dig/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../Digue-${{ matrix.name }}.zip" Digue.clap
+          else
+            tar -czf "../Digue-${{ matrix.name }}.tar.gz" Digue.clap
+          fi
+          cd ../..
+          rm -rf dist-dig/stage
+          ls -la dist-dig
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Digue-${{ matrix.name }}
+          path: dist-dig/*
+          if-no-files-found: error
+
+      # Carte séparé, archivé à part.
+      - name: Archive Carte.clap
+        shell: bash
+        run: |
+          CLAP=$(find build/adapter-juce/Carte_artefacts -name 'Carte.clap' -print -quit)
+          test -n "$CLAP" || { echo "Carte.clap introuvable"; exit 1; }
+          mkdir -p dist-car/stage
+          cp -R "$CLAP" dist-car/stage/
+          cd dist-car/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../Carte-${{ matrix.name }}.zip" Carte.clap
+          else
+            tar -czf "../Carte-${{ matrix.name }}.tar.gz" Carte.clap
+          fi
+          cd ../..
+          rm -rf dist-car/stage
+          ls -la dist-car
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Carte-${{ matrix.name }}
+          path: dist-car/*
+          if-no-files-found: error
+
+      # Arpege séparé, archivé à part.
+      - name: Archive Arpege.clap
+        shell: bash
+        run: |
+          CLAP=$(find build/adapter-juce/Arpege_artefacts -name 'Arpege.clap' -print -quit)
+          test -n "$CLAP" || { echo "Arpege.clap introuvable"; exit 1; }
+          mkdir -p dist-arp/stage
+          cp -R "$CLAP" dist-arp/stage/
+          cd dist-arp/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../Arpege-${{ matrix.name }}.zip" Arpege.clap
+          else
+            tar -czf "../Arpege-${{ matrix.name }}.tar.gz" Arpege.clap
+          fi
+          cd ../..
+          rm -rf dist-arp/stage
+          ls -la dist-arp
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Arpege-${{ matrix.name }}
+          path: dist-arp/*
+          if-no-files-found: error
+
+      # EssaiCarte séparé, archivé à part.
+      - name: Archive "Essai Carte.clap"
+        shell: bash
+        run: |
+          CLAP=$(find build/adapter-juce/EssaiCarte_artefacts -name 'Essai Carte.clap' -print -quit)
+          test -n "$CLAP" || { echo "Essai Carte.clap introuvable"; exit 1; }
+          mkdir -p dist-ess/stage
+          cp -R "$CLAP" dist-ess/stage/
+          cd dist-ess/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../EssaiCarte-${{ matrix.name }}.zip" "Essai Carte.clap"
+          else
+            tar -czf "../EssaiCarte-${{ matrix.name }}.tar.gz" "Essai Carte.clap"
+          fi
+          cd ../..
+          rm -rf dist-ess/stage
+          ls -la dist-ess
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: EssaiCarte-${{ matrix.name }}
+          path: dist-ess/*
           if-no-files-found: error
 
       # Fournaise séparé, archivé à part.
