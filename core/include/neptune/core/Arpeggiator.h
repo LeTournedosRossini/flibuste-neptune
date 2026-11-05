@@ -220,11 +220,34 @@ private:
     {
         double t = 0.0;        // temps de l'hôte (noires)
         int at = 0;            // instant dans le bloc (échantillons)
-        int hit = 0;           // indice du coup dans le motif
+        int order = 0;         // ordre de création (départage deux coups simultanés)
+        const pattern::Hit* hit = nullptr;
         const pattern::Pattern* pat = nullptr;
         double durBeats = 0.0; // longueur (noires), coupée à la barre
     };
     static constexpr int kMaxDue = 2048;
+
+    // Variante tirée pour cette mesure du morceau et cette répétition du motif : le tirage ne dépend que de leurs numéros et du motif, donc il est le même quelle que soit
+    // la taille des blocs et à chaque lecture. `chance` : probabilité ; 0 : jamais (la variante « sur signal » n'a pas de signal ici).
+    static const pattern::Alt* pickAlt (const pattern::Pattern& p, int measureIndex, int repIndex)
+    {
+        if (p.alts.empty()) return nullptr;
+        std::uint64_t x = (std::uint64_t) (std::uint32_t) measureIndex * 0x9E3779B97F4A7C15ull ^ ((std::uint64_t) repIndex + 1) * 0xBF58476D1CE4E5B9ull;
+        for (const char c : p.id) x = (x ^ (unsigned char) c) * 1099511628211ull;
+        x += 0x9E3779B97F4A7C15ull;
+        std::uint64_t z = x;
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+        z ^= z >> 31;
+        const double u = (double) (z >> 11) * (1.0 / 9007199254740992.0);
+        double acc = 0.0;
+        for (const auto& a : p.alts)
+        {
+            acc += a.chance;
+            if (u < acc) return &a;
+        }
+        return nullptr;
+    }
 
     // Coups des motifs dont l'instant tombe dans [start, start + blockBeats), triés. Règle de Scorsaire : la mesure k joue la mesure k modulo `bars` du motif,
     // le motif se répète pour remplir la mesure, un coup qui dépasse la barre est coupé. Les mesures sont celles de Carte (réelles : anacrouse, 3/4...) si elle est là,
@@ -267,33 +290,42 @@ private:
                 const double first = barBeats * bar, last = first + barBeats;
                 const double mEnd = mStart + mLen;
                 if (barBeats > 0.0)
-                    for (int hi = 0; hi < (int) pat->hits.size(); ++hi)
+                    for (double rep = 0.0; rep < mLen - 1e-9; rep += barBeats)   // le motif se répète pour remplir la mesure
                     {
-                        const auto& h = pat->hits[(size_t) hi];
-                        const double hAt = h.at.toBeats();
-                        if (hAt < first - 1e-9 || hAt >= last - 1e-9) continue;
-                        for (double rep = 0.0; rep + (hAt - first) < mLen - 1e-9; rep += barBeats)
+                        const pattern::Alt* alt = pickAlt (*pat, mIndex, (int) std::llround (rep / barBeats));
+                        const double fromBeats = alt != nullptr ? alt->from.toBeats() : 1e300;
+                        auto add = [&] (const pattern::Hit& h, double rel)
                         {
-                            const double ht = mStart + rep + (hAt - first);
+                            const double ht = mStart + rep + rel;
+                            if (rep + rel >= mLen - 1e-9) return;
                             const long long sample = std::llround ((ht - start) / bps);
-                            if (sample < -1 || sample >= numSamples || ht <= lastHitT_ + 1e-9 || n >= kMaxDue) continue;
-                            due_[n++] = { ht, (int) std::max<long long> (sample, 0), hi, pat, std::min (h.dur.toBeats(), mEnd - ht) };
+                            if (sample < -1 || sample >= numSamples || ht <= lastHitT_ + 1e-9 || n >= kMaxDue) return;
+                            due_[n++] = { ht, (int) std::max<long long> (sample, 0), n, &h, pat, std::min (h.dur.toBeats(), mEnd - ht) };
+                        };
+                        for (const auto& h : pat->hits)
+                        {
+                            const double hAt = h.at.toBeats();
+                            if (hAt < first - 1e-9 || hAt >= last - 1e-9) continue;
+                            if (hAt - first >= fromBeats - 1e-9) continue;   // remplacé par la variante
+                            add (h, hAt - first);
                         }
+                        if (alt != nullptr)
+                            for (const auto& h : alt->hits) add (h, h.at.toBeats());
                     }
             }
             const double next = mStart + mLen;
             if (next <= t) break;
             t = next;
         }
-        std::sort (due_.begin(), due_.begin() + n, [] (const Due& a, const Due& b) { return a.t < b.t || (a.t == b.t && a.hit < b.hit); });
+        std::sort (due_.begin(), due_.begin() + n, [] (const Due& a, const Due& b) { return a.t < b.t || (a.t == b.t && a.order < b.order); });
         return n;
     }
 
     void doPatternHit (const Due& d, double bps)
     {
         const CarteChordPool synth (*this, d.t);
-        if (heldCount_ == 0 || d.pat == nullptr) return;
-        const auto& h = d.pat->hits[(size_t) d.hit];
+        if (heldCount_ == 0 || d.hit == nullptr || d.pat == nullptr) return;
+        const auto& h = *d.hit;
         int notes[kMaxHeld];
         int vsum = 0;
         for (int i = 0; i < heldCount_; ++i) { notes[i] = held_[i].note; vsum += held_[i].velocity; }

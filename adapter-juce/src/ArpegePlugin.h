@@ -11,6 +11,7 @@
 #include "neptune/core/ChordPattern.h"
 #include "neptune/core/ChordTimeline.h"
 #include "neptune/core/SharedChordMap.h"
+#include "neptune/core/Undo.h"
 #include "neptune/core/Settings.h"
 #include "neptune/core/Theme.h"
 
@@ -62,6 +63,9 @@ public:
     neptune::core::pattern::Pattern slotPattern (int index) const;
     void setSlotPattern (int index, neptune::core::pattern::Pattern p);
     void clearSlot (int index);
+    // Changement annulable d'un motif (matrice, mode, longueur, chargement...) : `before` -> `after`.
+    void commitSlot (int index, const neptune::core::pattern::Pattern& before, const neptune::core::pattern::Pattern& after, const char* name);
+    neptune::core::UndoManager& undo() { return undo_; }
     static std::vector<neptune::core::pattern::Pattern> builtinPatterns();
 
     const neptune::core::settings::GlobalSettings& settings() const { return settings_; }
@@ -84,6 +88,7 @@ private:
     juce::MidiBuffer scratch_;
     std::atomic<int> held_ { 0 };
 
+    neptune::core::UndoManager undo_;
     mutable juce::SpinLock slotLock_;
     std::array<std::shared_ptr<const neptune::core::pattern::Pattern>, kSlots> slots_;
     std::vector<std::shared_ptr<const neptune::core::pattern::Pattern>> retired_;   // gardés en vie : le fil audio peut encore les lire
@@ -122,6 +127,8 @@ public:
 private:
     class ParamPill;
     class MatrixView;
+    bool keyPressed (const juce::KeyPress&) override;
+    void editSlot (const char* name, const std::function<void (neptune::core::pattern::Pattern&)>& edit);
     void timerCallback() override;
     void refreshActions();
 

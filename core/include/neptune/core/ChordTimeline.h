@@ -29,6 +29,8 @@ std::string formatChord (const Chord& c, Naming naming = Naming::Letters);
 const std::vector<std::string>& qualitySuffixes();
 // Les notes de l'accord comme masque de classes de hauteur absolues (do = 0), basse comprise.
 std::uint16_t absoluteMask (const Chord& c);
+// Idem sans la basse : les seules notes de l'accord (publié dans la carte partagée ; la basse y est un champ à part, pour que Am7/D ne compte pas le ré comme une note de l'accord).
+std::uint16_t chordMask (const Chord& c);
 
 struct Item
 {

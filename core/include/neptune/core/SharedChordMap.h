@@ -41,7 +41,7 @@ struct Container
     std::uint8_t root = 0;            // 0..11 (do = 0) ; Pattern : emplacement 1..16 ; Measure : numérateur du chiffrage 1..64
     std::uint8_t bass = 255;          // 0..11, 255 : pas de basse distincte ; Measure : dénominateur du chiffrage 1..64
     std::uint8_t reserved = 0;
-    std::uint16_t pitchMask = 0;      // classes de hauteur, bit n = note n (absolue, do = 0) : notes de l'accord, ou gamme (tonalité, gamme) ; 0 pour Pattern et Measure
+    std::uint16_t pitchMask = 0;      // classes de hauteur, bit n = note n (absolue, do = 0) : notes de l'accord (sans la basse, qui a son champ), ou gamme (tonalité, gamme) ; 0 pour Pattern et Measure
     std::uint16_t pad = 0;
 };
 static_assert (sizeof (Container) == 24, "format partagé : taille figée");

@@ -8,7 +8,7 @@ namespace arp = neptune::core::arp;
 
 namespace
 {
-constexpr int kDesignW = 1000, kDesignH = 560;
+constexpr int kDesignW = 1100, kDesignH = 640;
 
 std::filesystem::path configDirectory()
 {
@@ -191,6 +191,11 @@ void ArpegeProcessor::setSlotPattern (int i, pattern::Pattern p)
     slotsVersion_.fetch_add (1);
 }
 
+void ArpegeProcessor::commitSlot (int i, const pattern::Pattern& before, const pattern::Pattern& after, const char* name)
+{
+    undo_.perform (std::make_unique<SnapshotCommand<pattern::Pattern>> (before, after, [this, i] (const pattern::Pattern& p) { setSlotPattern (i, p); }, name));
+}
+
 void ArpegeProcessor::clearSlot (int i)
 {
     if (i < 0 || i >= kSlots) return;
@@ -316,6 +321,7 @@ void ArpegeProcessor::setStateInformation (const void* data, int size)
         if (xml->hasTagName ("ARPEGE"))
         {
             for (int i = 0; i < kSlots; ++i) clearSlot (i);
+            undo_.clear();
             for (auto* e : xml->getChildWithTagNameIterator ("SLOT"))
             {
                 const int n = e->getIntAttribute ("n");
@@ -436,7 +442,7 @@ juce::String rowLabel (const juce::String& part)
 class ArpegeEditor::MatrixView : public juce::Component
 {
 public:
-    MatrixView (ArpegeProcessor& p, const nova::Skin& s) : proc_ (p), skin_ (s) {}
+    MatrixView (ArpegeProcessor& p, const nova::Skin& s) : proc_ (p), skin_ (s) { setWantsKeyboardFocus (true); }
 
     int grid = 2;
     std::function<void()> onChange;
@@ -512,7 +518,24 @@ public:
             const auto acc = juce::Rectangle<float> (geo.x0 + c * geo.cellW, geo.accentY, geo.cellW, geo.accentH).reduced (skin_.px (2.0f));
             g.setColour (skin_.colour (h.accent ? Token::Pink : Token::TextDim2, h.accent ? 1.0f : 0.5f));
             g.fillRoundedRectangle (acc, skin_.px (3.0f));
+            // vélocité et durée propres au coup (barre pleine) ; sans valeur propre : une barre discrète au niveau du réglage du plugin
+            const float colW = std::max (2.0f, geo.cellW - skin_.px (4.0f));
+            const float vh = (h.vel > 0 ? (float) h.vel : 100.0f) / 127.0f * geo.velH;
+            g.setColour (skin_.colour (h.vel > 0 ? Token::Accent : Token::TextDim2, h.vel > 0 ? 0.9f : 0.35f));
+            g.fillRect (geo.x0 + c * geo.cellW + skin_.px (2.0f), geo.velY + geo.velH - vh, colW, vh);
+            const float gh = (h.gate > 0.0 ? (float) h.gate : 0.5f) * geo.gateH;
+            g.setColour (skin_.colour (h.gate > 0.0 ? Token::Accent2 : Token::TextDim2, h.gate > 0.0 ? 0.9f : 0.35f));
+            g.fillRect (geo.x0 + c * geo.cellW + skin_.px (2.0f), geo.gateY + geo.gateH - gh, colW, gh);
         }
+        for (const float y : { geo.velY, geo.gateY })
+        {
+            g.setColour (skin_.colour (Token::BgApp, 0.5f));
+            g.drawRect (juce::Rectangle<float> (geo.x0, y, geo.w, y == geo.velY ? geo.velH : geo.gateH), 1.0f);
+        }
+        g.setColour (skin_.colour (Token::TextDim));
+        g.setFont (skin_.font (11.0f));
+        g.drawText (juce::String::fromUTF8 ("vélocité"), juce::Rectangle<float> (0.0f, geo.velY, geo.x0 - skin_.px (6.0f), geo.velH), juce::Justification::centredRight);
+        g.drawText (juce::String::fromUTF8 ("durée"), juce::Rectangle<float> (0.0f, geo.gateY, geo.x0 - skin_.px (6.0f), geo.gateH), juce::Justification::centredRight);
         g.setColour (skin_.colour (Token::TextDim));
         g.setFont (skin_.font (11.0f));
         g.drawText (juce::String::fromUTF8 ("accent"), juce::Rectangle<float> (0.0f, geo.accentY, geo.x0 - skin_.px (6.0f), geo.accentH), juce::Justification::centredRight);
@@ -520,25 +543,40 @@ public:
 
     void mouseDown (const juce::MouseEvent& e) override
     {
+        grabKeyboardFocus();
         if (slotIndex() < 0) return;
         last_ = { -1, -1 };
+        strokeBefore_ = proc_.slotPattern (slotIndex());
+        dirty_ = false;
+        const auto geo = geometry (columns());
+        band_ = e.position.y >= geo.gateY ? Band::Gate : (e.position.y >= geo.velY ? Band::Vel : (e.position.y >= geo.accentY ? Band::Accent : Band::Cells));
+        reset_ = e.mods.isRightButtonDown();   // clic droit sur une barre : retour au réglage du plugin
         apply (e.position, true);
     }
     void mouseDrag (const juce::MouseEvent& e) override { if (slotIndex() >= 0 && painting_) apply (e.position, false); }
-    void mouseUp (const juce::MouseEvent&) override { painting_ = false; }
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        painting_ = false;
+        if (dirty_ && slotIndex() >= 0) proc_.commitSlot (slotIndex(), strokeBefore_, proc_.slotPattern (slotIndex()), "Matrice");
+        dirty_ = false;
+    }
 
 private:
-    struct Geo { float x0, y0, w, rowH, cellW, accentY, accentH; };
+    struct Geo { float x0, y0, w, rowH, cellW, accentY, accentH, velY, velH, gateY, gateH; };
     Geo geometry (int cols) const
     {
         Geo g {};
         g.x0 = skin_.px (46.0f);
         g.y0 = skin_.px (6.0f);
-        g.accentH = skin_.px (18.0f);
+        g.accentH = skin_.px (16.0f);
+        g.velH = skin_.px (34.0f);
+        g.gateH = skin_.px (34.0f);
         g.w = (float) getWidth() - g.x0 - skin_.px (8.0f);
-        g.rowH = ((float) getHeight() - g.y0 - g.accentH - skin_.px (14.0f)) / (float) kNumRows;
+        g.rowH = ((float) getHeight() - g.y0 - g.accentH - g.velH - g.gateH - skin_.px (26.0f)) / (float) kNumRows;
         g.cellW = g.w / (float) cols;
         g.accentY = g.y0 + g.rowH * kNumRows + skin_.px (4.0f);
+        g.velY = g.accentY + g.accentH + skin_.px (4.0f);
+        g.gateY = g.velY + g.velH + skin_.px (4.0f);
         return g;
     }
 
@@ -553,11 +591,22 @@ private:
         notes = pat.notesMode;
         const auto gr = kGridFracs[grid];
         const auto at = makeFrac (gr.n * c, gr.d);
-        if (pos.y >= geo.accentY)
+        if (band_ == Band::Accent)
         {
             if (! first) return;
-            if (pattern::toggleAccent (pat, at)) {}
+            pattern::toggleAccent (pat, at);
             proc_.setSlotPattern (idx, pat);
+            dirty_ = true;
+        }
+        else if (band_ == Band::Vel || band_ == Band::Gate)
+        {
+            painting_ = true;
+            const bool vel = band_ == Band::Vel;
+            const float y0 = vel ? geo.velY : geo.gateY, h = vel ? geo.velH : geo.gateH;
+            const double t = std::clamp (1.0 - (double) (pos.y - y0) / (double) h, 0.0, 1.0);
+            const bool ok = vel ? pattern::setHitVel (pat, at, reset_ ? 0 : std::max (1, (int) std::lround (t * 127.0)))
+                                : pattern::setHitGate (pat, at, reset_ ? 0.0 : 0.05 + 0.95 * t);
+            if (ok) { proc_.setSlotPattern (idx, pat); dirty_ = true; }
         }
         else
         {
@@ -573,6 +622,7 @@ private:
             if (pattern::hasCell (pat, at, rowPart (r)) == paintOn_) return;
             pattern::toggleCell (pat, at, gr, rowPart (r));
             proc_.setSlotPattern (idx, pat);
+            dirty_ = true;
         }
         repaint();
         if (onChange) onChange();
@@ -581,7 +631,9 @@ private:
     ArpegeProcessor& proc_;
     const nova::Skin& skin_;
     juce::Point<int> last_ { -1, -1 };
-    bool painting_ = false, paintOn_ = true;
+    bool painting_ = false, paintOn_ = true, dirty_ = false, reset_ = false;
+    enum class Band { Cells, Accent, Vel, Gate } band_ = Band::Cells;
+    pattern::Pattern strokeBefore_;
 };
 
 ArpegeEditor::ArpegeEditor (ArpegeProcessor& p)
@@ -613,21 +665,12 @@ ArpegeEditor::ArpegeEditor (ArpegeProcessor& p)
     addAndMakeVisible (*matrix_);
 
     // actions : 0 grille, 1 durée, 2 mesures, 3 fourni, 4 charger, 5 importer, 6 exporter, 7 effacer, 8 mode du motif
-    for (int i = 0; i < 9; ++i)
+    for (int i = 0; i < 11; ++i)
     {
         actions_.push_back (std::make_unique<nova::Pill> (skin_, nova::Pill::Look::Small));
         addAndMakeVisible (*actions_.back());
     }
-    const auto withPattern = [this] (const std::function<void (pattern::Pattern&)>& edit)
-    {
-        const int idx = proc_.slot->get() - 1;
-        if (idx < 0) return;
-        auto pat = proc_.slotPattern (idx);
-        edit (pat);
-        proc_.setSlotPattern (idx, pat);
-        matrix_->repaint();
-        refreshActions();
-    };
+    const auto withPattern = [this] (const std::function<void (pattern::Pattern&)>& edit) { editSlot ("Motif", edit); };
     actions_[0]->onClick = [this] { matrix_->grid = (matrix_->grid + 1) % kNumGrids; matrix_->repaint(); refreshActions(); };
     actions_[1]->onClick = [this, withPattern]
     {
@@ -644,7 +687,7 @@ ArpegeEditor::ArpegeEditor (ArpegeProcessor& p)
     {
         const int idx = proc_.slot->get() - 1;
         const auto all = proc_.builtinPatterns();
-        if (idx >= 0 && fournis_ < (int) all.size()) proc_.setSlotPattern (idx, all[(size_t) fournis_]);
+        if (idx >= 0 && fournis_ < (int) all.size()) proc_.commitSlot (idx, proc_.slotPattern (idx), all[(size_t) fournis_], "Charger un motif fourni");
         matrix_->repaint();
         refreshActions();
     };
@@ -662,7 +705,8 @@ ArpegeEditor::ArpegeEditor (ArpegeProcessor& p)
             for (const auto& pt : r.patterns)
             {
                 if (idx >= ArpegeProcessor::kSlots) break;
-                proc_.setSlotPattern (idx++, pt);
+                proc_.commitSlot (idx, proc_.slotPattern (idx), pt, "Importer un motif");
+                ++idx;
             }
             matrix_->repaint();
             refreshActions();
@@ -682,12 +726,18 @@ ArpegeEditor::ArpegeEditor (ArpegeProcessor& p)
         });
     };
     actions_[8]->onClick = [withPattern] { withPattern ([] (pattern::Pattern& pt) { pattern::setNotesMode (pt, ! pt.notesMode); }); };
+    actions_[9]->setText ("Annuler");
+    actions_[9]->onClick = [this] { proc_.undo().undo(); matrix_->repaint(); refreshActions(); };
+    actions_[10]->setText (juce::String::fromUTF8 ("Rétablir"));
+    actions_[10]->onClick = [this] { proc_.undo().redo(); matrix_->repaint(); refreshActions(); };
     actions_[7]->onClick = [this]
     {
         const int idx = proc_.slot->get() - 1;
         if (idx < 0) return;
-        proc_.clearSlot (idx);
-        proc_.setSlotPattern (idx, proc_.slotPattern (idx));   // un motif vide, prêt à dessiner
+        pattern::Pattern fresh;   // un motif vide, prêt à dessiner
+        fresh.id = "motif" + std::to_string (idx + 1);
+        pattern::setNotesMode (fresh, true);
+        proc_.commitSlot (idx, proc_.slotPattern (idx), fresh, "Effacer le motif");
         matrix_->repaint();
         refreshActions();
     };
@@ -727,6 +777,35 @@ void ArpegeEditor::refreshActions()
     actions_[7]->setText (juce::String::fromUTF8 ("Effacer"));
     for (int i = 1; i < 8; ++i) if (i != 3) actions_[(size_t) i]->setDim (! on);
     actions_[0]->setDim (! on);
+    actions_[9]->setDim (! proc_.undo().canUndo());
+    actions_[10]->setDim (! proc_.undo().canRedo());
+}
+
+void ArpegeEditor::editSlot (const char* name, const std::function<void (pattern::Pattern&)>& edit)
+{
+    const int idx = proc_.slot->get() - 1;
+    if (idx < 0) return;
+    const auto before = proc_.slotPattern (idx);
+    auto after = before;
+    edit (after);
+    proc_.commitSlot (idx, before, after, name);
+    matrix_->repaint();
+    refreshActions();
+}
+
+bool ArpegeEditor::keyPressed (const juce::KeyPress& k)
+{
+    const bool cmd = k.getModifiers().isCommandDown() || k.getModifiers().isCtrlDown();
+    const int code = k.getKeyCode();
+    if (cmd && (code == 'Z' || code == 'z'))
+    {
+        if (k.getModifiers().isShiftDown()) proc_.undo().redo(); else proc_.undo().undo();
+        matrix_->repaint();
+        refreshActions();
+        return true;
+    }
+    if (cmd && (code == 'Y' || code == 'y')) { proc_.undo().redo(); matrix_->repaint(); refreshActions(); return true; }
+    return false;
 }
 
 void ArpegeEditor::resized()
@@ -743,8 +822,8 @@ void ArpegeEditor::resized()
         pills_[i]->setBounds (x[r], y0 + r * gap, px (w[i]), h);
         x[r] += px (w[i] + 8.0f);
     }
-    const float aw[] = { 160, 130, 100, 160, 90, 90, 90, 90, 170 };   // rangée 3 : Source, Canal Carte, puis ces actions
-    const int aRow[] = { 2, 2, 2, 3, 3, 3, 3, 3, 2 };
+    const float aw[] = { 160, 130, 100, 160, 90, 90, 90, 90, 170, 90, 100 };   // rangée 3 : Source, Canal Carte, puis ces actions ; Annuler et Rétablir en fin de rangée 1
+    const int aRow[] = { 2, 2, 2, 3, 3, 3, 3, 3, 2, 1, 1 };
     for (size_t i = 0; i < actions_.size(); ++i)
     {
         const int r = aRow[i];

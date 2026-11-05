@@ -755,3 +755,76 @@ TEST_CASE ("arp carte : Carte joue seule, sans note tenue, pendant la lecture", 
         for (const auto& kv : balance) CHECK (kv.second == 0);
     }
 }
+
+TEST_CASE ("de bout en bout : une basse étrangère n'est pas une note de l'accord (Am7/D)", "[arp][carte][integration]")
+{
+    using namespace neptune::core;
+    static std::atomic<int> counter { 100 };
+    const std::string tag = "bas" + std::to_string (static_cast<long> (std::chrono::steady_clock::now().time_since_epoch().count() % 1000000)) + "-" + std::to_string (counter++) + "-";
+    chordmap::Writer writer (tag);
+    chordmap::Reader reader (tag);
+    REQUIRE (writer.open (1) == chordmap::Status::Ok);
+    carte::Score s;
+    chords::Item it;
+    it.start = 0.0; it.length = 8.0;
+    REQUIRE (chords::parseChord ("Am7/D", it.chord));
+    s.chords = { it };
+    writer.publish (carte::toContainers (s));
+    reader.poll();
+    arp::ChordMapEnvironment::Slots slots;
+    arp::ChordMapEnvironment env (reader, slots);
+    arp::Harmony hm;
+    REQUIRE (env.harmonyAt (1.0, hm));
+    CHECK (hm.rootPc == 9);
+    CHECK (hm.bassPc == 2);
+    CHECK (hm.rel == 0x489);   // la m7 : 0 3 7 10, sans le ré
+    writer.close();
+}
+
+TEST_CASE ("arp : variantes de motif (alts), tirage reproductible et indépendant des blocs", "[arp][pattern]")
+{
+    const char* json = R"({ "id": "va", "length": [1,1], "hits": [
+        { "at": [0,4], "dur": [1,4], "parts": ["1"] }, { "at": [1,4], "dur": [1,4], "parts": ["1"] },
+        { "at": [2,4], "dur": [1,4], "parts": ["1"] }, { "at": [3,4], "dur": [1,4], "parts": ["1"] } ],
+        "alts": [ { "id": "fill", "chance": %s, "from": [1,2], "hits": [
+            { "at": [2,4], "dur": [1,8], "parts": ["5"] }, { "at": [5,8], "dur": [1,8], "parts": ["5"] }, { "at": [3,4], "dur": [1,4], "parts": ["5+1"] } ] } ] })";
+    auto make1 = [&] (const char* chance) { char buf[1024]; std::snprintf (buf, sizeof buf, json, chance); return patternFrom (buf); };
+    const long long len = (long long) (kSamplesPerBeat * 4 * 8 - 10);   // huit mesures
+
+    SECTION ("chance 0 : la variante ne joue jamais")
+    {
+        const auto pat = make1 ("0");
+        REQUIRE (pat.alts.size() == 1);
+        auto a = make();
+        a.setPattern (&pat);
+        const auto ons = onNotes (run (a, kChord, len, 512));
+        CHECK (ons.size() == 32);
+        for (int n : ons) CHECK (n == 60);
+    }
+    SECTION ("chance 1 : la variante remplace la fin de chaque mesure")
+    {
+        const auto pat = make1 ("1");
+        auto a = make();
+        a.setPattern (&pat);
+        const auto ons = onNotes (run (a, kChord, (long long) (kSamplesPerBeat * 4 - 10), 512));
+        CHECK (ons == std::vector<int> { 60, 60, 67, 67, 79 });   // 2 coups d'origine, puis 5, 5 et 5+1 de la variante
+    }
+    SECTION ("chance 0,5 : un mélange, le même à chaque lecture et à toute taille de bloc")
+    {
+        const auto pat = make1 ("0.5");
+        std::vector<int> ref;
+        for (int block : { 1, 64, 512, 4096 })
+        {
+            auto a = make();
+            a.setPattern (&pat);
+            const auto ons = onNotes (run (a, kChord, len, block));
+            if (ref.empty()) ref = ons;
+            CHECK (ons == ref);
+        }
+        int plain = 0, filled = 0;
+        for (size_t i = 0; i + 3 < ref.size(); ++i) { (void) i; }
+        for (int n : ref) { if (n == 60) ++plain; else ++filled; }
+        CHECK (plain > 8);
+        CHECK (filled > 4);   // au moins une mesure a pris la variante, au moins une ne l'a pas prise
+    }
+}

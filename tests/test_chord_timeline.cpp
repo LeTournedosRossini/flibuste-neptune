@@ -93,6 +93,7 @@ TEST_CASE ("accords : masque absolu avec basse", "[chords]")
 {
     CHECK (absoluteMask (parsed ("C")) == ((1u << 0) | (1u << 4) | (1u << 7)));
     CHECK (absoluteMask (parsed ("Am")) == ((1u << 9) | (1u << 0) | (1u << 4)));
+    CHECK (chordMask (parsed ("C/D")) == ((1u << 0) | (1u << 4) | (1u << 7)));   // la basse n'est pas une note de l'accord
     CHECK (absoluteMask (parsed ("C/D")) == ((1u << 0) | (1u << 4) | (1u << 7) | (1u << 2)));
 }
 
@@ -206,7 +207,7 @@ TEST_CASE ("timeline : conteneurs publiés", "[chords]")
     CHECK (c[0].lengthBeats == 4.0);
     CHECK (c[0].root == 0);
     CHECK (c[0].bass == 4);
-    CHECK (c[0].pitchMask == absoluteMask (v[0].chord));
+    CHECK (c[0].pitchMask == chordMask (v[0].chord));
     place (v, item (4, 4, "G"));
     CHECK (toContainers (v)[1].bass == 255);
 }

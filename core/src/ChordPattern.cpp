@@ -153,6 +153,27 @@ bool readPattern (const json& j, Pattern& out)
         }
     if (p.hits.empty()) return false;
     std::stable_sort (p.hits.begin(), p.hits.end(), [] (const Hit& a, const Hit& b) { return compare (a.at, b.at) < 0; });
+    if (j.contains ("alts") && j["alts"].is_array())
+    {
+        const Frac barLen = makeFrac (p.length.n, p.length.d * p.bars);
+        for (const auto& aj : j["alts"])
+        {
+            Alt a;
+            if (! aj.is_object()) continue;
+            a.id = aj.value ("id", std::string());
+            Frac from;
+            a.from = (aj.contains ("from") && readFrac (aj["from"], from) && compare (from, barLen) < 0) ? from : makeFrac (1, 2);
+            const double ch = aj.value ("chance", 0.0);
+            a.chance = ch < 0.0 ? 0.0 : (ch > 1.0 ? 1.0 : ch);
+            if (aj.contains ("hits") && aj["hits"].is_array())
+                for (const auto& hj : aj["hits"])
+                {
+                    Hit h;
+                    if (readHit (hj, barLen, h) && compare (h.at, a.from) >= 0) a.hits.push_back (h);
+                }
+            if (! a.hits.empty() && p.alts.size() < 7) p.alts.push_back (std::move (a));
+        }
+    }
     p.extraJson = extrasOf (j, { "id", "name", "length", "bars", "hits" });
     if (! p.extraJson.empty())
     {
@@ -334,6 +355,23 @@ bool toggleAccent (Pattern& p, const Frac& at)
     }
     return false;
 }
+
+bool setHitVel (Pattern& p, const Frac& at, int vel)
+{
+    auto* h = hitAt (p, at);
+    if (h == nullptr) return false;
+    h->vel = vel <= 0 ? 0 : std::clamp (vel, 1, 127);
+    return true;
+}
+bool setHitGate (Pattern& p, const Frac& at, double gate)
+{
+    auto* h = hitAt (p, at);
+    if (h == nullptr) return false;
+    h->gate = gate <= 0.0 ? 0.0 : std::clamp (gate, 0.05, 1.0);
+    return true;
+}
+int hitVel (const Pattern& p, const Frac& at) { const auto* h = hitAtConst (p, at); return h != nullptr ? h->vel : 0; }
+double hitGate (const Pattern& p, const Frac& at) { const auto* h = hitAtConst (p, at); return h != nullptr ? h->gate : 0.0; }
 
 void setLengthAndBars (Pattern& p, const Frac& length, int bars)
 {

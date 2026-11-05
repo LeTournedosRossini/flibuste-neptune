@@ -360,3 +360,31 @@ TEST_CASE ("motif : le mode notes est un repère gardé dans x", "[pattern]")
     setNotesMode (fresh, false);
     CHECK (fresh.extraJson.empty());
 }
+
+TEST_CASE ("motif : vélocité et durée propres à un coup", "[pattern]")
+{
+    Pattern p;
+    p.length = makeFrac (1, 1);
+    const auto at = makeFrac (1, 4), d = makeFrac (1, 4);
+    CHECK (! setHitVel (p, at, 90));            // pas de coup : rien
+    toggleCell (p, at, d, "3");
+    CHECK (setHitVel (p, at, 90));
+    CHECK (hitVel (p, at) == 90);
+    CHECK (setHitVel (p, at, 500));
+    CHECK (hitVel (p, at) == 127);              // borné
+    CHECK (setHitGate (p, at, 0.3));
+    CHECK (hitGate (p, at) == 0.3);
+    CHECK (setHitGate (p, at, 7.0));
+    CHECK (hitGate (p, at) == 1.0);
+    // aller-retour par le fichier
+    const auto again = fromJson (toJson ({ p }));
+    REQUIRE (again.ok);
+    CHECK (again.patterns[0].hits[0].vel == 127);
+    CHECK (again.patterns[0].hits[0].gate == 1.0);
+    // 0 retire la valeur : retour au réglage du plugin
+    CHECK (setHitVel (p, at, 0));
+    CHECK (setHitGate (p, at, 0.0));
+    CHECK (hitVel (p, at) == 0);
+    CHECK (hitGate (p, at) == 0.0);
+    CHECK (fromJson (toJson ({ p })).patterns[0].hits[0].vel == 0);
+}

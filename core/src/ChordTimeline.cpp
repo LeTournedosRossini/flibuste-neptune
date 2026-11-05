@@ -190,11 +190,17 @@ std::string formatChord (const Chord& c, Naming naming)
     return s;
 }
 
-std::uint16_t absoluteMask (const Chord& c)
+std::uint16_t chordMask (const Chord& c)
 {
     std::uint16_t m = 0;
     for (int n = 0; n < 12; ++n)
         if ((c.rel & (1u << n)) != 0) m = static_cast<std::uint16_t> (m | (1u << ((c.root + n) % 12)));
+    return m;
+}
+
+std::uint16_t absoluteMask (const Chord& c)
+{
+    auto m = chordMask (c);
     if (c.bass >= 0) m = static_cast<std::uint16_t> (m | (1u << (c.bass % 12)));
     return m;
 }
@@ -334,7 +340,7 @@ std::vector<chordmap::Container> toContainers (const std::vector<Item>& items)
         c.kind = chordmap::Kind::Chord;
         c.root = static_cast<std::uint8_t> (it.chord.root);
         c.bass = it.chord.bass >= 0 ? static_cast<std::uint8_t> (it.chord.bass) : static_cast<std::uint8_t> (255);
-        c.pitchMask = absoluteMask (it.chord);
+        c.pitchMask = chordMask (it.chord);
         v.push_back (c);
     }
     return v;

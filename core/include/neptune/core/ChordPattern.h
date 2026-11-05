@@ -49,12 +49,22 @@ struct Hit
     std::string extraJson;   // champs inconnus (objet JSON), vide si aucun
 };
 
+// Variante d'un motif (Scorsaire : `alts`) : remplace la fin de la mesure du motif à partir de `from`, avec la probabilité `chance` (0 : seulement sur signal, jamais ici).
+struct Alt
+{
+    std::string id;
+    Frac from = makeFrac (1, 2);   // depuis le début de la mesure du motif
+    double chance = 0.0;
+    std::vector<Hit> hits;         // `at` comptés depuis le début de la mesure du motif, tous >= from
+};
+
 struct Pattern
 {
     std::string id, name;
     Frac length = makeFrac (1, 1);   // longueur TOTALE (toutes les mesures du motif)
     int bars = 1;
     std::vector<Hit> hits;           // triés par `at`
+    std::vector<Alt> alts;           // variantes (gardées aussi telles quelles dans `extraJson`, qui reste la source de l'écriture)
     std::string extraJson;           // champs inconnus, `alts` comprises
     // Mode « notes » : les parts « 1 » à « 15 » sont des RANGS des notes tenues (de la plus grave à la plus aiguë), pas des degrés d'accord. Repère dans le motif :
     // `x.arpege.mode = "notes"` (Scorsaire garde `x` sans le lire). Sans repère : mode « accord » (degrés).
@@ -85,6 +95,12 @@ bool hasCell (const Pattern& p, const Frac& at, const std::string& partText);
 // Accent du coup qui commence à `at` ; faux (rien fait) s'il n'y a pas de coup. Retourne le nouvel état.
 bool toggleAccent (Pattern& p, const Frac& at);
 bool hasAccent (const Pattern& p, const Frac& at);
+// Vélocité (1..127) et durée de note (0,05..1 de la longueur du coup) propres au coup qui commence à `at` ; 0 retire la valeur (retour au réglage du plugin).
+// Faux (rien fait) s'il n'y a pas de coup à cet endroit.
+bool setHitVel (Pattern& p, const Frac& at, int vel);
+bool setHitGate (Pattern& p, const Frac& at, double gate);
+int hitVel (const Pattern& p, const Frac& at);          // 0 : pas de valeur propre
+double hitGate (const Pattern& p, const Frac& at);      // 0 : pas de valeur propre
 // Nouvelle longueur totale et nombre de mesures ; les coups qui ne tiennent plus dans le motif sont retirés, les autres coupés à la fin.
 void setLengthAndBars (Pattern& p, const Frac& length, int bars);
 void clearHits (Pattern& p);
