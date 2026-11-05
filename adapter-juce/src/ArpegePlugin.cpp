@@ -1,4 +1,5 @@
 #include "ArpegePlugin.h"
+#include "MotifLibrary.h"
 
 #include <algorithm>
 #include <cmath>
@@ -771,7 +772,7 @@ ArpegeEditor::ArpegeEditor (ArpegeProcessor& p)
     {
         const int idx = proc_.slot->get() - 1;
         if (idx < 0) return;
-        chooser_ = std::make_unique<juce::FileChooser> (juce::String::fromUTF8 ("Exporter le motif"), juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("motif.json"), "*.json");
+        chooser_ = std::make_unique<juce::FileChooser> (juce::String::fromUTF8 ("Exporter le motif (le dossier proposé est la bibliothèque lue par Orgamon)"), motifs::fileFor (proc_.slotPattern (idx)), "*.json");
         chooser_->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::warnAboutOverwriting, [this, idx] (const juce::FileChooser& fc)
         {
             auto f = fc.getResult();

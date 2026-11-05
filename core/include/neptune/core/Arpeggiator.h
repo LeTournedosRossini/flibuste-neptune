@@ -47,7 +47,7 @@ struct StrumParams
 };
 
 struct NoteIn { int offset = 0; bool on = false; std::uint8_t note = 0; std::uint8_t velocity = 0; };
-struct NoteOut { int offset = 0; bool on = false; std::uint8_t note = 0; std::uint8_t velocity = 0; };
+struct NoteOut { int offset = 0; bool on = false; std::uint8_t note = 0; std::uint8_t velocity = 0; bool bass = false; };   // bass : note d'une partie « B » du motif (Orgamon : canal du pédalier)
 
 struct Transport
 {
@@ -171,7 +171,7 @@ public:
         if (syncHost && (! wasSync_ || ! clockValid_)) counter_ = 0;   // départ de la lecture : le motif repart du début
         if (resync || releaseAllPending_)
         {
-            for (int i = 0; i < pendingCount_; ++i) emit (0, false, pending_[i].note, 0);
+            for (int i = 0; i < pendingCount_; ++i) emit (0, false, pending_[i].note, 0, pending_[i].bass);
             pendingCount_ = 0;
             delayedCount_ = 0;
             releaseAllPending_ = false;
@@ -216,14 +216,14 @@ public:
 
             if (nextOff >= 0 && offAt <= inAt && offAt <= stepAt && offAt <= delAt)
             {
-                emit (offAt, false, pending_[nextOff].note, 0);
+                emit (offAt, false, pending_[nextOff].note, 0, pending_[nextOff].bass);
                 pending_[nextOff] = pending_[--pendingCount_];
             }
             else if (nextDel >= 0 && delAt <= inAt && delAt <= stepAt)
             {
                 const Delayed dl = delayed_[(size_t) nextDel];
                 delayed_[(size_t) nextDel] = delayed_[(size_t) --delayedCount_];
-                startNote (std::max (dl.at, 0), dl.note, dl.vel, dl.len);
+                startNote (std::max (dl.at, 0), dl.note, dl.vel, dl.len, dl.bass);
             }
             else if (ie < nIn && inAt <= stepAt)
             {
@@ -456,7 +456,7 @@ private:
                     if (dup) continue;
                     if (nPlayed < 32) played[nPlayed++] = note;
                 }
-                startNote (d.at, std::clamp (note + params_.transpose, 0, 127), vel, len);
+                startNote (d.at, std::clamp (note + params_.transpose, 0, 127), vel, len, part.kind == pattern::Part::Kind::Bass);
             }
         }
         if (nChord > 0) strumChord (d, h, chordNotes, nChord, vel, len, bps);
@@ -499,24 +499,24 @@ private:
     static bool hitMuted (const pattern::Hit& h) { return h.muted; }
 
     // Début de note avec sa fin programmée ; une note identique encore en cours est terminée d'abord.
-    void startNote (int at, int note, int vel, int len)
+    void startNote (int at, int note, int vel, int len, bool bass = false)
     {
         for (int i = 0; i < pendingCount_; ++i)
-            if (pending_[i].note == note)
+            if (pending_[i].note == note && pending_[i].bass == bass)
             {
-                emit (at, false, (std::uint8_t) note, 0);
+                emit (at, false, (std::uint8_t) note, 0, bass);
                 pending_[i] = pending_[--pendingCount_];
                 break;
             }
         if (outN_ >= outCap_ || pendingCount_ >= kMaxPending) return;   // pas de début sans fin programmée
-        emit (at, true, (std::uint8_t) note, (std::uint8_t) vel);
-        pending_[pendingCount_++] = { at + len, (std::uint8_t) note };
+        emit (at, true, (std::uint8_t) note, (std::uint8_t) vel, bass);
+        pending_[pendingCount_++] = { at + len, (std::uint8_t) note, bass };
     }
 
-    struct Delayed { int at = 0; std::uint8_t note = 0, vel = 0; int len = 0; };
+    struct Delayed { int at = 0; std::uint8_t note = 0, vel = 0; int len = 0; bool bass = false; };
     static constexpr int kMaxDelayed = 128;
     struct Held { std::uint8_t note = 0, velocity = 0; };
-    struct Pending { int at = 0; std::uint8_t note = 0; };
+    struct Pending { int at = 0; std::uint8_t note = 0; bool bass = false; };
 
     double stepTime (std::int64_t n) const
     {
@@ -529,10 +529,10 @@ private:
         return n;
     }
 
-    void emit (int at, bool on, std::uint8_t note, std::uint8_t vel)
+    void emit (int at, bool on, std::uint8_t note, std::uint8_t vel, bool bass = false)
     {
         if (outN_ >= outCap_) return;
-        out_[outN_++] = { at, on, note, vel };
+        out_[outN_++] = { at, on, note, vel, bass };
     }
 
     void handleInput (const NoteIn& e)

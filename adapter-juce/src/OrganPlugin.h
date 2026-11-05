@@ -15,6 +15,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "PresetHost.h"
 #include "NovaOrganEditor.h"
 #include "PresetManager.h"
+#include "neptune/core/Arpeggiator.h"
 #include "neptune/core/ChordFollower.h"
 #include "neptune/core/ChordMapEnvironment.h"
 #include "neptune/core/I18n.h"
@@ -92,6 +93,13 @@ public:
     void setCarteLed (bool on) { carteLed_.store (on); }
     int carteOctave() const noexcept { return carteOctave_.load(); }                   // octave de base, 1..6 (3 = do 48)
     void setCarteOctave (int o) { carteOctave_.store (juce::jlimit (1, 6, o)); }
+    // Motifs : 16 emplacements, copiés dans l'état du projet (le projet reste autonome) ; le motif joué (0 = aucun : l'orgue tient l'accord) remplace le suivi d'accord.
+    static constexpr int kMotifSlots = 16;
+    int motifSlot() const noexcept { return motifSlot_.load(); }
+    void setMotifSlot (int s) { motifSlot_.store (juce::jlimit (0, kMotifSlots, s)); }
+    bool motifUsed (int index) const;
+    juce::String motifName (int index) const;
+    void setMotif (int index, const neptune::core::pattern::Pattern* p);   // nullptr : vide l'emplacement
     juce::String carteText() const;                                                    // « Carte : ON · canal 1 · Dm7 »
     bool ccEnabled() const noexcept { return ccEnabled_.load(); }
     void uiSetCcEnabled (bool on) { ccEnabled_.store (on); }
@@ -157,6 +165,14 @@ private:
     Ticker ticker_ { *this };
     std::atomic<bool> carteFollow_ { false }, carteLed_ { true };
     std::atomic<int> carteChannel_ { 1 }, chordChannel_ { 1 }, bassChannel_ { 0 }, carteOctave_ { 3 };
+    // Motifs (fil de messages : motifs_ sous verrou ; fil audio : copie audioMotifs_ refaite quand la version change)
+    mutable juce::SpinLock motifLock_;
+    neptune::core::arp::ChordMapEnvironment::Slots motifs_, audioMotifs_;
+    std::vector<std::shared_ptr<const neptune::core::pattern::Pattern>> retiredMotifs_;
+    std::atomic<int> motifsVersion_ { 0 }, motifSlot_ { 0 };
+    int audioMotifsVersion_ = -1;
+    neptune::core::arp::Arpeggiator arp_;
+    std::array<neptune::core::arp::NoteOut, 256> arpOut_ {};
     std::atomic<int> carteChordNow_ { -2 };   // -2 : pas en lecture ou pas de Carte ; sinon racine | rel << 8
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OrganProcessor)

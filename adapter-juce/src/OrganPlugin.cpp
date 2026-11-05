@@ -1,4 +1,5 @@
 #include "OrganPlugin.h"
+#include "MotifLibrary.h"
 #include "NovaOrganEditor.h"
 #include "NeptuneParameter.h"
 #include "neptune/core/Mixer.h"
@@ -84,7 +85,40 @@ bool OrganProcessor::isBusesLayoutSupported (const BusesLayout& l) const
     return l.getMainOutputChannelSet() == juce::AudioChannelSet::stereo();
 }
 
-void OrganProcessor::prepareToPlay (double sampleRate, int samplesPerBlock) { engine_.prepare (sampleRate, samplesPerBlock); }
+void OrganProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+{
+    engine_.prepare (sampleRate, samplesPerBlock);
+    arp_.setSampleRate (sampleRate);
+    arp_.reset();
+}
+
+bool OrganProcessor::motifUsed (int i) const
+{
+    const juce::SpinLock::ScopedLockType l (motifLock_);
+    return i >= 0 && i < kMotifSlots && motifs_[(size_t) i] != nullptr;
+}
+
+juce::String OrganProcessor::motifName (int i) const
+{
+    const juce::SpinLock::ScopedLockType l (motifLock_);
+    if (i < 0 || i >= kMotifSlots || motifs_[(size_t) i] == nullptr) return {};
+    const auto& p = *motifs_[(size_t) i];
+    return juce::String::fromUTF8 ((p.name.empty() ? p.id : p.name).c_str());
+}
+
+void OrganProcessor::setMotif (int i, const neptune::core::pattern::Pattern* p)
+{
+    if (i < 0 || i >= kMotifSlots) return;
+    std::shared_ptr<const neptune::core::pattern::Pattern> np;
+    if (p != nullptr) np = std::make_shared<const neptune::core::pattern::Pattern> (*p);
+    {
+        const juce::SpinLock::ScopedLockType l (motifLock_);
+        if (motifs_[(size_t) i] != nullptr) retiredMotifs_.push_back (motifs_[(size_t) i]);   // le fil audio peut encore le lire : on le garde en vie
+        if (retiredMotifs_.size() > 64) retiredMotifs_.erase (retiredMotifs_.begin(), retiredMotifs_.begin() + 32);
+        motifs_[(size_t) i] = std::move (np);
+    }
+    motifsVersion_.fetch_add (1);
+}
 
 void OrganProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
@@ -106,15 +140,60 @@ void OrganProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
                 if (const auto b = info->getBpm()) bpm = *b;
             }
         const bool follow = carteFollow_.load (std::memory_order_relaxed);
-        follower_.setChordChannel (chordChannel_.load (std::memory_order_relaxed) - 1);
-        follower_.setVoiceLeading (carteLed_.load (std::memory_order_relaxed));
-        follower_.setBassChannel (bassChannel_.load (std::memory_order_relaxed) - 1);
+        // motif choisi : le moteur d'Arpège le joue d'après la carte ; sinon le suiveur tient l'accord
+        {
+            const int ver = motifsVersion_.load (std::memory_order_relaxed);
+            if (ver != audioMotifsVersion_)
+            {
+                const juce::SpinLock::ScopedTryLockType l (motifLock_);
+                if (l.isLocked()) { audioMotifs_ = motifs_; audioMotifsVersion_ = ver; }
+            }
+        }
+        const int ms = motifSlot_.load (std::memory_order_relaxed);
+        const pattern::Pattern* motif = (ms >= 1 && ms <= kMotifSlots && audioMotifsVersion_ == motifsVersion_.load (std::memory_order_relaxed)) ? audioMotifs_[(size_t) ms - 1].get() : nullptr;
+        const bool usePattern = follow && motif != nullptr;
+        const int chordCh = chordChannel_.load (std::memory_order_relaxed) - 1, bassCh = bassChannel_.load (std::memory_order_relaxed) - 1;
+        const bool led = carteLed_.load (std::memory_order_relaxed);
+        follower_.setChordChannel (chordCh);
+        follower_.setVoiceLeading (led);
+        follower_.setBassChannel (bassCh);
         follower_.setBaseNote (12 * (carteOctave_.load (std::memory_order_relaxed) + 1));
-        const int m = follower_.process (*carteEnv_, follow && playing, hasPos, ppq, bpm, getSampleRate(), n, followOut_.data(), static_cast<int> (followOut_.size()));
+        const int m = follower_.process (*carteEnv_, follow && ! usePattern && playing, hasPos, ppq, bpm, getSampleRate(), n, followOut_.data(), static_cast<int> (followOut_.size()));
         for (int i = 0; i < m; ++i)
         {
             const auto& e = followOut_[static_cast<size_t> (i)];
             midi.addEvent (e.on ? juce::MidiMessage::noteOn (e.channel + 1, e.note, static_cast<juce::uint8> (100)) : juce::MidiMessage::noteOff (e.channel + 1, e.note), e.offset);
+        }
+        {
+            arp::Params ap;
+            ap.gate = 0.9;
+            ap.fixedVelocity = true;
+            ap.velocity = 100;
+            arp_.setParams (ap);
+            arp_.setPattern (usePattern ? motif : nullptr);
+            arp_.setEnvironment (usePattern ? carteEnv_.get() : nullptr);
+            arp_.setBaseNote (12 * (carteOctave_.load (std::memory_order_relaxed) + 1));
+            arp_.setVoiceLeading (led);
+            arp::Transport tr;
+            tr.playing = usePattern && playing;
+            tr.hasPosition = hasPos;
+            tr.ppq = ppq;
+            tr.bpm = bpm;
+            if (auto* head = getPlayHead())
+                if (const auto info = head->getPosition())
+                {
+                    if (const auto ts = info->getTimeSignature())
+                        if (ts->denominator > 0) tr.beatsPerBar = 4.0 * ts->numerator / ts->denominator;
+                    if (const auto bar = info->getPpqPositionOfLastBarStart()) tr.barStartPpq = *bar;
+                }
+            const int k = arp_.process (nullptr, 0, tr, n, arpOut_.data(), static_cast<int> (arpOut_.size()));
+            for (int i = 0; i < k; ++i)
+            {
+                const auto& e = arpOut_[static_cast<size_t> (i)];
+                const int ch = e.bass ? bassCh : chordCh;
+                if (ch < 0) continue;   // pas de basse : la partie B se tait (début et fin)
+                midi.addEvent (e.on ? juce::MidiMessage::noteOn (ch + 1, e.note, static_cast<juce::uint8> (e.velocity)) : juce::MidiMessage::noteOff (ch + 1, e.note), e.offset);
+            }
         }
         arp::Harmony hm;
         if (follow && playing && hasPos && reader_.connected() && carteEnv_->harmonyAt (ppq, hm)) carteChordNow_.store (hm.rootPc | static_cast<int> (hm.rel) << 8);
@@ -183,7 +262,13 @@ void OrganProcessor::getStateInformation (juce::MemoryBlock& dest)
     auto doc = nlohmann::json::parse (text, nullptr, false);
     if (doc.is_object())
     {
-        doc["carte"] = { { "follow", carteFollow_.load() }, { "channel", carteChannel_.load() }, { "chordChannel", chordChannel_.load() }, { "bassChannel", bassChannel_.load() }, { "octave", carteOctave_.load() }, { "led", carteLed_.load() } };
+        doc["carte"] = { { "follow", carteFollow_.load() }, { "channel", carteChannel_.load() }, { "chordChannel", chordChannel_.load() }, { "bassChannel", bassChannel_.load() }, { "octave", carteOctave_.load() }, { "led", carteLed_.load() }, { "motifSlot", motifSlot_.load() } };
+        auto arr = nlohmann::json::array();
+        {
+            const juce::SpinLock::ScopedLockType l (motifLock_);
+            for (const auto& mp : motifs_) arr.push_back (mp != nullptr ? neptune::core::pattern::toJson ({ *mp }, "orgamon") : std::string());
+        }
+        doc["carte"]["motifs"] = arr;
         text = doc.dump();
     }
     dest.append (text.data(), text.size());
@@ -209,6 +294,18 @@ void OrganProcessor::setStateInformation (const void* data, int size)
             bassChannel_.store (juce::jlimit (0, 16, c.value ("bassChannel", 0)));
             carteOctave_.store (juce::jlimit (1, 6, c.value ("octave", 3)));
             carteLed_.store (c.value ("led", true));
+            motifSlot_.store (juce::jlimit (0, kMotifSlots, c.value ("motifSlot", 0)));
+            for (int i = 0; i < kMotifSlots; ++i)
+            {
+                neptune::core::pattern::Pattern pt;
+                bool ok = false;
+                if (c.contains ("motifs") && c["motifs"].is_array() && (size_t) i < c["motifs"].size() && c["motifs"][(size_t) i].is_string())
+                {
+                    const auto r = neptune::core::pattern::fromJson (c["motifs"][(size_t) i].get<std::string>());
+                    if (r.ok && ! r.patterns.empty()) { pt = r.patterns.front(); ok = true; }
+                }
+                setMotif (i, ok ? &pt : nullptr);
+            }
         }
     }
     engine_.setDescription (d);
@@ -440,7 +537,8 @@ void NovaOrganPluginEditor::buildContent()
     link.carteText = [&p] { return p.carteText(); };
     link.carteMenu = [&p] (juce::Component* anchor)
     {
-        juce::PopupMenu m, ch, chord, bass, oct;
+        juce::PopupMenu m, ch, chord, bass, oct, play, load;
+        const auto library = motifs::files();   // lu à l'ouverture du menu
         m.addItem (1, juce::String::fromUTF8 ("Suivre les accords de Carte"), true, p.carteFollow());
         for (int i = 1; i <= 8; ++i) ch.addItem (100 + i, juce::String (i), true, p.carteChannel() == i);
         for (int i = 1; i <= 16; ++i) chord.addItem (200 + i, juce::String (i), true, p.chordMidiChannel() == i);
@@ -448,6 +546,21 @@ void NovaOrganPluginEditor::buildContent()
         for (int i = 1; i <= 16; ++i) bass.addItem (300 + i, juce::String (i), true, p.bassMidiChannel() == i);
         for (int i = 1; i <= 6; ++i) oct.addItem (400 + i, juce::String (i) + (i == 3 ? juce::String::fromUTF8 (" (do 48)") : juce::String()), true, p.carteOctave() == i);
         m.addItem (2, juce::String::fromUTF8 ("Voix conduites (sinon position fixe)"), true, p.carteLed());
+        play.addItem (500, juce::String::fromUTF8 ("aucun (tenir l'accord)"), true, p.motifSlot() == 0);
+        for (int i = 0; i < OrganProcessor::kMotifSlots; ++i)
+        {
+            const auto name = p.motifName (i);
+            play.addItem (500 + 1 + i, juce::String (i + 1) + " : " + (p.motifUsed (i) ? name : juce::String::fromUTF8 ("(vide)")), p.motifUsed (i), p.motifSlot() == i + 1);
+            juce::PopupMenu files;
+            files.addItem (10000 + i * 256, juce::String::fromUTF8 ("vider l'emplacement"), p.motifUsed (i));
+            for (int f = 0; f < library.size() && f < 200; ++f) files.addItem (10000 + i * 256 + 1 + f, library[f].getFileNameWithoutExtension());
+            if (library.isEmpty()) files.addItem (-1, juce::String::fromUTF8 ("(le dossier des motifs est vide)"), false);
+            load.addSubMenu (juce::String (i + 1) + " : " + (p.motifUsed (i) ? name : juce::String::fromUTF8 ("(vide)")), files);
+        }
+        load.addSeparator();
+        load.addItem (9000, juce::String::fromUTF8 ("Ouvrir le dossier des motifs"));
+        m.addSubMenu (juce::String::fromUTF8 ("Motif joué"), play);
+        m.addSubMenu (juce::String::fromUTF8 ("Charger un motif dans l'emplacement"), load);
         m.addSeparator();
         m.addSubMenu (juce::String::fromUTF8 ("Canal de Carte"), ch);
         m.addSubMenu (juce::String::fromUTF8 ("Canal MIDI des accords"), chord);
@@ -457,6 +570,19 @@ void NovaOrganPluginEditor::buildContent()
         {
             if (r == 1) p.setCarteFollow (! p.carteFollow());
             else if (r == 2) p.setCarteLed (! p.carteLed());
+            else if (r >= 500 && r <= 516) p.setMotifSlot (r - 500);
+            else if (r == 9000) motifs::directory().revealToUser();
+            else if (r >= 10000 && r < 10000 + 16 * 256)
+            {
+                const int slot = (r - 10000) / 256, idx = (r - 10000) % 256;
+                if (idx == 0) { p.setMotif (slot, nullptr); if (p.motifSlot() == slot + 1) p.setMotifSlot (0); }
+                else
+                {
+                    const auto files = motifs::files();
+                    neptune::core::pattern::Pattern pt;
+                    if (idx - 1 < files.size() && motifs::read (files[idx - 1], pt)) p.setMotif (slot, &pt);
+                }
+            }
             else if (r > 100 && r <= 108) p.setCarteChannel (r - 100);
             else if (r > 200 && r <= 216) p.setChordMidiChannel (r - 200);
             else if (r >= 300 && r <= 316) p.setBassMidiChannel (r - 300);

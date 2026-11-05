@@ -16,7 +16,7 @@ constexpr double kSr = 48000.0;
 constexpr double kBpm = 120.0;                       // 24000 échantillons par noire
 constexpr double kSamplesPerBeat = kSr * 60.0 / kBpm;
 
-struct Event { long long at; bool on; int note; int vel; };
+struct Event { long long at; bool on; int note; int vel; bool bass = false; };
 
 // Joue `totalSamples` en blocs de `block` échantillons ; `notes` = événements d'entrée avec leur instant absolu.
 std::vector<Event> run (Arpeggiator& a, const std::vector<Event>& notes, long long totalSamples, int block, bool playing = true, double ppq0 = 0.0)
@@ -36,7 +36,7 @@ std::vector<Event> run (Arpeggiator& a, const std::vector<Event>& notes, long lo
         tr.ppq = ppq0 + (double) pos / kSamplesPerBeat;
         tr.bpm = kBpm;
         const int m = a.process (in.data(), (int) in.size(), tr, n, out.data(), (int) out.size());
-        for (int i = 0; i < m; ++i) events.push_back ({ pos + out[i].offset, out[i].on, out[i].note, out[i].velocity });
+        for (int i = 0; i < m; ++i) events.push_back ({ pos + out[i].offset, out[i].on, out[i].note, out[i].velocity, out[i].bass });
         pos += n;
     }
     return events;
@@ -1119,4 +1119,24 @@ TEST_CASE ("arp : grattage, les notes de l'accord partent l'une après l'autre",
     for (const auto& e : alt) if (e.on && e.at >= (long long) (kSamplesPerBeat * 0.4)) second.push_back (e.note);
     REQUIRE (second.size() == 3);
     CHECK (second == std::vector<int> { 55, 52, 48 });
+}
+
+TEST_CASE ("arp : les notes d'une partie B sont marquées « basse » (début et fin)", "[arp][carte][bass]")
+{
+    const auto pat = patternFrom (R"({ "id": "b", "length": [1,1], "hits": [ { "at": [0,1], "dur": [1,2], "parts": ["B"] }, { "at": [1,4], "dur": [1,4], "parts": ["3"] } ] })");
+    ChordListEnv env;
+    env.chords = { { 0.0, 4.0, 0, 0x091, -1 } };
+    auto a = make();
+    a.setPattern (&pat);
+    a.setEnvironment (&env);
+    const auto ev = run (a, { { 0, true, 48, 90 } }, (long long) (kSamplesPerBeat * 3.0), 256);
+    int bassOn = 0, bassOff = 0, otherOn = 0;
+    for (const auto& e : ev)
+    {
+        if (e.bass) (e.on ? bassOn : bassOff)++;
+        else if (e.on) ++otherOn;
+    }
+    CHECK (bassOn >= 1);
+    CHECK (bassOn == bassOff);
+    CHECK (otherOn >= 1);
 }
