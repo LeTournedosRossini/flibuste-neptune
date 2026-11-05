@@ -107,6 +107,7 @@ void OrganProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
             }
         const bool follow = carteFollow_.load (std::memory_order_relaxed);
         follower_.setChordChannel (chordChannel_.load (std::memory_order_relaxed) - 1);
+        follower_.setVoiceLeading (carteLed_.load (std::memory_order_relaxed));
         follower_.setBassChannel (bassChannel_.load (std::memory_order_relaxed) - 1);
         follower_.setBaseNote (12 * (carteOctave_.load (std::memory_order_relaxed) + 1));
         const int m = follower_.process (*carteEnv_, follow && playing, hasPos, ppq, bpm, getSampleRate(), n, followOut_.data(), static_cast<int> (followOut_.size()));
@@ -182,7 +183,7 @@ void OrganProcessor::getStateInformation (juce::MemoryBlock& dest)
     auto doc = nlohmann::json::parse (text, nullptr, false);
     if (doc.is_object())
     {
-        doc["carte"] = { { "follow", carteFollow_.load() }, { "channel", carteChannel_.load() }, { "chordChannel", chordChannel_.load() }, { "bassChannel", bassChannel_.load() }, { "octave", carteOctave_.load() } };
+        doc["carte"] = { { "follow", carteFollow_.load() }, { "channel", carteChannel_.load() }, { "chordChannel", chordChannel_.load() }, { "bassChannel", bassChannel_.load() }, { "octave", carteOctave_.load() }, { "led", carteLed_.load() } };
         text = doc.dump();
     }
     dest.append (text.data(), text.size());
@@ -207,6 +208,7 @@ void OrganProcessor::setStateInformation (const void* data, int size)
             chordChannel_.store (juce::jlimit (1, 16, c.value ("chordChannel", 1)));
             bassChannel_.store (juce::jlimit (0, 16, c.value ("bassChannel", 0)));
             carteOctave_.store (juce::jlimit (1, 6, c.value ("octave", 3)));
+            carteLed_.store (c.value ("led", true));
         }
     }
     engine_.setDescription (d);
@@ -445,6 +447,7 @@ void NovaOrganPluginEditor::buildContent()
         bass.addItem (300, juce::String::fromUTF8 ("aucune basse"), true, p.bassMidiChannel() == 0);
         for (int i = 1; i <= 16; ++i) bass.addItem (300 + i, juce::String (i), true, p.bassMidiChannel() == i);
         for (int i = 1; i <= 6; ++i) oct.addItem (400 + i, juce::String (i) + (i == 3 ? juce::String::fromUTF8 (" (do 48)") : juce::String()), true, p.carteOctave() == i);
+        m.addItem (2, juce::String::fromUTF8 ("Voix conduites (sinon position fixe)"), true, p.carteLed());
         m.addSeparator();
         m.addSubMenu (juce::String::fromUTF8 ("Canal de Carte"), ch);
         m.addSubMenu (juce::String::fromUTF8 ("Canal MIDI des accords"), chord);
@@ -453,6 +456,7 @@ void NovaOrganPluginEditor::buildContent()
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor), [&p] (int r)
         {
             if (r == 1) p.setCarteFollow (! p.carteFollow());
+            else if (r == 2) p.setCarteLed (! p.carteLed());
             else if (r > 100 && r <= 108) p.setCarteChannel (r - 100);
             else if (r > 200 && r <= 216) p.setChordMidiChannel (r - 200);
             else if (r >= 300 && r <= 316) p.setBassMidiChannel (r - 300);

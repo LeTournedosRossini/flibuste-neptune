@@ -88,6 +88,8 @@ public:
     void setChordMidiChannel (int c) { chordChannel_.store (juce::jlimit (1, 16, c)); }
     int bassMidiChannel() const noexcept { return bassChannel_.load(); }               // canal MIDI de la basse, 0 : pas de basse, 1..16
     void setBassMidiChannel (int c) { bassChannel_.store (juce::jlimit (0, 16, c)); }
+    bool carteLed() const noexcept { return carteLed_.load(); }                        // voix conduites (défaut) ou position fixe
+    void setCarteLed (bool on) { carteLed_.store (on); }
     int carteOctave() const noexcept { return carteOctave_.load(); }                   // octave de base, 1..6 (3 = do 48)
     void setCarteOctave (int o) { carteOctave_.store (juce::jlimit (1, 6, o)); }
     juce::String carteText() const;                                                    // « Carte : ON · canal 1 · Dm7 »
@@ -153,7 +155,7 @@ private:
     neptune::core::arp::ChordFollower follower_;
     std::array<neptune::core::arp::FollowEvent, 64> followOut_ {};
     Ticker ticker_ { *this };
-    std::atomic<bool> carteFollow_ { false };
+    std::atomic<bool> carteFollow_ { false }, carteLed_ { true };
     std::atomic<int> carteChannel_ { 1 }, chordChannel_ { 1 }, bassChannel_ { 0 }, carteOctave_ { 3 };
     std::atomic<int> carteChordNow_ { -2 };   // -2 : pas en lecture ou pas de Carte ; sinon racine | rel << 8
 

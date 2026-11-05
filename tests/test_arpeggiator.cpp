@@ -985,3 +985,46 @@ TEST_CASE ("suiveur : basse, trou entre deux accords, arrêt de la lecture", "[a
     CHECK (! g.sounding());
     for (int i = 0; i < m; ++i) CHECK (! out[(size_t) i].on);
 }
+
+TEST_CASE ("suiveur : voix conduites, peu de mouvement d'un accord à l'autre, basse proche", "[arp][carte][follower][voice]")
+{
+    ChordListEnv env;
+    env.chords = { { 0.0, 4.0, 0, 0x091, -1 }, { 4.0, 4.0, 5, 0x0A1, -1 }, { 8.0, 4.0, 7, 0x491, -1 }, { 12.0, 4.0, 0, 0x091, -1 } };   // do, fa, sol7, do
+    neptune::core::arp::ChordFollower f;
+    f.setVoiceLeading (true);
+    f.setChordChannel (0);
+    f.setBassChannel (1);
+    const auto ev = runFollower (f, env, (long long) (kSamplesPerBeat * 15.9), 480);
+    std::vector<std::vector<int>> hands (4);
+    std::vector<int> basses;
+    for (const auto& e : ev)
+    {
+        if (! e.on) continue;
+        const int k = (int) (e.at / (4 * kSamplesPerBeat));
+        if (e.ch == 0) hands[(size_t) k].push_back (e.note);
+        else basses.push_back (e.note);
+    }
+    REQUIRE (basses.size() == 4);
+    for (size_t k = 0; k < 4; ++k)
+    {
+        auto h = hands[k];
+        std::sort (h.begin(), h.end());
+        for (int n : h) { CHECK (n >= 55); CHECK (n <= 76); }
+        if (k > 0)
+        {
+            auto p = hands[k - 1];
+            std::sort (p.begin(), p.end());
+            int move = 0;
+            if (p.size() == h.size()) for (size_t i = 0; i < h.size(); ++i) move += std::abs (h[i] - p[i]);
+            CHECK (move <= 8);
+        }
+        if (k > 0) CHECK (std::abs (basses[k] - basses[k - 1]) <= 7);
+    }
+    // à l'arrêt puis au redémarrage, la mémoire est effacée : même position qu'au premier départ
+    std::vector<neptune::core::arp::FollowEvent> out (64);
+    f.process (env, false, false, 0.0, kBpm, kSr, 256, out.data(), 64);
+    const auto again = runFollower (f, env, (long long) (kSamplesPerBeat * 1.0), 480);
+    std::vector<int> a0;
+    for (const auto& e : again) if (e.on && e.ch == 0) a0.push_back (e.note);
+    CHECK (a0 == hands[0]);
+}
