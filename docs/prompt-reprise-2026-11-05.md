@@ -5,7 +5,7 @@ Tu reprends le travail sur la Flibuste Suite (Neptune : sampler / orgue / synth�
 **Commence par lire** : le fichier précédent `docs/prompt-reprise-2026-11-04.md` (règles qui ne bougent pas, où est tout, scripts Windows, vérification à l'écran) : tout y est encore valable. Ce fichier-ci ne raconte que ce qui a changé le 5 novembre. Les mémoires de `~/.claude/projects/-home-jean-Bureau-FlibusteSuite/memory/` donnent le reste.
 
 ## Rappels utiles (les plus importants)
-- Pousser sur GitHub **seulement si Jean le demande**, commit avec `[skip ci]` ; demander avant chaque push. Dernier commit poussé : `1727205`. **Local, non poussé : `992717c` (Carte).**
+- Pousser sur GitHub **seulement si Jean le demande**, commit avec `[skip ci]` ; demander avant chaque push. Dernier commit poussé : `f53fab6` (6 novembre, `[skip ci]`).
 - Reaper fermé avant toute installation ; installer après chaque bonne compilation (Linux puis Windows), ancien fichier sauvegardé, SHA256 vérifié.
 - Compilations par `~/.local/bin/claude-build linux ...` ; **pour Windows : `claude-build windows ssh neptune-win 'C:\Users\lcj\neptune-build\build_xxx.cmd'`** (sans `ssh`, la commande s'exécute en local et échoue).
 - Jean est le chef d'orchestre entre toi et la conversation « banc » : tu écris dans `~/Bureau/FlibusteSuite/echanges/messages/`, Jean relaie ; tu tiens `echanges/etat-versions.md`.
