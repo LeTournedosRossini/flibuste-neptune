@@ -308,6 +308,42 @@ Score fromJson (const std::string& text)
     return s;
 }
 
+Score demoScore (double startBeats)
+{
+    Score s;
+    const char* names[8] = { "C", "Am7", "F", "G7", "Dm7", "Am7/D", "C", "Cmaj7" };
+    double t = startBeats;
+    for (int m = 0; m < 8; ++m)
+    {
+        const double len = m == 7 ? 3.0 : 4.0;   // la dernière mesure est un 3/4
+        MeasureItem ms;
+        ms.start = t;
+        ms.length = len;
+        ms.num = m == 7 ? 3 : 4;
+        ms.den = 4;
+        ms.source = m;
+        s.measures.push_back (ms);
+        chords::Item it;
+        it.start = t;
+        it.length = len;
+        chords::parseChord (names[m], it.chord);
+        s.chords.push_back (it);
+        t += len;
+    }
+    const double b = startBeats;
+    placeScale (s.scales, { b + 0.0, 16.0, 0, kModeMajor, false });       // do majeur sur les quatre premiers accords
+    placeScale (s.scales, { b + 16.0, 8.0, 2, 4, false });                // ré dorien sur Dm7 et Am7/D
+    placeScale (s.scales, { b + 24.0, 7.0, 0, kModeMajor, false });       // retour en do majeur
+    s.hasGlobalKey = true;
+    s.globalKey.root = 0;
+    placeKey (s.keys, { b + 16.0, 5, false, false });                     // marqueur : fa majeur à partir de la mesure 5 (la gamme de Dm7 en dorien en est un mode)
+    placePattern (s.patterns, { b + 0.0, 8.0, 12 });                      // mesures 1-2 : Essai 1 (notes, vélocité et durée par coup)
+    placePattern (s.patterns, { b + 8.0, 8.0, 13 });                      // mesures 3-4 : Essai 2 (accord, variante tirée au sort)
+    placePattern (s.patterns, { b + 16.0, 8.0, 14 });                     // mesures 5-6 : Essai 3 (ballade)
+    placePattern (s.patterns, { b + 24.0, 7.0, 15 });                     // mesures 7-8 : Essai 4 (deux mesures)
+    return s;
+}
+
 // ---------------------------------------------------------------------------------------------------- import
 
 namespace

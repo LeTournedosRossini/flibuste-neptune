@@ -1049,12 +1049,12 @@ CarteEditor::CarteEditor (CarteProcessor& p)
       zoomOut_ (skin_, nova::Pill::Look::Small), zoomIn_ (skin_, nova::Pill::Look::Small), followPill_ (skin_, nova::Pill::Look::Small),
       undoPill_ (skin_, nova::Pill::Look::Small), redoPill_ (skin_, nova::Pill::Look::Small),
       copyPill_ (skin_, nova::Pill::Look::Small), pastePill_ (skin_, nova::Pill::Look::Small), dupPill_ (skin_, nova::Pill::Look::Small),
-      importPill_ (skin_, nova::Pill::Look::Small), keyPill_ (skin_, nova::Pill::Look::Small), clearBarsPill_ (skin_, nova::Pill::Look::Small)
+      importPill_ (skin_, nova::Pill::Look::Small), keyPill_ (skin_, nova::Pill::Look::Small), clearBarsPill_ (skin_, nova::Pill::Look::Small), demoPill_ (skin_, nova::Pill::Look::Small)
 {
     view_ = std::make_unique<TimelineView> (p, skin_, *this);
     addAndMakeVisible (*view_);
     for (auto* c : std::initializer_list<nova::Pill*> { &channelPill_, &gridPill_, &namingPill_, &zoomOut_, &zoomIn_, &followPill_, &undoPill_, &redoPill_,
-                                                       &copyPill_, &pastePill_, &dupPill_, &importPill_, &keyPill_, &clearBarsPill_ }) addAndMakeVisible (c);
+                                                       &copyPill_, &pastePill_, &dupPill_, &importPill_, &keyPill_, &clearBarsPill_, &demoPill_ }) addAndMakeVisible (c);
 
     channelPill_.onClick = [this] { proc_.setChannel (proc_.channel() % chordmap::kChannels + 1); refreshPills(); repaint(); };
     gridPill_.onClick = [this] { view_->setGrid ((view_->grid() + 1) % 4); refreshPills(); };
@@ -1077,6 +1077,17 @@ CarteEditor::CarteEditor (CarteProcessor& p)
     importPill_.setText (juce::String::fromUTF8 ("Importer des accords..."));
     importPill_.onClick = [this] { importFile(); };
     keyPill_.onClick = [this] { showGlobalKeyPicker(); };
+    demoPill_.setText (juce::String::fromUTF8 ("Charger le morceau d'essai"));
+    demoPill_.onClick = [this]
+    {
+        const auto t = proc_.transport();
+        const auto demo = carte::demoScore (t.hasPosition ? t.beats : 0.0);   // il commence à la tête de lecture
+        proc_.commit (proc_.score(), demo, "Morceau d'essai");   // remplace toute la carte ; annulable
+        view_->reload();
+        refreshPills();
+        hint_ = juce::String::fromUTF8 ("Morceau d'essai chargé : 8 mesures, accords, gammes, tonalité et motifs 12 à 15 d'Arpège. Annuler le retire.");
+        repaint();
+    };
     clearBarsPill_.setText (juce::String::fromUTF8 ("Retirer les barres du fichier"));
     clearBarsPill_.onClick = [this]
     {
@@ -1141,6 +1152,7 @@ void CarteEditor::resized()
     put (importPill_, 190.0f);
     put (keyPill_, 290.0f);
     put (clearBarsPill_, 230.0f);
+    put (demoPill_, 230.0f);
     view_->setBounds (px (14.0f), px (126.0f), getWidth() - px (28.0f), getHeight() - px (126.0f) - px (40.0f));
     if (popup_) popup_->setBounds (getLocalBounds());
 }

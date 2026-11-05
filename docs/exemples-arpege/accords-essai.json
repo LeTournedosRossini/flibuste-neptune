@@ -1,0 +1,276 @@
+{
+ "format": "flibuste-accords",
+ "version": 1,
+ "from": "neptune",
+ "unrolled": true,
+ "title": "Morceau d'essai (Carte et Arpège)",
+ "timeSignatures": [
+  {
+   "fromMeasure": 0,
+   "ts": [
+    4,
+    4
+   ]
+  },
+  {
+   "fromMeasure": 7,
+   "ts": [
+    3,
+    4
+   ]
+  }
+ ],
+ "measures": [
+  {
+   "at": [
+    0,
+    1
+   ],
+   "dur": [
+    1,
+    1
+   ],
+   "ts": [
+    4,
+    4
+   ],
+   "source": 0
+  },
+  {
+   "at": [
+    1,
+    1
+   ],
+   "dur": [
+    1,
+    1
+   ],
+   "ts": [
+    4,
+    4
+   ],
+   "source": 1
+  },
+  {
+   "at": [
+    2,
+    1
+   ],
+   "dur": [
+    1,
+    1
+   ],
+   "ts": [
+    4,
+    4
+   ],
+   "source": 2
+  },
+  {
+   "at": [
+    3,
+    1
+   ],
+   "dur": [
+    1,
+    1
+   ],
+   "ts": [
+    4,
+    4
+   ],
+   "source": 3
+  },
+  {
+   "at": [
+    4,
+    1
+   ],
+   "dur": [
+    1,
+    1
+   ],
+   "ts": [
+    4,
+    4
+   ],
+   "source": 4
+  },
+  {
+   "at": [
+    5,
+    1
+   ],
+   "dur": [
+    1,
+    1
+   ],
+   "ts": [
+    4,
+    4
+   ],
+   "source": 5
+  },
+  {
+   "at": [
+    6,
+    1
+   ],
+   "dur": [
+    1,
+    1
+   ],
+   "ts": [
+    4,
+    4
+   ],
+   "source": 6
+  },
+  {
+   "at": [
+    7,
+    1
+   ],
+   "dur": [
+    3,
+    4
+   ],
+   "ts": [
+    3,
+    4
+   ],
+   "source": 7
+  }
+ ],
+ "chords": [
+  {
+   "at": [
+    0,
+    1
+   ],
+   "dur": [
+    1,
+    1
+   ],
+   "root": "C",
+   "quality": "",
+   "bass": null
+  },
+  {
+   "at": [
+    1,
+    1
+   ],
+   "dur": [
+    1,
+    1
+   ],
+   "root": "A",
+   "quality": "m7",
+   "bass": null
+  },
+  {
+   "at": [
+    2,
+    1
+   ],
+   "dur": [
+    1,
+    1
+   ],
+   "root": "F",
+   "quality": "",
+   "bass": null
+  },
+  {
+   "at": [
+    3,
+    1
+   ],
+   "dur": [
+    1,
+    1
+   ],
+   "root": "G",
+   "quality": "7",
+   "bass": null
+  },
+  {
+   "at": [
+    4,
+    1
+   ],
+   "dur": [
+    1,
+    1
+   ],
+   "root": "D",
+   "quality": "m7",
+   "bass": null
+  },
+  {
+   "at": [
+    5,
+    1
+   ],
+   "dur": [
+    1,
+    1
+   ],
+   "root": "A",
+   "quality": "m7",
+   "bass": "D"
+  },
+  {
+   "at": [
+    6,
+    1
+   ],
+   "dur": [
+    1,
+    1
+   ],
+   "root": "C",
+   "quality": "",
+   "bass": null
+  },
+  {
+   "at": [
+    7,
+    1
+   ],
+   "dur": [
+    3,
+    4
+   ],
+   "root": "C",
+   "quality": "M7",
+   "bass": null
+  }
+ ],
+ "qualities": {
+  "": [
+   0,
+   4,
+   7
+  ],
+  "m7": [
+   0,
+   3,
+   7,
+   10
+  ],
+  "7": [
+   0,
+   4,
+   7,
+   10
+  ],
+  "M7": [
+   0,
+   4,
+   7,
+   11
+  ]
+ }
+}

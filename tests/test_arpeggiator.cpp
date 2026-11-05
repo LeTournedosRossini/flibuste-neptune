@@ -1,7 +1,9 @@
 // Arpégiateur : motifs, instants à l'échantillon près, blocs de toute taille, arrêt / saut / boucle sans note bloquée.
 #include <catch2/catch_test_macros.hpp>
 
+#include <fstream>
 #include <map>
+#include <sstream>
 #include <vector>
 
 #include "neptune/core/Arpeggiator.h"
@@ -827,4 +829,59 @@ TEST_CASE ("arp : variantes de motif (alts), tirage reproductible et indépendan
         CHECK (plain > 8);
         CHECK (filled > 4);   // au moins une mesure a pris la variante, au moins une ne l'a pas prise
     }
+}
+
+TEST_CASE ("de bout en bout : le morceau d'essai de Carte et les motifs d'essai d'Arpège", "[arp][carte][integration]")
+{
+    using namespace neptune::core;
+    static std::atomic<int> counter { 200 };
+    const std::string tag = "ess" + std::to_string (static_cast<long> (std::chrono::steady_clock::now().time_since_epoch().count() % 1000000)) + "-" + std::to_string (counter++) + "-";
+    chordmap::Writer writer (tag);
+    chordmap::Reader reader (tag);
+    REQUIRE (writer.open (1) == chordmap::Status::Ok);
+    writer.publish (carte::toContainers (carte::demoScore()));
+    reader.poll();
+    REQUIRE (reader.connected());
+    CHECK (reader.count (chordmap::Kind::Measure) == 8);
+
+    std::ifstream in (std::string (NEPTUNE_SOURCE_DIR) + "/docs/exemples-arpege/motifs-essai.json");
+    std::stringstream ss;
+    ss << in.rdbuf();
+    const auto pats = neptune::core::pattern::fromJson (ss.str());
+    REQUIRE (pats.ok);
+    arp::ChordMapEnvironment::Slots slots;
+    for (size_t i = 0; i < pats.patterns.size(); ++i) slots[11 + i] = std::make_shared<const neptune::core::pattern::Pattern> (pats.patterns[i]);
+    arp::ChordMapEnvironment env (reader, slots);
+
+    auto a = make();
+    a.setEnvironment (&env);
+    const auto ev = run (a, {}, (long long) (kSamplesPerBeat * 31), 480);   // les 8 mesures, sans note tenue
+    std::vector<Event> ons;
+    for (const auto& e : ev) if (e.on) ons.push_back (e);
+    REQUIRE (ons.size() > 40);
+
+    // mesure 1 (Essai 1, mode notes, do majeur : do mi sol, base do 48) : 1 2 3 4 3 2 3 puis 1+1 ; vélocités 50..120, accents (+20) sur les 3e et 7e
+    const std::vector<int> notes1 = { 48, 52, 55, 60, 55, 52, 55, 60 };
+    const std::vector<int> vel1 = { 50, 65, 100, 95, 110, 95, 100, 120 };
+    for (size_t i = 0; i < 8; ++i)
+    {
+        CHECK (ons[i].note == notes1[i]);
+        CHECK (ons[i].vel == vel1[i]);
+        CHECK (ons[i].at == (long long) std::llround (i * 0.5 * kSamplesPerBeat));
+    }
+    // mesure 5 (Essai 3, ballade, Dm7) : basse et accord au temps 16 ; la basse est ré, une octave sous la fondamentale
+    long long beat16 = (long long) std::llround (16.0 * kSamplesPerBeat);
+    std::vector<int> atBeat16;
+    for (const auto& e : ons) if (e.at == beat16) atBeat16.push_back (e.note);
+    REQUIRE (atBeat16.size() == 5);                    // la basse + les quatre notes de Dm7
+    CHECK (atBeat16[0] == 38);                          // ré 38 = ré 50 - 12 ; (le tri place la basse la première : même instant, ordre de création)
+    // mesure 6 (Am7/D) : la basse est ré (pas la)
+    const long long beat20 = (long long) std::llround (20.0 * kSamplesPerBeat);
+    bool bassD = false;
+    for (const auto& e : ons) if (e.at == beat20 && e.note % 12 == 2 && e.note < 57) bassD = true;   // ré sous la fondamentale (la = 57)
+    CHECK (bassD);
+    // mesure 8 (3/4) : Essai 4, 2e mesure du motif, coupée à la barre : aucun début au-delà de la fin du morceau
+    const long long end = (long long) std::llround (31.0 * kSamplesPerBeat);
+    for (const auto& e : ons) CHECK (e.at < end);
+    writer.close();
 }

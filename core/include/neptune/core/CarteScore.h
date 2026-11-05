@@ -59,6 +59,10 @@ std::vector<chordmap::Container> toContainers (const Score& score);
 std::string toJson (const Score& score);
 Score fromJson (const std::string& text);
 
+// Morceau d'essai : 8 mesures (la dernière en 3/4), accords simples puis enrichis (septièmes, une basse étrangère), deux gammes, une tonalité globale et un marqueur,
+// la voie des motifs qui appelle les emplacements 12 à 15 d'Arpège (ses motifs d'essai). `startBeats` : où il commence dans le projet.
+Score demoScore (double startBeats = 0.0);
+
 // ---- import d'un fichier `flibuste-accords` (écrit par Scorsaire)
 constexpr int kMaxImportMeasures = 4096, kMaxImportChords = 16384;
 struct ImportResult

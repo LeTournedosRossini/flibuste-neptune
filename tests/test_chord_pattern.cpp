@@ -388,3 +388,26 @@ TEST_CASE ("motif : vélocité et durée propres à un coup", "[pattern]")
     CHECK (hitGate (p, at) == 0.0);
     CHECK (fromJson (toJson ({ p })).patterns[0].hits[0].vel == 0);
 }
+
+TEST_CASE ("exemples d'essai : motifs-essai.json et les motifs d'essai d'Arpège", "[pattern]")
+{
+    std::ifstream in (std::string (NEPTUNE_SOURCE_DIR) + "/docs/exemples-arpege/motifs-essai.json");
+    std::stringstream ss;
+    ss << in.rdbuf();
+    const auto r = fromJson (ss.str());
+    REQUIRE (r.ok);
+    REQUIRE (r.patterns.size() == 4);
+    CHECK (r.patterns[0].notesMode);
+    CHECK (r.patterns[0].hits[0].vel == 50);
+    CHECK (r.patterns[0].hits[0].gate == 0.3);
+    CHECK (r.patterns[0].hits[2].accent);
+    CHECK (! r.patterns[1].notesMode);
+    REQUIRE (r.patterns[1].alts.size() == 1);
+    CHECK (r.patterns[1].alts[0].chance == 0.5);
+    CHECK (r.patterns[3].bars == 2);
+    CHECK (r.patterns[3].hits.size() == 8);
+    const auto again = fromJson (toJson (r.patterns));      // réécrit sans perte
+    REQUIRE (again.patterns.size() == 4);
+    CHECK (again.patterns[1].alts.size() == 1);
+    CHECK (again.patterns[0].hits[7].vel == 120);
+}

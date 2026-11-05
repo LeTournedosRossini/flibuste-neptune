@@ -215,3 +215,48 @@ TEST_CASE ("carte : noms de gammes et de tonalités", "[carte]")
     CHECK (carte::scaleName ({ 0.0, 4.0, 2, 4, false }, chords::Naming::Letters) == "D dorian");
     CHECK (carte::scaleName ({ 0.0, 4.0, 10, 9, false }, chords::Naming::French) == "Sib pentatonique majeure");
 }
+
+TEST_CASE ("carte : morceau d'essai", "[carte]")
+{
+    const auto s = carte::demoScore (8.0);
+    REQUIRE (s.measures.size() == 8);
+    REQUIRE (s.chords.size() == 8);
+    CHECK (s.measures[0].start == 8.0);
+    CHECK (s.measures[7].num == 3);
+    CHECK (s.measures[7].length == 3.0);
+    for (size_t i = 1; i < s.chords.size(); ++i)   // les accords se suivent sans trou, comme les mesures
+    {
+        CHECK (s.chords[i].start == s.chords[i - 1].start + s.chords[i - 1].length);
+        CHECK (s.measures[i].start == s.chords[i].start);
+    }
+    CHECK (s.patterns.size() == 4);
+    CHECK (s.patterns.front().slot == 12);
+    CHECK (s.patterns.back().slot == 15);
+    CHECK (s.scales.size() == 3);
+    CHECK (s.hasGlobalKey);
+    CHECK (! s.keys.empty());
+    CHECK (carte::toContainers (s).size() >= 8 + 8 + 4 + 3 + 2);
+    // enregistré puis relu à l'identique
+    CHECK (carte::fromJson (carte::toJson (s)).chords.size() == 8);
+}
+
+TEST_CASE ("exemples d'essai : les fichiers de docs/exemples-arpege se lisent", "[carte][pattern]")
+{
+    std::ifstream a (std::string (NEPTUNE_SOURCE_DIR) + "/docs/exemples-arpege/accords-essai.json");
+    std::stringstream sa;
+    sa << a.rdbuf();
+    const auto r = importChordFile (sa.str(), 0.0);
+    REQUIRE (r.ok);
+    CHECK (r.score.chords.size() == 8);
+    CHECK (r.score.measures.size() == 8);
+    CHECK (r.score.measures[7].length == 3.0);
+    CHECK (r.score.chords[5].chord.bass == 2);   // Am7/D
+    const auto demo = carte::demoScore();
+    for (size_t i = 0; i < 8; ++i)               // le fichier est le même morceau que le bouton d'essai
+    {
+        CHECK (r.score.chords[i].start == demo.chords[i].start);
+        CHECK (r.score.chords[i].length == demo.chords[i].length);
+        CHECK (r.score.chords[i].chord.root == demo.chords[i].chord.root);
+        CHECK ((r.score.chords[i].chord.rel & 0x0FFF) == (demo.chords[i].chord.rel & 0x0FFF));
+    }
+}
