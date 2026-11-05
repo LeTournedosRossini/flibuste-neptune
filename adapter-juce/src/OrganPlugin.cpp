@@ -174,6 +174,9 @@ void OrganProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
             arp_.setEnvironment (usePattern ? carteEnv_.get() : nullptr);
             arp_.setBaseNote (12 * (carteOctave_.load (std::memory_order_relaxed) + 1));
             arp_.setVoiceLeading (led);
+            arp::ApproachParams ap;
+            ap.kind = static_cast<arp::ApproachParams::Kind> (carteApproach_.load (std::memory_order_relaxed));
+            arp_.setApproach (ap);
             arp::Transport tr;
             tr.playing = usePattern && playing;
             tr.hasPosition = hasPos;
@@ -262,7 +265,7 @@ void OrganProcessor::getStateInformation (juce::MemoryBlock& dest)
     auto doc = nlohmann::json::parse (text, nullptr, false);
     if (doc.is_object())
     {
-        doc["carte"] = { { "follow", carteFollow_.load() }, { "channel", carteChannel_.load() }, { "chordChannel", chordChannel_.load() }, { "bassChannel", bassChannel_.load() }, { "octave", carteOctave_.load() }, { "led", carteLed_.load() }, { "motifSlot", motifSlot_.load() } };
+        doc["carte"] = { { "follow", carteFollow_.load() }, { "channel", carteChannel_.load() }, { "chordChannel", chordChannel_.load() }, { "bassChannel", bassChannel_.load() }, { "octave", carteOctave_.load() }, { "led", carteLed_.load() }, { "motifSlot", motifSlot_.load() }, { "approach", carteApproach_.load() } };
         auto arr = nlohmann::json::array();
         {
             const juce::SpinLock::ScopedLockType l (motifLock_);
@@ -295,6 +298,7 @@ void OrganProcessor::setStateInformation (const void* data, int size)
             carteOctave_.store (juce::jlimit (1, 6, c.value ("octave", 3)));
             carteLed_.store (c.value ("led", true));
             motifSlot_.store (juce::jlimit (0, kMotifSlots, c.value ("motifSlot", 0)));
+            carteApproach_.store (juce::jlimit (0, 4, c.value ("approach", 0)));
             for (int i = 0; i < kMotifSlots; ++i)
             {
                 neptune::core::pattern::Pattern pt;
@@ -537,7 +541,7 @@ void NovaOrganPluginEditor::buildContent()
     link.carteText = [&p] { return p.carteText(); };
     link.carteMenu = [&p] (juce::Component* anchor)
     {
-        juce::PopupMenu m, ch, chord, bass, oct, play, load;
+        juce::PopupMenu m, ch, chord, bass, oct, play, load, appr;
         const auto library = motifs::files();   // lu à l'ouverture du menu
         m.addItem (1, juce::String::fromUTF8 ("Suivre les accords de Carte"), true, p.carteFollow());
         for (int i = 1; i <= 8; ++i) ch.addItem (100 + i, juce::String (i), true, p.carteChannel() == i);
@@ -559,6 +563,11 @@ void NovaOrganPluginEditor::buildContent()
         }
         load.addSeparator();
         load.addItem (9000, juce::String::fromUTF8 ("Ouvrir le dossier des motifs"));
+        {
+            const char* names[] = { "aucun", "dominante (V7 de l'accord suivant)", "triton (bII7)", "chromatique (majeur un demi-ton plus bas)", "parallèle (l'accord suivant, un demi-ton plus haut)" };
+            for (int k = 0; k < 5; ++k) appr.addItem (600 + k, juce::String::fromUTF8 (names[k]), true, p.carteApproach() == k);
+        }
+        m.addSubMenu (juce::String::fromUTF8 ("Accord d'approche (motifs)"), appr);
         m.addSubMenu (juce::String::fromUTF8 ("Motif joué"), play);
         m.addSubMenu (juce::String::fromUTF8 ("Charger un motif dans l'emplacement"), load);
         m.addSeparator();
@@ -571,6 +580,7 @@ void NovaOrganPluginEditor::buildContent()
             if (r == 1) p.setCarteFollow (! p.carteFollow());
             else if (r == 2) p.setCarteLed (! p.carteLed());
             else if (r >= 500 && r <= 516) p.setMotifSlot (r - 500);
+            else if (r >= 600 && r <= 604) p.setCarteApproach (r - 600);
             else if (r == 9000) motifs::directory().revealToUser();
             else if (r >= 10000 && r < 10000 + 16 * 256)
             {

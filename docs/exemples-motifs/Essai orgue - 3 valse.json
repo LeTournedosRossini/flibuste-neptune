@@ -1,0 +1,56 @@
+{
+ "format": "flibuste-motifs",
+ "version": 1,
+ "from": "arpege",
+ "patterns": [
+  {
+   "id": "Essai orgue - 3 valse",
+   "name": "Essai orgue : valse à 3 temps",
+   "length": [
+    3,
+    4
+   ],
+   "hits": [
+    {
+     "at": [
+      0,
+      4
+     ],
+     "dur": [
+      1,
+      4
+     ],
+     "parts": [
+      "B"
+     ]
+    },
+    {
+     "at": [
+      1,
+      4
+     ],
+     "dur": [
+      1,
+      4
+     ],
+     "parts": [
+      "C"
+     ]
+    },
+    {
+     "at": [
+      2,
+      4
+     ],
+     "dur": [
+      1,
+      4
+     ],
+     "parts": [
+      "C"
+     ]
+    }
+   ]
+  }
+ ]
+}

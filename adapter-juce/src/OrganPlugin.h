@@ -89,6 +89,8 @@ public:
     void setChordMidiChannel (int c) { chordChannel_.store (juce::jlimit (1, 16, c)); }
     int bassMidiChannel() const noexcept { return bassChannel_.load(); }               // canal MIDI de la basse, 0 : pas de basse, 1..16
     void setBassMidiChannel (int c) { bassChannel_.store (juce::jlimit (0, 16, c)); }
+    int carteApproach() const noexcept { return carteApproach_.load(); }              // 0 non, 1 dominante, 2 triton, 3 chromatique, 4 parallèle (motifs joués)
+    void setCarteApproach (int k) { carteApproach_.store (juce::jlimit (0, 4, k)); }
     bool carteLed() const noexcept { return carteLed_.load(); }                        // voix conduites (défaut) ou position fixe
     void setCarteLed (bool on) { carteLed_.store (on); }
     int carteOctave() const noexcept { return carteOctave_.load(); }                   // octave de base, 1..6 (3 = do 48)
@@ -164,6 +166,7 @@ private:
     std::array<neptune::core::arp::FollowEvent, 64> followOut_ {};
     Ticker ticker_ { *this };
     std::atomic<bool> carteFollow_ { false }, carteLed_ { true };
+    std::atomic<int> carteApproach_ { 0 };
     std::atomic<int> carteChannel_ { 1 }, chordChannel_ { 1 }, bassChannel_ { 0 }, carteOctave_ { 3 };
     // Motifs (fil de messages : motifs_ sous verrou ; fil audio : copie audioMotifs_ refaite quand la version change)
     mutable juce::SpinLock motifLock_;

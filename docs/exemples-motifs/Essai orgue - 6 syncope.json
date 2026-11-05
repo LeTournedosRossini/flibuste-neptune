@@ -1,0 +1,59 @@
+{
+ "format": "flibuste-motifs",
+ "version": 1,
+ "from": "arpege",
+ "patterns": [
+  {
+   "id": "Essai orgue - 6 syncope",
+   "name": "Essai orgue : syncopé (3 + 3 + 2 croches)",
+   "length": [
+    1,
+    1
+   ],
+   "hits": [
+    {
+     "at": [
+      0,
+      8
+     ],
+     "dur": [
+      3,
+      8
+     ],
+     "parts": [
+      "B",
+      "C"
+     ]
+    },
+    {
+     "at": [
+      3,
+      8
+     ],
+     "dur": [
+      3,
+      8
+     ],
+     "parts": [
+      "C"
+     ],
+     "accent": true
+    },
+    {
+     "at": [
+      6,
+      8
+     ],
+     "dur": [
+      2,
+      8
+     ],
+     "parts": [
+      "C"
+     ],
+     "vel": 80
+    }
+   ]
+  }
+ ]
+}

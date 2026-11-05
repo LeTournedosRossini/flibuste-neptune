@@ -1140,3 +1140,31 @@ TEST_CASE ("arp : les notes d'une partie B sont marquées « basse » (début et
     CHECK (bassOn == bassOff);
     CHECK (otherOn >= 1);
 }
+
+TEST_CASE ("arp : accord d'approche devant un changement d'accord", "[arp][carte][approach]")
+{
+    // un coup sur chaque temps ; l'accord change au temps 4 (do -> sol) : seul le coup du temps 3 (dernier temps avant le changement) reçoit l'approche
+    const auto pat = patternFrom (R"({ "id": "t", "length": [1,1], "hits": [
+        { "at": [0,4], "dur": [1,4], "parts": ["1"] }, { "at": [1,4], "dur": [1,4], "parts": ["1"] },
+        { "at": [2,4], "dur": [1,4], "parts": ["1"] }, { "at": [3,4], "dur": [1,4], "parts": ["1"] } ] })");
+    ChordListEnv env;
+    env.chords = { { 0.0, 4.0, 0, 0x091, -1 }, { 4.0, 4.0, 7, 0x091, -1 } };
+    using Kind = neptune::core::arp::ApproachParams::Kind;
+    auto roots = [&] (Kind k)
+    {
+        auto a = make();
+        a.setPattern (&pat);
+        a.setEnvironment (&env);
+        neptune::core::arp::ApproachParams ap;
+        ap.kind = k;
+        a.setApproach (ap);
+        std::vector<int> pcs;
+        for (int n : onNotes (run (a, { { 0, true, 48, 90 } }, (long long) (kSamplesPerBeat * 4.9), 256))) pcs.push_back (n % 12);
+        return pcs;
+    };
+    CHECK (roots (Kind::Off) == std::vector<int> { 0, 0, 0, 0, 7 });
+    CHECK (roots (Kind::Dominant) == std::vector<int> { 0, 0, 0, 2, 7 });   // ré : V de sol   // sol : V de fa
+    CHECK (roots (Kind::Tritone) == std::vector<int> { 0, 0, 0, 8, 7 });     // sol dièse : le bII de sol
+    CHECK (roots (Kind::Chromatic) == std::vector<int> { 0, 0, 0, 6, 7 });   // fa dièse : un demi-ton sous sol
+    CHECK (roots (Kind::Parallel) == std::vector<int> { 0, 0, 0, 8, 7 });    // sol un demi-ton plus haut
+}

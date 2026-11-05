@@ -1,0 +1,56 @@
+{
+ "format": "flibuste-motifs",
+ "version": 1,
+ "from": "arpege",
+ "patterns": [
+  {
+   "id": "Essai orgue - 8 basse seule",
+   "name": "Essai orgue : basse seule, fondamentale puis quinte",
+   "length": [
+    1,
+    1
+   ],
+   "hits": [
+    {
+     "at": [
+      0,
+      4
+     ],
+     "dur": [
+      2,
+      4
+     ],
+     "parts": [
+      "B"
+     ]
+    },
+    {
+     "at": [
+      2,
+      4
+     ],
+     "dur": [
+      1,
+      4
+     ],
+     "parts": [
+      "B"
+     ]
+    },
+    {
+     "at": [
+      3,
+      4
+     ],
+     "dur": [
+      1,
+      4
+     ],
+     "parts": [
+      "5-1"
+     ]
+    }
+   ]
+  }
+ ]
+}

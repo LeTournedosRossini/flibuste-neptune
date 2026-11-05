@@ -1,0 +1,43 @@
+{
+ "format": "flibuste-motifs",
+ "version": 1,
+ "from": "arpege",
+ "patterns": [
+  {
+   "id": "Essai orgue - 1 accord tenu",
+   "name": "Essai orgue : accord tenu",
+   "length": [
+    1,
+    1
+   ],
+   "hits": [
+    {
+     "at": [
+      0,
+      1
+     ],
+     "dur": [
+      1,
+      1
+     ],
+     "parts": [
+      "B"
+     ]
+    },
+    {
+     "at": [
+      0,
+      1
+     ],
+     "dur": [
+      1,
+      1
+     ],
+     "parts": [
+      "C"
+     ]
+    }
+   ]
+  }
+ ]
+}

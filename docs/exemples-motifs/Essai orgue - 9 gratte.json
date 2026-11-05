@@ -1,0 +1,74 @@
+{
+ "format": "flibuste-motifs",
+ "version": 1,
+ "from": "arpege",
+ "patterns": [
+  {
+   "id": "Essai orgue - 9 gratte",
+   "name": "Essai orgue : accord gratté (coup bas puis haut ; régler « Grattage » dans Arpège)",
+   "length": [
+    1,
+    1
+   ],
+   "hits": [
+    {
+     "at": [
+      0,
+      4
+     ],
+     "dur": [
+      1,
+      4
+     ],
+     "parts": [
+      "C"
+     ]
+    },
+    {
+     "at": [
+      1,
+      4
+     ],
+     "dur": [
+      1,
+      4
+     ],
+     "parts": [
+      "C"
+     ]
+    },
+    {
+     "at": [
+      2,
+      4
+     ],
+     "dur": [
+      1,
+      4
+     ],
+     "parts": [
+      "C"
+     ]
+    },
+    {
+     "at": [
+      3,
+      4
+     ],
+     "dur": [
+      1,
+      4
+     ],
+     "parts": [
+      "C"
+     ],
+     "x": {
+      "arpege": {
+       "muted": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

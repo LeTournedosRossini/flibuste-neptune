@@ -1,0 +1,69 @@
+{
+ "format": "flibuste-motifs",
+ "version": 1,
+ "from": "arpege",
+ "patterns": [
+  {
+   "id": "Essai orgue - 2 marche",
+   "name": "Essai orgue : marche (basse aux temps 1 et 3, accord aux temps 2 et 4)",
+   "length": [
+    1,
+    1
+   ],
+   "hits": [
+    {
+     "at": [
+      0,
+      4
+     ],
+     "dur": [
+      1,
+      4
+     ],
+     "parts": [
+      "B"
+     ]
+    },
+    {
+     "at": [
+      1,
+      4
+     ],
+     "dur": [
+      1,
+      4
+     ],
+     "parts": [
+      "C"
+     ]
+    },
+    {
+     "at": [
+      2,
+      4
+     ],
+     "dur": [
+      1,
+      4
+     ],
+     "parts": [
+      "B"
+     ]
+    },
+    {
+     "at": [
+      3,
+      4
+     ],
+     "dur": [
+      1,
+      4
+     ],
+     "parts": [
+      "C"
+     ]
+    }
+   ]
+  }
+ ]
+}

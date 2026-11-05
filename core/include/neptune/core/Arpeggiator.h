@@ -46,6 +46,17 @@ struct StrumParams
     double mutedVelocity = 0.6;
 };
 
+// Accord d'approche (Scorsaire, `approachSpec`) : un coup du motif qui tombe peu avant un changement d'accord joue, à la place de l'accord en cours, un accord qui mène à
+// l'accord suivant. Jamais sur le premier coup d'un accord. Le tirage de `chance` ne dépend que de l'instant du changement : le même à chaque lecture.
+struct ApproachParams
+{
+    enum class Kind { Off, Dominant, Tritone, Chromatic, Parallel };
+    Kind kind = Kind::Off;       // Dominant : V7 de l'accord suivant ; Tritone : ♭II7 ; Chromatic : majeur un demi-ton plus bas ; Parallel : l'accord suivant lui-même un demi-ton plus haut (ou plus bas)
+    double chance = 1.0;         // part des changements qui reçoivent une approche (0..1)
+    double beats = 1.0;          // les coups qui commencent dans ce nombre de noires avant le changement
+    double below = 0.0;          // avec Parallel : part des approches qui viennent d'en dessous
+};
+
 struct NoteIn { int offset = 0; bool on = false; std::uint8_t note = 0; std::uint8_t velocity = 0; };
 struct NoteOut { int offset = 0; bool on = false; std::uint8_t note = 0; std::uint8_t velocity = 0; bool bass = false; };   // bass : note d'une partie « B » du motif (Orgamon : canal du pédalier)
 
@@ -112,6 +123,14 @@ public:
         strum_ = sp;
         strum_.delayMs = std::clamp (strum_.delayMs, 0.0, 100.0);
         strum_.upStrings = std::clamp (strum_.upStrings, 1, 16);
+    }
+
+    void setApproach (const ApproachParams& ap)
+    {
+        approach_ = ap;
+        approach_.chance = std::clamp (approach_.chance, 0.0, 1.0);
+        approach_.beats = std::clamp (approach_.beats, 0.125, 4.0);
+        approach_.below = std::clamp (approach_.below, 0.0, 1.0);
     }
 
     void setSampleRate (double sr) { sampleRate_ = sr > 0.0 ? sr : 44100.0; }
@@ -362,6 +381,37 @@ private:
         return n;
     }
 
+    // Remplace l'accord `hm` par son accord d'approche quand le coup à `t` tombe juste avant un changement d'accord (voir ApproachParams).
+    void applyApproach (double t, Harmony& hm) const
+    {
+        if (approach_.kind == ApproachParams::Kind::Off || env_ == nullptr || hm.lengthBeats <= 0.0) return;
+        const double until = hm.startBeats + hm.lengthBeats;
+        if (t <= hm.startBeats + 1e-6 || until - t > approach_.beats + 1e-6) return;
+        Harmony nx;
+        if (! env_->harmonyAt (until + 1e-9, nx) || nx.rootPc == hm.rootPc) return;
+        // tirages (chance, sens du parallèle) fixés par l'instant du changement : le même à chaque lecture, quelle que soit la taille des blocs
+        auto unit = [&] (std::uint32_t salt)
+        {
+            std::uint32_t x = (std::uint32_t) std::llround (until * 1000.0) * 2654435761u ^ salt * 40503u;
+            x ^= x >> 15; x *= 2246822519u; x ^= x >> 13; x *= 3266489917u; x ^= x >> 16;
+            return (double) (x & 0xFFFFFF) / (double) 0x1000000;
+        };
+        if (approach_.chance < 1.0 && unit (1) >= approach_.chance) return;
+        const auto mod12 = [] (int n) { return ((n % 12) + 12) % 12; };
+        Harmony a;
+        a.startBeats = hm.startBeats;
+        a.lengthBeats = hm.lengthBeats;
+        switch (approach_.kind)
+        {
+            case ApproachParams::Kind::Dominant:  a.rootPc = mod12 (nx.rootPc + 7); a.rel = 0x491; break;
+            case ApproachParams::Kind::Tritone:   a.rootPc = mod12 (nx.rootPc + 1); a.rel = 0x491; break;
+            case ApproachParams::Kind::Chromatic: a.rootPc = mod12 (nx.rootPc - 1); a.rel = 0x091; break;
+            case ApproachParams::Kind::Parallel:  a.rootPc = mod12 (nx.rootPc + (unit (2) < approach_.below ? -1 : 1)); a.rel = nx.rel; break;
+            default: return;
+        }
+        hm = a;
+    }
+
     void doPatternHit (const Due& d, double bps)
     {
         const CarteChordPool synth (*this, d.t);
@@ -378,6 +428,7 @@ private:
         Harmony hm;
         if (! d.pat->notesMode && env_ != nullptr && env_->harmonyAt (d.t, hm))
         {
+            applyApproach (d.t, hm);
             const int low = sorted[0];
             int root = low - (((low - hm.rootPc) % 12) + 12) % 12;       // la fondamentale la plus proche en dessous (ou égale) de la note la plus grave
             if (low - root > 6) root += 12;                              // ... ou au-dessus si c'est plus près
@@ -683,6 +734,7 @@ private:
     bool carteLive_ = false;
     int baseNote_ = 48;
     StrumParams strum_;
+    ApproachParams approach_;
     std::array<Delayed, kMaxDelayed> delayed_ {};
     int delayedCount_ = 0;
     bool ledAll_ = false;

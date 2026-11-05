@@ -1,0 +1,86 @@
+{
+ "format": "flibuste-motifs",
+ "version": 1,
+ "from": "arpege",
+ "patterns": [
+  {
+   "id": "Essai orgue - 7 choral",
+   "name": "Essai orgue : choral, voix conduites (octaves choisies par la conduite)",
+   "length": [
+    1,
+    1
+   ],
+   "voices": {
+    "rh": "led",
+    "lh": "literal"
+   },
+   "hits": [
+    {
+     "at": [
+      0,
+      1
+     ],
+     "dur": [
+      1,
+      1
+     ],
+     "parts": [
+      "B"
+     ]
+    },
+    {
+     "at": [
+      0,
+      4
+     ],
+     "dur": [
+      1,
+      4
+     ],
+     "parts": [
+      "C"
+     ]
+    },
+    {
+     "at": [
+      1,
+      4
+     ],
+     "dur": [
+      1,
+      4
+     ],
+     "parts": [
+      "C"
+     ]
+    },
+    {
+     "at": [
+      2,
+      4
+     ],
+     "dur": [
+      1,
+      4
+     ],
+     "parts": [
+      "C"
+     ]
+    },
+    {
+     "at": [
+      3,
+      4
+     ],
+     "dur": [
+      1,
+      4
+     ],
+     "parts": [
+      "C"
+     ]
+    }
+   ]
+  }
+ ]
+}
