@@ -453,3 +453,25 @@ TEST_CASE ("arp motif : pas de note bloquée, quels que soient les sauts", "[arp
     for (int i = 0; i < m; ++i) balance[out[i].note] += out[i].on ? 1 : -1;
     for (const auto& kv : balance) CHECK (kv.second == 0);
 }
+
+TEST_CASE ("arp motif : mode notes, rangs des notes tenues, toujours un motif complet", "[arp][pattern]")
+{
+    const auto pat = patternFrom (R"({ "id": "n", "length": [1,2], "x": { "arpege": { "mode": "notes" } }, "hits": [
+        { "at": [0,8], "dur": [1,8], "parts": ["1"] }, { "at": [1,8], "dur": [1,8], "parts": ["2"] },
+        { "at": [2,8], "dur": [1,8], "parts": ["3"] }, { "at": [3,8], "dur": [1,8], "parts": ["4"] } ] })");
+    REQUIRE (pat.notesMode);
+    auto a = make();
+    a.setPattern (&pat);
+    // trois notes : la quatrième remonte d'une octave ; deux répétitions dans la mesure
+    CHECK (onNotes (run (a, kChord, (long long) (kSamplesPerBeat * 4), 256)) == std::vector<int> { 60, 64, 67, 72, 60, 64, 67, 72 });
+    // une seule note : le motif se promène par octaves
+    auto b = make();
+    b.setPattern (&pat);
+    const std::vector<Event> one = { { 0, true, 50, 90 } };
+    CHECK (onNotes (run (b, one, (long long) (kSamplesPerBeat * 2), 256)) == std::vector<int> { 50, 62, 74, 86 });
+    // des notes qui ne forment aucun accord : les rangs marchent quand même
+    auto c = make();
+    c.setPattern (&pat);
+    const std::vector<Event> odd = { { 0, true, 60, 90 }, { 0, true, 61, 90 }, { 0, true, 66, 90 } };
+    CHECK (onNotes (run (c, odd, (long long) (kSamplesPerBeat * 2), 256)) == std::vector<int> { 60, 61, 66, 72 });
+}

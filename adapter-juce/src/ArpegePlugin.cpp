@@ -38,23 +38,34 @@ namespace
 {
 struct Fourni { const char* name; const char* json; };
 const Fourni kFournis[] = {
-    { "Arpège montant", R"({ "id": "montant", "name": "Arpège montant", "length": [1,2], "hits": [
+    { "Notes montant", R"({ "id": "n-montant", "name": "Notes montant", "length": [1,2], "x": { "arpege": { "mode": "notes" } }, "hits": [
+        { "at": [0,8], "dur": [1,8], "parts": ["1"] }, { "at": [1,8], "dur": [1,8], "parts": ["2"] },
+        { "at": [2,8], "dur": [1,8], "parts": ["3"] }, { "at": [3,8], "dur": [1,8], "parts": ["4"] } ] })" },
+    { "Notes descendant", R"({ "id": "n-descendant", "name": "Notes descendant", "length": [1,2], "x": { "arpege": { "mode": "notes" } }, "hits": [
+        { "at": [0,8], "dur": [1,8], "parts": ["4"] }, { "at": [1,8], "dur": [1,8], "parts": ["3"] },
+        { "at": [2,8], "dur": [1,8], "parts": ["2"] }, { "at": [3,8], "dur": [1,8], "parts": ["1"] } ] })" },
+    { "Notes aller-retour", R"({ "id": "n-allerretour", "name": "Notes aller-retour", "length": [1,1], "x": { "arpege": { "mode": "notes" } }, "hits": [
+        { "at": [0,8], "dur": [1,8], "parts": ["1"] }, { "at": [1,8], "dur": [1,8], "parts": ["2"] }, { "at": [2,8], "dur": [1,8], "parts": ["3"] }, { "at": [3,8], "dur": [1,8], "parts": ["4"] },
+        { "at": [4,8], "dur": [1,8], "parts": ["4"] }, { "at": [5,8], "dur": [1,8], "parts": ["3"] }, { "at": [6,8], "dur": [1,8], "parts": ["2"] }, { "at": [7,8], "dur": [1,8], "parts": ["1"] } ] })" },
+    { "Notes en triolets", R"({ "id": "n-triolets", "name": "Notes en triolets", "length": [1,4], "x": { "arpege": { "mode": "notes" } }, "hits": [
+        { "at": [0,12], "dur": [1,12], "parts": ["1"] }, { "at": [1,12], "dur": [1,12], "parts": ["2"] }, { "at": [2,12], "dur": [1,12], "parts": ["3"] } ] })" },
+    { "Accord : arpège montant", R"({ "id": "montant", "name": "Accord : arpège montant", "length": [1,2], "hits": [
         { "at": [0,8], "dur": [1,8], "parts": ["1"] }, { "at": [1,8], "dur": [1,8], "parts": ["3"] },
         { "at": [2,8], "dur": [1,8], "parts": ["5"] }, { "at": [3,8], "dur": [1,8], "parts": ["5+1"] } ] })" },
-    { "Alberti", R"({ "id": "alberti", "name": "Alberti", "length": [1,2], "hits": [
+    { "Accord : Alberti", R"({ "id": "alberti", "name": "Accord : Alberti", "length": [1,2], "hits": [
         { "at": [0,8], "dur": [1,8], "parts": ["1"] }, { "at": [1,8], "dur": [1,8], "parts": ["5"] },
         { "at": [2,8], "dur": [1,8], "parts": ["3"] }, { "at": [3,8], "dur": [1,8], "parts": ["5"] } ] })" },
-    { "Triolets montants", R"({ "id": "triolets", "name": "Triolets montants", "length": [1,4], "hits": [
+    { "Accord : triolets", R"({ "id": "triolets", "name": "Accord : triolets", "length": [1,4], "hits": [
         { "at": [0,12], "dur": [1,12], "parts": ["1"] }, { "at": [1,12], "dur": [1,12], "parts": ["3"] }, { "at": [2,12], "dur": [1,12], "parts": ["5"] } ] })" },
-    { "Ballade", R"({ "id": "ballade", "name": "Ballade", "length": [1,1], "hits": [
+    { "Accord : ballade", R"({ "id": "ballade", "name": "Accord : ballade", "length": [1,1], "hits": [
         { "at": [0,4], "dur": [1,4], "parts": ["B","C"] }, { "at": [1,4], "dur": [1,4], "parts": ["C"] },
         { "at": [2,4], "dur": [1,4], "parts": ["C"] }, { "at": [3,4], "dur": [1,4], "parts": ["C"] } ] })" },
-    { "Valse", R"({ "id": "valse", "name": "Valse", "length": [3,4], "hits": [
+    { "Accord : valse", R"({ "id": "valse", "name": "Accord : valse", "length": [3,4], "hits": [
         { "at": [0,4], "dur": [1,4], "parts": ["B"] }, { "at": [1,4], "dur": [1,4], "parts": ["C"] }, { "at": [2,4], "dur": [1,4], "parts": ["C"] } ] })" },
-    { "Basse et contretemps", R"({ "id": "contretemps", "name": "Basse et contretemps", "length": [1,1], "hits": [
+    { "Accord : basse et contretemps", R"({ "id": "contretemps", "name": "Accord : basse et contretemps", "length": [1,1], "hits": [
         { "at": [0,8], "dur": [1,4], "parts": ["B"] }, { "at": [1,8], "dur": [1,8], "parts": ["C"] }, { "at": [3,8], "dur": [1,8], "parts": ["C"] },
         { "at": [4,8], "dur": [1,4], "parts": ["B"] }, { "at": [5,8], "dur": [1,8], "parts": ["C"] }, { "at": [7,8], "dur": [1,8], "parts": ["C"] } ] })" },
-    { "Accord tenu", R"({ "id": "tenu", "name": "Accord tenu", "length": [1,1], "hits": [ { "at": [0,1], "dur": [1,1], "parts": ["C"] } ] })" },
+    { "Accord : tenu", R"({ "id": "tenu", "name": "Accord : tenu", "length": [1,1], "hits": [ { "at": [0,1], "dur": [1,1], "parts": ["C"] } ] })" },
 };
 constexpr int kNumFournis = (int) (sizeof (kFournis) / sizeof (kFournis[0]));
 }
@@ -138,6 +149,7 @@ pattern::Pattern ArpegeProcessor::slotPattern (int i) const
     if (i >= 0 && i < kSlots && slots_[(size_t) i] != nullptr) return *slots_[(size_t) i];
     pattern::Pattern p;
     p.id = "motif" + std::to_string (i + 1);
+    pattern::setNotesMode (p, true);   // un motif neuf est un vrai arpégiateur (rangs des notes tenues)
     return p;
 }
 
@@ -363,7 +375,8 @@ namespace
 {
 using pattern::Frac;
 using pattern::makeFrac;
-const char* const kRowParts[] = { "5+1", "4+1", "3+1", "2+1", "1+1", "7", "6", "5", "4", "3", "2", "1", "B" };
+const char* const kRowPartsChord[] = { "5+1", "4+1", "3+1", "2+1", "1+1", "7", "6", "5", "4", "3", "2", "1", "B" };
+const char* const kRowPartsNotes[] = { "5+1", "4+1", "3+1", "2+1", "1+1", "8", "7", "6", "5", "4", "3", "2", "1" };
 constexpr int kNumRows = 13;
 const Frac kGridFracs[] = { { 1, 8 }, { 1, 12 }, { 1, 16 }, { 1, 24 }, { 1, 32 } };
 const char* const kGridNames[] = { "1/8", "1/12 (triolet)", "1/16", "1/24 (triolet)", "1/32" };
@@ -385,6 +398,8 @@ public:
 
     int grid = 2;
     std::function<void()> onChange;
+    bool notes = false;   // mode du motif affiché (lignes : rangs des notes tenues, ou degrés de l'accord)
+    const char* rowPart (int r) const { return notes ? kRowPartsNotes[r] : kRowPartsChord[r]; }
 
     int slotIndex() const { return proc_.slot->get() - 1; }
     int columns() const
@@ -403,10 +418,11 @@ public:
         {
             g.setColour (skin_.colour (Token::TextDim));
             g.setFont (skin_.font (14.0f));
-            g.drawFittedText (juce::String::fromUTF8 ("Motifs automatiques. Choisissez un emplacement de motif (1 à 16) pour dessiner le vôtre ici."), getLocalBounds().reduced (skin_.ipx (20.0f)), juce::Justification::centred, 2);
+            g.drawFittedText (juce::String::fromUTF8 ("Motifs automatiques. Choisissez un emplacement de motif (1 à 16) pour dessiner le vôtre ici : en mode notes (un vrai arpégiateur, rangs des notes tenues) ou en mode accord (degrés des accords)."), getLocalBounds().reduced (skin_.ipx (20.0f)), juce::Justification::centred, 2);
             return;
         }
         const auto pat = proc_.slotPattern (slotIndex());
+        notes = pat.notesMode;
         const auto gr = kGridFracs[grid];
         const int cols = columns();
         const auto geo = geometry (cols);
@@ -417,7 +433,7 @@ public:
             if (r % 2 == 0) { g.setColour (skin_.colour (Token::BgCard, 0.45f)); g.fillRect (row); }
             g.setColour (skin_.colour (Token::TextDim));
             g.setFont (skin_.font (12.0f));
-            g.drawText (rowLabel (kRowParts[r]), juce::Rectangle<float> (0.0f, row.getY(), geo.x0 - skin_.px (6.0f), row.getHeight()), juce::Justification::centredRight);
+            g.drawText (rowLabel (rowPart (r)), juce::Rectangle<float> (0.0f, row.getY(), geo.x0 - skin_.px (6.0f), row.getHeight()), juce::Justification::centredRight);
         }
         // traits de temps et de mesure
         for (int c = 0; c <= cols; ++c)
@@ -442,7 +458,7 @@ public:
                 juce::String t (part.text);
                 if (t.startsWithChar ('L')) t = t.substring (1);
                 for (int r = 0; r < kNumRows; ++r)
-                    if (t == kRowParts[r])
+                    if (t == rowPart (r))
                     {
                         const auto cell = juce::Rectangle<float> (geo.x0 + c * geo.cellW, geo.y0 + r * geo.rowH, widthCells * geo.cellW, geo.rowH).reduced (skin_.px (1.5f));
                         skin_.fillActive (g, cell, skin_.px (4.0f), 2.0f);
@@ -492,6 +508,7 @@ private:
         const int c = (int) std::floor ((pos.x - geo.x0) / geo.cellW);
         if (c < 0 || c >= cols) return;
         auto pat = proc_.slotPattern (idx);
+        notes = pat.notesMode;
         const auto gr = kGridFracs[grid];
         const auto at = makeFrac (gr.n * c, gr.d);
         if (pos.y >= geo.accentY)
@@ -508,11 +525,11 @@ private:
             last_ = { c, r };
             if (first)
             {
-                paintOn_ = ! pattern::hasCell (pat, at, kRowParts[r]);
+                paintOn_ = ! pattern::hasCell (pat, at, rowPart (r));
                 painting_ = true;
             }
-            if (pattern::hasCell (pat, at, kRowParts[r]) == paintOn_) return;
-            pattern::toggleCell (pat, at, gr, kRowParts[r]);
+            if (pattern::hasCell (pat, at, rowPart (r)) == paintOn_) return;
+            pattern::toggleCell (pat, at, gr, rowPart (r));
             proc_.setSlotPattern (idx, pat);
         }
         repaint();
@@ -550,8 +567,8 @@ ArpegeEditor::ArpegeEditor (ArpegeProcessor& p)
     matrix_ = std::make_unique<MatrixView> (proc_, skin_);
     addAndMakeVisible (*matrix_);
 
-    // actions : 0 grille, 1 durée, 2 mesures, 3 fourni, 4 charger, 5 importer, 6 exporter, 7 effacer
-    for (int i = 0; i < 8; ++i)
+    // actions : 0 grille, 1 durée, 2 mesures, 3 fourni, 4 charger, 5 importer, 6 exporter, 7 effacer, 8 mode du motif
+    for (int i = 0; i < 9; ++i)
     {
         actions_.push_back (std::make_unique<nova::Pill> (skin_, nova::Pill::Look::Small));
         addAndMakeVisible (*actions_.back());
@@ -619,6 +636,7 @@ ArpegeEditor::ArpegeEditor (ArpegeProcessor& p)
             f.replaceWithText (juce::String (pattern::toJson ({ proc_.slotPattern (idx) }, "arpege")));
         });
     };
+    actions_[8]->onClick = [withPattern] { withPattern ([] (pattern::Pattern& pt) { pattern::setNotesMode (pt, ! pt.notesMode); }); };
     actions_[7]->onClick = [this]
     {
         const int idx = proc_.slot->get() - 1;
@@ -652,6 +670,8 @@ void ArpegeEditor::refreshActions()
         len << juce::String (pt.length.toBeats(), 2).trimCharactersAtEnd ("0").trimCharactersAtEnd (".") << " temps";
         bars << pt.bars;
     }
+    actions_[8]->setText (on && ! proc_.slotPattern (idx).notesMode ? juce::String::fromUTF8 ("Mode : accord (degrés)") : juce::String::fromUTF8 ("Mode : notes (rangs)"));
+    actions_[8]->setDim (! on);
     actions_[0]->setText (grid);
     actions_[1]->setText (len);
     actions_[2]->setText (bars);
@@ -668,7 +688,7 @@ void ArpegeEditor::resized()
 {
     skin_.setScale (nova::fitScale (getWidth(), getHeight(), kDesignW, kDesignH, 0.6f, 3.0f));
     const auto px = [this] (float v) { return skin_.ipx (v); };
-    const float w[] = { 260, 110, 150, 120, 120, 120, 120, 100, 190, 100, 170, 130, 150 };
+    const float w[] = { 260, 110, 150, 120, 120, 120, 120, 100, 190, 100, 170, 130, 130 };
     const int rowOf[] = { 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2 };
     int x[4] = { px (16.0f), px (16.0f), px (16.0f), px (16.0f) };
     const int y0 = px (60.0f), h = px (30.0f), gap = px (40.0f);
@@ -678,8 +698,8 @@ void ArpegeEditor::resized()
         pills_[i]->setBounds (x[r], y0 + r * gap, px (w[i]), h);
         x[r] += px (w[i] + 8.0f);
     }
-    const float aw[] = { 190, 140, 110, 250, 100, 100, 100, 100 };
-    const int aRow[] = { 2, 2, 2, 3, 3, 3, 3, 3 };
+    const float aw[] = { 160, 130, 100, 250, 100, 100, 100, 100, 170 };
+    const int aRow[] = { 2, 2, 2, 3, 3, 3, 3, 3, 2 };
     for (size_t i = 0; i < actions_.size(); ++i)
     {
         const int r = aRow[i];

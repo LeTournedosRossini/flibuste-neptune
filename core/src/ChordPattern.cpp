@@ -154,6 +154,12 @@ bool readPattern (const json& j, Pattern& out)
     if (p.hits.empty()) return false;
     std::stable_sort (p.hits.begin(), p.hits.end(), [] (const Hit& a, const Hit& b) { return compare (a.at, b.at) < 0; });
     p.extraJson = extrasOf (j, { "id", "name", "length", "bars", "hits" });
+    if (! p.extraJson.empty())
+    {
+        const auto ex = json::parse (p.extraJson, nullptr, false);
+        if (ex.is_object() && ex.contains ("x") && ex["x"].is_object() && ex["x"].contains ("arpege") && ex["x"]["arpege"].is_object())
+            p.notesMode = ex["x"]["arpege"].value ("mode", std::string()) == "notes";
+    }
     out = p;
     return true;
 }
@@ -162,6 +168,12 @@ json patternJson (const Pattern& p)
 {
     json j = p.extraJson.empty() ? json::object() : json::parse (p.extraJson, nullptr, false);
     if (! j.is_object()) j = json::object();
+    if (p.notesMode)
+    {
+        if (! j.contains ("x") || ! j["x"].is_object()) j["x"] = json::object();
+        if (! j["x"].contains ("arpege") || ! j["x"]["arpege"].is_object()) j["x"]["arpege"] = json::object();
+        j["x"]["arpege"]["mode"] = "notes";
+    }
     j["id"] = p.id;
     if (! p.name.empty()) j["name"] = p.name;
     j["length"] = fracJson (p.length);
@@ -340,6 +352,26 @@ void setLengthAndBars (Pattern& p, const Frac& length, int bars)
 
 void clearHits (Pattern& p) { p.hits.clear(); }
 
+void setNotesMode (Pattern& p, bool notes)
+{
+    p.notesMode = notes;
+    json j = p.extraJson.empty() ? json::object() : json::parse (p.extraJson, nullptr, false);
+    if (! j.is_object()) j = json::object();
+    if (notes)
+    {
+        if (! j.contains ("x") || ! j["x"].is_object()) j["x"] = json::object();
+        if (! j["x"].contains ("arpege") || ! j["x"]["arpege"].is_object()) j["x"]["arpege"] = json::object();
+        j["x"]["arpege"]["mode"] = "notes";
+    }
+    else if (j.contains ("x") && j["x"].is_object() && j["x"].contains ("arpege") && j["x"]["arpege"].is_object())
+    {
+        j["x"]["arpege"].erase ("mode");
+        if (j["x"]["arpege"].empty()) j["x"].erase ("arpege");
+        if (j["x"].empty()) j.erase ("x");
+    }
+    p.extraJson = j.empty() ? std::string() : j.dump();
+}
+
 // ================================================================================================ degrés
 
 namespace
@@ -376,6 +408,25 @@ int degreeSemitones (const Part& part, std::uint16_t rel, Absent absent)
     for (int s = 12; s < 16; ++s)
         if (((rel >> s) & 1) != 0 && degreeOfInterval (s - 12, rel) == base && octaves == 1) return s;
     return absent == Absent::Play ? majorInterval (n) : -1;
+}
+
+int resolveRank (const Part& part, const int* sorted, int count, int* out, int cap)
+{
+    int k = 0;
+    if (count <= 0) return 0;
+    auto put = [&] (int note) { if (k < cap && note >= 0 && note <= 127) out[k++] = note; };
+    switch (part.kind)
+    {
+        case Part::Kind::Bass: put (sorted[0] - 12); break;
+        case Part::Kind::Chord: for (int i = 0; i < count; ++i) put (sorted[i]); break;
+        case Part::Kind::Degree:
+        {
+            const int r = part.degree - 1;
+            put (sorted[r % count] + 12 * (r / count) + 12 * part.octave);
+            break;
+        }
+    }
+    return k;
 }
 
 int resolvePart (const Part& part, const ChordContext& chord, Absent absent, int* out, int cap)

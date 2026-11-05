@@ -311,3 +311,52 @@ TEST_CASE ("motif : fichier d'export de Scorsaire lu et réécrit sans perte", "
     future.replace (pos, 12, "\"version\": 2");
     CHECK (! fromJson (future).ok);
 }
+
+TEST_CASE ("motif : mode notes, rangs des notes tenues", "[pattern]")
+{
+    int out[16];
+    const int three[] = { 60, 64, 67 };
+    CHECK (resolveRank (part ("1"), three, 3, out, 16) == 1);
+    CHECK (out[0] == 60);
+    resolveRank (part ("3"), three, 3, out, 16);
+    CHECK (out[0] == 67);
+    resolveRank (part ("4"), three, 3, out, 16);
+    CHECK (out[0] == 72);                       // on remonte d'une octave
+    resolveRank (part ("5"), three, 3, out, 16);
+    CHECK (out[0] == 76);
+    resolveRank (part ("7"), three, 3, out, 16);
+    CHECK (out[0] == 84);                       // 7 = 1 + deux octaves
+    resolveRank (part ("2+1"), three, 3, out, 16);
+    CHECK (out[0] == 76);
+    const int one[] = { 60 };
+    resolveRank (part ("3"), one, 1, out, 16);
+    CHECK (out[0] == 84);                       // une seule note : le motif se promène par octaves
+    CHECK (resolveRank (part ("C"), three, 3, out, 16) == 3);
+    resolveRank (part ("B"), three, 3, out, 16);
+    CHECK (out[0] == 48);
+}
+
+TEST_CASE ("motif : le mode notes est un repère gardé dans x", "[pattern]")
+{
+    auto r = fromJson (R"({"id":"n","x":{"arpege":{"mode":"notes","autre":1},"zz":2},"hits":[{"at":[0,1],"dur":[1,4],"parts":["1"]}]})");
+    REQUIRE (r.ok);
+    REQUIRE (r.patterns.size() == 1);
+    auto p = r.patterns[0];
+    CHECK (p.notesMode);
+    const auto again = fromJson (toJson ({ p }));
+    REQUIRE (again.ok);
+    CHECK (again.patterns[0].notesMode);
+    setNotesMode (p, false);
+    CHECK (! p.notesMode);
+    const auto off = fromJson (toJson ({ p }));
+    REQUIRE (off.ok);
+    CHECK (! off.patterns[0].notesMode);
+    CHECK (off.patterns[0].extraJson.find ("\"zz\"") != std::string::npos);        // le reste de x est gardé
+    CHECK (off.patterns[0].extraJson.find ("\"autre\"") != std::string::npos);
+    setNotesMode (p, true);
+    CHECK (fromJson (toJson ({ p })).patterns[0].notesMode);
+    Pattern fresh;
+    setNotesMode (fresh, true);
+    setNotesMode (fresh, false);
+    CHECK (fresh.extraJson.empty());
+}

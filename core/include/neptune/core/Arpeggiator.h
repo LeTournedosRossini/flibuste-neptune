@@ -241,6 +241,9 @@ private:
         int notes[kMaxHeld];
         int vsum = 0;
         for (int i = 0; i < heldCount_; ++i) { notes[i] = held_[i].note; vsum += held_[i].velocity; }
+        std::array<int, kMaxHeld> sorted {};
+        for (int i = 0; i < heldCount_; ++i) sorted[(size_t) i] = notes[i];
+        std::sort (sorted.begin(), sorted.begin() + heldCount_);
         const auto ctx = pattern::contextFromNotes (notes, heldCount_);
         const int heldVel = std::clamp (vsum / heldCount_, 1, 127);
         int vel = h.vel > 0 ? h.vel : (params_.fixedVelocity ? params_.velocity : heldVel);
@@ -251,7 +254,7 @@ private:
         for (const auto& part : h.parts)
         {
             int out[16];
-            const int n = pattern::resolvePart (part, ctx, absent_, out, 16);
+            const int n = pattern_->notesMode ? pattern::resolveRank (part, sorted.data(), heldCount_, out, 16) : pattern::resolvePart (part, ctx, absent_, out, 16);
             for (int k = 0; k < n; ++k) startNote (d.at, std::clamp (out[k] + params_.transpose, 0, 127), vel, len);
         }
     }
