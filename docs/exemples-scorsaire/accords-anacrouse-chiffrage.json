@@ -1,0 +1,191 @@
+{
+  "format": "flibuste-accords",
+  "version": 1,
+  "from": "scorsaire",
+  "unrolled": true,
+  "title": "Anacrouse, 3/4, pas d'accord",
+  "timeSignatures": [
+    {
+      "fromMeasure": 0,
+      "ts": [
+        4,
+        4
+      ]
+    },
+    {
+      "fromMeasure": 3,
+      "ts": [
+        3,
+        4
+      ]
+    }
+  ],
+  "measures": [
+    {
+      "at": [
+        0,
+        1
+      ],
+      "dur": [
+        1,
+        4
+      ],
+      "ts": [
+        4,
+        4
+      ],
+      "source": 0
+    },
+    {
+      "at": [
+        1,
+        4
+      ],
+      "dur": [
+        1,
+        1
+      ],
+      "ts": [
+        4,
+        4
+      ],
+      "source": 1
+    },
+    {
+      "at": [
+        5,
+        4
+      ],
+      "dur": [
+        1,
+        1
+      ],
+      "ts": [
+        4,
+        4
+      ],
+      "source": 2
+    },
+    {
+      "at": [
+        9,
+        4
+      ],
+      "dur": [
+        3,
+        4
+      ],
+      "ts": [
+        3,
+        4
+      ],
+      "source": 3
+    },
+    {
+      "at": [
+        3,
+        1
+      ],
+      "dur": [
+        3,
+        4
+      ],
+      "ts": [
+        3,
+        4
+      ],
+      "source": 4
+    }
+  ],
+  "chords": [
+    {
+      "at": [
+        0,
+        1
+      ],
+      "dur": [
+        1,
+        4
+      ],
+      "root": "G",
+      "quality": "",
+      "bass": null
+    },
+    {
+      "at": [
+        1,
+        4
+      ],
+      "dur": [
+        1,
+        2
+      ],
+      "root": "C",
+      "quality": "",
+      "bass": null
+    },
+    {
+      "at": [
+        3,
+        4
+      ],
+      "dur": [
+        1,
+        2
+      ],
+      "root": "A",
+      "quality": "m7",
+      "bass": "E"
+    },
+    {
+      "at": [
+        5,
+        4
+      ],
+      "dur": [
+        1,
+        1
+      ],
+      "root": "F#",
+      "quality": "",
+      "bass": null
+    },
+    {
+      "at": [
+        9,
+        4
+      ],
+      "dur": [
+        3,
+        4
+      ],
+      "root": "Bb",
+      "quality": "",
+      "bass": null
+    },
+    {
+      "at": [
+        3,
+        1
+      ],
+      "dur": [
+        3,
+        4
+      ],
+      "nc": true
+    }
+  ],
+  "qualities": {
+    "": [
+      0,
+      4,
+      7
+    ],
+    "m7": [
+      0,
+      3,
+      7,
+      10
+    ]
+  }
+}

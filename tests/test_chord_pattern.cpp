@@ -247,3 +247,67 @@ TEST_CASE ("motif : édition de la matrice", "[pattern]")
     clearHits (p);
     CHECK (p.hits.empty());
 }
+
+// ================================================================================================ fichiers écrits par Scorsaire (docs/exemples-scorsaire)
+
+#include <fstream>
+#include <sstream>
+
+namespace
+{
+std::string readExample (const char* name)
+{
+    std::ifstream in (std::string (NEPTUNE_SOURCE_DIR) + "/docs/exemples-scorsaire/" + name);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+}
+
+TEST_CASE ("motif : fichier d'export de Scorsaire lu et réécrit sans perte", "[pattern][scorsaire]")
+{
+    const auto text = readExample ("motifs-scorsaire.json");
+    REQUIRE (! text.empty());
+    const auto r = fromJson (text);
+    REQUIRE (r.ok);
+    REQUIRE (r.patterns.size() == 4);
+    CHECK (r.patterns[0].id == "ballad");
+    CHECK (r.patterns[1].id == "waltz");
+    CHECK (compare (r.patterns[1].length, makeFrac (3, 4)) == 0);
+    const auto& ex = r.patterns[3];
+    REQUIRE (ex.hits.size() == 4);
+    CHECK (ex.hits[0].vel == 64);
+    CHECK (ex.hits[0].gate == 0.5);
+    CHECK (ex.hits[1].accent);
+    CHECK (ex.hits[1].vel == 100);
+    CHECK (ex.hits[3].gate == 0.3);
+    CHECK (! ex.hits[0].extraJson.empty());   // x du coup
+    CHECK (! ex.extraJson.empty());           // x du motif
+
+    // réécriture : tout revient identique
+    const auto again = fromJson (toJson (r.patterns));
+    REQUIRE (again.ok);
+    REQUIRE (again.patterns.size() == 4);
+    for (size_t i = 0; i < 4; ++i)
+    {
+        CHECK (again.patterns[i].extraJson == r.patterns[i].extraJson);
+        REQUIRE (again.patterns[i].hits.size() == r.patterns[i].hits.size());
+        for (size_t k = 0; k < r.patterns[i].hits.size(); ++k)
+        {
+            const auto &a = again.patterns[i].hits[k], &b = r.patterns[i].hits[k];
+            CHECK (a.extraJson == b.extraJson);
+            CHECK (a.vel == b.vel);
+            CHECK (a.gate == b.gate);
+            CHECK (a.accent == b.accent);
+            CHECK (compare (a.at, b.at) == 0);
+            CHECK (compare (a.dur, b.dur) == 0);
+        }
+    }
+
+    // une version supérieure à 1 est refusée
+    auto future = text;
+    const auto pos = future.find ("\"version\": 1");
+    REQUIRE (pos != std::string::npos);
+    future.replace (pos, 12, "\"version\": 2");
+    CHECK (! fromJson (future).ok);
+}

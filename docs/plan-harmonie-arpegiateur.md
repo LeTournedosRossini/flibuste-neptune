@@ -84,3 +84,9 @@ Carte peut aussi **jouer** l'accord en cours comme des notes sur une piste que l
 3. **Copier / coller / dupliquer** et sélection multiple (rectangle, Maj + clic) ; dupliquer = copie juste après, ou répétition n fois.
 4. **Constructeur d'accords** : fenêtre qui s'ouvre au double-clic, trois colonnes : fondamentales (à gauche), qualités (au milieu : majeur, mineur, 7, maj7, m7, dim, aug, sus, extensions...), basses (à droite, « /X »). Remplace la saisie du nom au clavier, qui reste possible. Le nom en lettres ou en notes françaises suit le réglage de notation.
 5. Ensuite seulement : traduction, script Reaper pour remplir depuis les marqueurs.
+
+## Reçu de Scorsaire (5 novembre 2026, paquet `pour-flibuste.zip`) et décisions de Jean
+
+- Exemples copiés dans `docs/exemples-scorsaire/` (trois pistes d'accords déroulées : reprise + volta, D.S. al Coda, anacrouse + changement de chiffrage + « pas d'accord » ; un fichier de motifs). Test : les quatre motifs sont lus, réécrits sans perte (`vel`, `gate`, `x` identiques), une version 2 est refusée (`[scorsaire]`, vert). L'import des fichiers d'accords dans Carte n'est pas encore codé.
+- **Tailles** (réponse de Scorsaire) : pas de limite dure ; un morceau long déroulé fait quelques centaines de mesures, jusqu'à environ 2 500 accords, cas extrême 2 000 mesures et 8 000 accords. Recommandation retenue pour la carte partagée v2 : **4 096 mesures et 16 384 accords**, avec un **refus clair** à l'import au-delà, jamais de troncature silencieuse.
+- **Jean (après l'essai de la matrice dans Reaper : ça marche)** : il faut **deux modes** de motif dans Arpège : (1) un vrai arpégiateur qui se base sur les **numéros des notes tenues** ; (2) le mode actuel, qui se base sur les **degrés de l'accord**.
