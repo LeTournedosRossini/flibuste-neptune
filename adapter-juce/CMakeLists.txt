@@ -697,6 +697,48 @@ target_link_libraries(Carte
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
 
+# ---- Arpège : arpégiateur (notes tenues -> notes calées sur la grille de l'hôte), plugin CLAP effet de notes ----------------------------------------------
+# Voir docs/plan-harmonie-arpegiateur.md (phase 2). Cœur : Arpeggiator.
+set(ARPEGE_CLAP_ID "com.tournedosrossini.arpege" CACHE STRING "Identifiant CLAP d'Arpège")
+
+juce_add_plugin(Arpege
+  COMPANY_NAME                "Le Tournedos Rossini"
+  PRODUCT_NAME                "Arpege"
+  PLUGIN_MANUFACTURER_CODE    Trss
+  PLUGIN_CODE                 Arpg
+  IS_SYNTH                    FALSE
+  IS_MIDI_EFFECT              TRUE
+  NEEDS_MIDI_INPUT            TRUE
+  NEEDS_MIDI_OUTPUT           TRUE
+  FORMATS                     Standalone)
+
+clap_juce_extensions_plugin(
+  TARGET        Arpege
+  CLAP_ID       "${ARPEGE_CLAP_ID}"
+  CLAP_FEATURES note-effect utility)
+
+target_sources(Arpege PRIVATE
+  src/ArpegePlugin.cpp
+  src/NovaKit.cpp
+  src/NeptuneKnob.cpp
+  src/KnobModal.cpp)
+
+target_compile_definitions(Arpege PUBLIC
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+  JUCE_VST3_CAN_REPLACE_VST2=0)
+
+target_link_libraries(Arpege
+  PRIVATE
+    neptune_core
+    juce::juce_audio_utils
+    juce::juce_audio_plugin_client
+    clap_juce_extensions
+  PUBLIC
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_lto_flags
+    juce::juce_recommended_warning_flags)
+
 # ---- Mirador : mesure et visualisation (sonie EBU R128 par libebur128, niveaux, stéréo, spectre), plugin CLAP effet transparent indépendant ------------------
 # Cœur : Mirador (mesures) + LoudnessMeter ; interface NOVA (NovaMiradorEditor), spectre de l'égaliseur (SpectrumAnalyzer).
 set(MIRADOR_CLAP_ID "com.tournedosrossini.mirador" CACHE STRING "Identifiant CLAP de Mirador")
