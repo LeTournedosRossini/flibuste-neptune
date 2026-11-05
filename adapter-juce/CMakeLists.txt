@@ -622,6 +622,41 @@ target_link_libraries(Diapason
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
 
+# ---- Essai Carte : plugin d'essai de la carte d'accords partagée (voir docs/plan-harmonie-arpegiateur.md), effet transparent ------------------------------
+set(ESSAICARTE_CLAP_ID "com.tournedosrossini.essai-carte" CACHE STRING "Identifiant CLAP d'Essai Carte")
+
+juce_add_plugin(EssaiCarte
+  COMPANY_NAME                "Le Tournedos Rossini"
+  PRODUCT_NAME                "Essai Carte"
+  PLUGIN_MANUFACTURER_CODE    Trss
+  PLUGIN_CODE                 Essa
+  IS_SYNTH                    FALSE
+  NEEDS_MIDI_INPUT            FALSE
+  FORMATS                     Standalone)
+
+clap_juce_extensions_plugin(
+  TARGET        EssaiCarte
+  CLAP_ID       "${ESSAICARTE_CLAP_ID}"
+  CLAP_FEATURES audio-effect utility stereo)
+
+target_sources(EssaiCarte PRIVATE src/EssaiCartePlugin.cpp)
+
+target_compile_definitions(EssaiCarte PUBLIC
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+  JUCE_VST3_CAN_REPLACE_VST2=0)
+
+target_link_libraries(EssaiCarte
+  PRIVATE
+    neptune_core
+    juce::juce_audio_utils
+    juce::juce_audio_plugin_client
+    clap_juce_extensions
+  PUBLIC
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_lto_flags
+    juce::juce_recommended_warning_flags)
+
 # ---- Mirador : mesure et visualisation (sonie EBU R128 par libebur128, niveaux, stéréo, spectre), plugin CLAP effet transparent indépendant ------------------
 # Cœur : Mirador (mesures) + LoudnessMeter ; interface NOVA (NovaMiradorEditor), spectre de l'égaliseur (SpectrumAnalyzer).
 set(MIRADOR_CLAP_ID "com.tournedosrossini.mirador" CACHE STRING "Identifiant CLAP de Mirador")

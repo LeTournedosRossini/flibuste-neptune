@@ -5,12 +5,15 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <thread>
 
 #include "neptune/core/SharedChordMap.h"
 
-#ifndef _WIN32
+#ifdef _WIN32
+ #include <process.h>
+#else
  #include <sys/wait.h>
  #include <unistd.h>
 #endif
@@ -269,6 +272,34 @@ TEST_CASE ("chordmap: a second live writer in another process is refused, a dead
     CHECK (WEXITSTATUS (status) == 0);
 }
 #endif
+
+namespace
+{
+// Lance le programme d'essai (un autre processus) et rend son code de sortie ; -1 si le lancement échoue.
+int runProbe (const std::string& mode, const std::string& tag, int channel)
+{
+    std::string cmd = std::string ("\"") + NEPTUNE_CHORDMAP_PROBE + "\" " + mode + " " + tag + " " + std::to_string (channel);
+ #ifdef _WIN32
+    cmd = "\"" + cmd + "\"";   // cmd.exe retire une paire de guillemets autour de toute la commande
+    return std::system (cmd.c_str());
+ #else
+    const int status = std::system (cmd.c_str());
+    return status == -1 || ! WIFEXITED (status) ? -1 : WEXITSTATUS (status);
+ #endif
+}
+} // namespace
+
+TEST_CASE ("chordmap: a separate program (another process) reads the map and is refused as a second writer", "[chordmap][process][probe]")
+{
+    const auto tag = uniqueTag();
+    Writer w (tag);
+    REQUIRE (w.open (5) == Status::Ok);
+    w.publish ({ chord (0.0, 4.0, 5, kMajor), chord (4.0, 4.0, 10, kMajor) });
+    CHECK (runProbe ("read", tag, 5) == 0);
+    CHECK (runProbe ("read", tag, 6) == 1);   // autre canal : rien
+    CHECK (runProbe ("open", tag, 5) == 2);   // écrivain vivant : refusé
+    CHECK (runProbe ("open", tag, 6) == 0);   // canal libre : accepté
+}
 
 TEST_CASE ("chordmap: cost of a lookup", "[chordmap][mesure]")
 {
