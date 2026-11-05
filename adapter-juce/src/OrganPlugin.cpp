@@ -174,9 +174,9 @@ void OrganProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
             arp_.setEnvironment (usePattern ? carteEnv_.get() : nullptr);
             arp_.setBaseNote (12 * (carteOctave_.load (std::memory_order_relaxed) + 1));
             arp_.setVoiceLeading (led);
-            arp::ApproachParams ap;
-            ap.kind = static_cast<arp::ApproachParams::Kind> (carteApproach_.load (std::memory_order_relaxed));
-            arp_.setApproach (ap);
+            arp::ApproachParams approach;
+            approach.kind = static_cast<arp::ApproachParams::Kind> (carteApproach_.load (std::memory_order_relaxed));
+            arp_.setApproach (approach);
             arp::Transport tr;
             tr.playing = usePattern && playing;
             tr.hasPosition = hasPos;
