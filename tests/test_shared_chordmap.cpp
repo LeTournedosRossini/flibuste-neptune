@@ -91,10 +91,10 @@ TEST_CASE ("chordmap: publish sorts, drops invalid entries, trims overlaps and c
     CHECK (c.lengthBeats == 4.0);                        // raccourci à 4
 
     std::vector<Container> many;
-    for (int i = 0; i < kMaxPerKind + 100; ++i) many.push_back (chord (i, 1.0, i % 12, m));
-    CHECK (w.publish (many) == kMaxPerKind);
-    CHECK_FALSE (r.lookup (kMaxPerKind + 10.0, Kind::Chord, c));
-    CHECK (r.lookup (kMaxPerKind - 1.0, Kind::Chord, c));
+    for (int i = 0; i < kCapacity[0] + 100; ++i) many.push_back (chord (i, 1.0, i % 12, m));
+    CHECK (w.publish (many) == kCapacity[0]);
+    CHECK_FALSE (r.lookup (kCapacity[0] + 10.0, Kind::Chord, c));
+    CHECK (r.lookup (kCapacity[0] - 1.0, Kind::Chord, c));
 }
 
 TEST_CASE ("chordmap: republishing replaces the map", "[chordmap]")
@@ -308,7 +308,7 @@ TEST_CASE ("chordmap: cost of a lookup", "[chordmap][mesure]")
     Reader r (tag);
     REQUIRE (w.open (1) == Status::Ok);
     std::vector<Container> v;
-    for (int i = 0; i < kMaxPerKind; ++i) v.push_back (chord (i * 2.0, 2.0, i % 12, kMajor));
+    for (int i = 0; i < kCapacity[0]; ++i) v.push_back (chord (i * 2.0, 2.0, i % 12, kMajor));
     w.publish (v);
     r.poll();
     Container c;
@@ -317,6 +317,108 @@ TEST_CASE ("chordmap: cost of a lookup", "[chordmap][mesure]")
     const auto t0 = std::chrono::steady_clock::now();
     for (int i = 0; i < N; ++i) hits += r.lookup ((i % 1000) * 1.01, Kind::Chord, c) ? 1 : 0;
     const auto ns = std::chrono::duration<double, std::nano> (std::chrono::steady_clock::now() - t0).count() / N;
-    std::printf ("\ncoût d'une consultation (512 conteneurs) : %.1f ns (%ld trouvées sur %d)\n", ns, hits, N);
+    std::printf ("\ncoût d'une consultation (16384 accords) : %.1f ns (%ld trouvées sur %d)\n", ns, hits, N);
     CHECK (hits > 0);
+}
+
+// ================================================================================================ format v2 : gammes, motifs, mesures
+
+namespace
+{
+Container measureOf (double start, double len, int num, int den)
+{
+    Container c;
+    c.startBeats = start; c.lengthBeats = len; c.kind = Kind::Measure; c.root = static_cast<std::uint8_t> (num); c.bass = static_cast<std::uint8_t> (den);
+    return c;
+}
+Container patternOf (double start, double len, int slot)
+{
+    Container c;
+    c.startBeats = start; c.lengthBeats = len; c.kind = Kind::Pattern; c.root = static_cast<std::uint8_t> (slot);
+    return c;
+}
+}
+
+TEST_CASE ("chordmap v2: mesures irrégulières (anacrouse, 3/4), numéro de mesure", "[chordmap]")
+{
+    const auto tag = uniqueTag();
+    Writer w (tag);
+    Reader r (tag);
+    REQUIRE (w.open (1) == Status::Ok);
+    // anacrouse d'un temps, deux mesures de 4/4, puis du 3/4
+    w.publish ({ measureOf (0.0, 1.0, 4, 4), measureOf (1.0, 4.0, 4, 4), measureOf (5.0, 4.0, 4, 4), measureOf (9.0, 3.0, 3, 4) });
+    r.poll();
+    REQUIRE (r.connected());
+    CHECK (r.count (Kind::Measure) == 4);
+    CHECK (r.indexAt (0.5, Kind::Measure) == 0);
+    CHECK (r.indexAt (1.0, Kind::Measure) == 1);
+    CHECK (r.indexAt (4.99, Kind::Measure) == 1);
+    CHECK (r.indexAt (9.5, Kind::Measure) == 3);
+    CHECK (r.indexAt (13.0, Kind::Measure) == -1);   // après la dernière mesure
+    Container c;
+    REQUIRE (r.lookup (10.0, Kind::Measure, c));
+    CHECK (c.root == 3);
+    CHECK (c.bass == 4);
+    CHECK (c.lengthBeats == 3.0);
+    CHECK (r.count (Kind::Chord) == 0);
+}
+
+TEST_CASE ("chordmap v2: gammes et motifs sont des voies indépendantes des accords", "[chordmap]")
+{
+    const auto tag = uniqueTag();
+    Writer w (tag);
+    Reader r (tag);
+    REQUIRE (w.open (1) == Status::Ok);
+    const std::uint16_t kMajorScale = 0xAB5;   // do majeur
+    const std::uint16_t kDorian = 0x6AD;       // ré dorien
+    // deux accords sous une seule gamme, puis une gamme qui change au milieu d'un accord
+    w.publish ({ chord (0.0, 4.0, 0, kMajor), chord (4.0, 4.0, 7, kMajor),
+                 chord (0.0, 8.0, 0, kMajorScale, Kind::Scale),
+                 chord (8.0, 2.0, 2, kDorian, Kind::Scale),
+                 patternOf (0.0, 4.0, 3), patternOf (4.0, 8.0, 7) });
+    r.poll();
+    Container c;
+    REQUIRE (r.lookup (5.0, Kind::Chord, c));
+    CHECK (c.root == 7);
+    REQUIRE (r.lookup (5.0, Kind::Scale, c));
+    CHECK (c.pitchMask == kMajorScale);          // la même gamme sous les deux accords
+    REQUIRE (r.lookup (9.0, Kind::Scale, c));
+    CHECK (c.root == 2);
+    REQUIRE (r.lookup (2.0, Kind::Pattern, c));
+    CHECK (c.root == 3);
+    REQUIRE (r.lookup (5.0, Kind::Pattern, c));
+    CHECK (c.root == 7);
+    CHECK_FALSE (r.lookup (20.0, Kind::Pattern, c));
+}
+
+TEST_CASE ("chordmap v2: valeurs invalides refusées, une ancienne zone v1 est ignorée", "[chordmap]")
+{
+    const auto tag = uniqueTag();
+    Writer w (tag);
+    Reader r (tag);
+    REQUIRE (w.open (1) == Status::Ok);
+    CHECK (w.publish ({ patternOf (0.0, 4.0, 0), patternOf (4.0, 4.0, 17), patternOf (8.0, 4.0, 16),
+                        measureOf (0.0, 4.0, 0, 4), measureOf (4.0, 4.0, 4, 0), measureOf (8.0, 4.0, 65, 4), measureOf (12.0, 4.0, 4, 4) }) == 2);
+    r.poll();
+    CHECK (r.count (Kind::Pattern) == 1);
+    CHECK (r.count (Kind::Measure) == 1);
+    w.setVersionForTest (1);   // un lecteur v2 traite une zone v1 comme « pas de carte »
+    r.poll();
+    CHECK_FALSE (r.connected());
+}
+
+TEST_CASE ("chordmap v2: plafonds de 4096 mesures et 16384 accords", "[chordmap]")
+{
+    const auto tag = uniqueTag();
+    Writer w (tag);
+    Reader r (tag);
+    REQUIRE (w.open (1) == Status::Ok);
+    std::vector<Container> v;
+    for (int i = 0; i < 4096 + 50; ++i) v.push_back (measureOf (i * 4.0, 4.0, 4, 4));
+    CHECK (w.publish (v) == 4096);
+    r.poll();
+    CHECK (r.count (Kind::Measure) == 4096);
+    CHECK (r.indexAt (4095 * 4.0 + 1.0, Kind::Measure) == 4095);
+    static_assert (kCapacity[0] >= 16384, "recommandation de Scorsaire");
+    static_assert (kCapacity[4] >= 4096, "recommandation de Scorsaire");
 }

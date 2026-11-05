@@ -177,9 +177,23 @@ int Writer::publish (std::vector<Container> containers)
         const int k = static_cast<int> (c.kind);
         if (k < 0 || k >= kKinds) continue;
         if (! std::isfinite (c.startBeats) || ! std::isfinite (c.lengthBeats) || c.lengthBeats <= 0.0 || c.startBeats < 0.0) continue;
-        if (c.root > 11) continue;
-        if (c.bass > 11 && c.bass != 255) c.bass = 255;
-        c.pitchMask = static_cast<std::uint16_t> (c.pitchMask & 0x0FFFu);
+        switch (c.kind)
+        {
+            case Kind::Pattern:
+                if (c.root < 1 || c.root > 16) continue;
+                c.bass = 255;
+                c.pitchMask = 0;
+                break;
+            case Kind::Measure:
+                if (c.root < 1 || c.root > 64 || c.bass < 1 || c.bass > 64) continue;
+                c.pitchMask = 0;
+                break;
+            default:
+                if (c.root > 11) continue;
+                if (c.bass > 11 && c.bass != 255) c.bass = 255;
+                c.pitchMask = static_cast<std::uint16_t> (c.pitchMask & 0x0FFFu);
+                break;
+        }
         c.reserved = 0;
         c.pad = 0;
         byKind[k].push_back (c);
@@ -199,7 +213,8 @@ int Writer::publish (std::vector<Container> containers)
             }
             clean.push_back (c);
         }
-        if (clean.size() > static_cast<std::size_t> (kMaxPerKind)) clean.resize (kMaxPerKind);
+        const int kind = static_cast<int> (&v - byKind);
+        if (clean.size() > static_cast<std::size_t> (kCapacity[kind])) clean.resize (static_cast<std::size_t> (kCapacity[kind]));
         v = std::move (clean);
         total += static_cast<int> (v.size());
     }
@@ -210,7 +225,7 @@ int Writer::publish (std::vector<Container> containers)
     for (int k = 0; k < kKinds; ++k)
     {
         b.count[k] = static_cast<std::uint32_t> (byKind[k].size());
-        if (! byKind[k].empty()) std::memcpy (static_cast<void*> (b.items[k]), byKind[k].data(), byKind[k].size() * sizeof (Container));
+        if (! byKind[k].empty()) std::memcpy (static_cast<void*> (b.items + offsetOf (k)), byKind[k].data(), byKind[k].size() * sizeof (Container));
     }
     b.gen.fetch_add (1, std::memory_order_release);   // pair : terminé
     h->active.store (target, std::memory_order_release);
@@ -277,7 +292,7 @@ namespace
 {
 enum class Mode { Cover, After };
 
-bool query (const detail::Header* h, double beats, Kind kind, Container& out, Mode mode) noexcept
+bool query (const detail::Header* h, double beats, Kind kind, Container& out, Mode mode, int* index = nullptr) noexcept
 {
     const int k = static_cast<int> (kind);
     if (h == nullptr || k < 0 || k >= kKinds || std::isnan (beats)) return false;
@@ -286,24 +301,29 @@ bool query (const detail::Header* h, double beats, Kind kind, Container& out, Mo
         const detail::Buffer& b = h->buf[h->active.load (std::memory_order_acquire) & 1u];
         const std::uint32_t g1 = b.gen.load (std::memory_order_acquire);
         if ((g1 & 1u) != 0) continue;
-        const std::uint32_t n = std::min<std::uint32_t> (b.count[k], kMaxPerKind);
+        const Container* items = b.items + offsetOf (k);
+        const std::uint32_t n = std::min<std::uint32_t> (b.count[k], static_cast<std::uint32_t> (kCapacity[k]));
         // premier conteneur dont le début est > beats ; Cover prend celui d'avant (s'il couvre beats), After prend celui-là
         std::uint32_t lo = 0, hi = n;
         while (lo < hi)
         {
             const std::uint32_t mid = (lo + hi) / 2;
-            if (b.items[k][mid].startBeats <= beats) lo = mid + 1; else hi = mid;
+            if (items[mid].startBeats <= beats) lo = mid + 1; else hi = mid;
         }
         bool found = false;
         Container c;
         if (mode == Mode::Cover)
         {
-            if (lo > 0) { c = b.items[k][lo - 1]; found = beats < c.startBeats + c.lengthBeats; }
+            if (lo > 0) { c = items[lo - 1]; found = beats < c.startBeats + c.lengthBeats; }
         }
-        else if (lo < n) { c = b.items[k][lo]; found = true; }
+        else if (lo < n) { c = items[lo]; found = true; }
         std::atomic_thread_fence (std::memory_order_acquire);
         if (b.gen.load (std::memory_order_relaxed) != g1) continue;   // réécrit pendant la lecture : on recommence
-        if (found) out = c;
+        if (found)
+        {
+            out = c;
+            if (index != nullptr) *index = mode == Mode::Cover ? static_cast<int> (lo) - 1 : static_cast<int> (lo);
+        }
         return found;
     }
     return false;
@@ -318,5 +338,29 @@ bool Reader::lookup (double beats, Kind kind, Container& out) const noexcept
 bool Reader::next (double beats, Kind kind, Container& out) const noexcept
 {
     return alive_.load (std::memory_order_relaxed) && query (header_, beats, kind, out, Mode::After);
+}
+
+int Reader::indexAt (double beats, Kind kind) const noexcept
+{
+    Container c;
+    int idx = -1;
+    if (! alive_.load (std::memory_order_relaxed) || ! query (header_, beats, kind, c, Mode::Cover, &idx)) return -1;
+    return idx;
+}
+
+int Reader::count (Kind kind) const noexcept
+{
+    const int k = static_cast<int> (kind);
+    if (! alive_.load (std::memory_order_relaxed) || header_ == nullptr || k < 0 || k >= kKinds) return 0;
+    for (int attempt = 0; attempt < 4; ++attempt)
+    {
+        const detail::Buffer& b = header_->buf[header_->active.load (std::memory_order_acquire) & 1u];
+        const std::uint32_t g1 = b.gen.load (std::memory_order_acquire);
+        if ((g1 & 1u) != 0) continue;
+        const int n = static_cast<int> (std::min<std::uint32_t> (b.count[k], static_cast<std::uint32_t> (kCapacity[k])));
+        std::atomic_thread_fence (std::memory_order_acquire);
+        if (b.gen.load (std::memory_order_relaxed) == g1) return n;
+    }
+    return 0;
 }
 } // namespace neptune::core::chordmap

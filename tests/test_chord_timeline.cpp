@@ -210,3 +210,22 @@ TEST_CASE ("timeline : conteneurs publiés", "[chords]")
     place (v, item (4, 4, "G"));
     CHECK (toContainers (v)[1].bass == 255);
 }
+
+TEST_CASE ("accords : qualités du dictionnaire de Scorsaire lues et réécrites", "[chords]")
+{
+    // comparées une à une au dictionnaire de Scorsaire (5 novembre 2026) : 0 différence, huit qualités ajoutées à Carte
+    const char* names[] = { "C11", "C13", "C69", "C7#11", "C7b5", "C7b13", "Calt", "C7sus" };
+    for (auto* n : names)
+    {
+        Chord c;
+        REQUIRE (parseChord (n, c));
+        Chord back;
+        REQUIRE (parseChord (formatChord (c, Naming::Letters), back));
+        CHECK (back == c);
+    }
+    Chord c;
+    REQUIRE (parseChord ("C7sus", c));
+    Chord d;
+    REQUIRE (parseChord ("C7sus4", d));
+    CHECK (c.rel == d.rel);
+}

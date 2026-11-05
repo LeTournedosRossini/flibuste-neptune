@@ -16,23 +16,32 @@
 namespace neptune::core::chordmap
 {
 constexpr std::uint32_t kMagic = 0x4D48434Eu;   // « NCHM »
-constexpr std::uint32_t kVersion = 1;
-constexpr int kKinds = 2;
-constexpr int kMaxPerKind = 512;
+constexpr std::uint32_t kVersion = 2;           // v2 : types gamme, motif et mesure ; plafonds relevés (v1 : accords et tonalités, 512 par type)
+constexpr int kKinds = 5;
+// Plafond par type : un morceau déroulé avec reprises dépasse vite 512 (Scorsaire : jusqu'à environ 2 500 accords, cas extrême 8 000 ; recommandation 4096 mesures et 16384 accords).
+constexpr int kCapacity[kKinds] = { 16384, 1024, 4096, 4096, 4096 };
+constexpr int offsetOf (int kind)
+{
+    int o = 0;
+    for (int i = 0; i < kind; ++i) o += kCapacity[i];
+    return o;
+}
+constexpr int kTotalItems = offsetOf (kKinds);
 constexpr int kChannels = 8;                    // numéros de liaison 1 à 8
 constexpr std::uint64_t kStaleMs = 5000;        // sans signe de vie depuis ce délai : carte morte
 
-enum class Kind : std::uint8_t { Chord = 0, Key = 1 };
+// Accord, tonalité (jusqu'à la suivante), gamme (plage indépendante des accords), motif d'Arpège (numéro d'emplacement), mesure (barres réelles du morceau).
+enum class Kind : std::uint8_t { Chord = 0, Key = 1, Scale = 2, Pattern = 3, Measure = 4 };
 
 struct Container
 {
     double startBeats = 0.0;
     double lengthBeats = 0.0;
     Kind kind = Kind::Chord;
-    std::uint8_t root = 0;            // 0..11 (do = 0)
-    std::uint8_t bass = 255;          // 0..11, 255 : pas de basse distincte
+    std::uint8_t root = 0;            // 0..11 (do = 0) ; Pattern : emplacement 1..16 ; Measure : numérateur du chiffrage 1..64
+    std::uint8_t bass = 255;          // 0..11, 255 : pas de basse distincte ; Measure : dénominateur du chiffrage 1..64
     std::uint8_t reserved = 0;
-    std::uint16_t pitchMask = 0;      // classes de hauteur, bit n = note n (absolue, do = 0) : notes de l'accord, ou gamme de la tonalité
+    std::uint16_t pitchMask = 0;      // classes de hauteur, bit n = note n (absolue, do = 0) : notes de l'accord, ou gamme (tonalité, gamme) ; 0 pour Pattern et Measure
     std::uint16_t pad = 0;
 };
 static_assert (sizeof (Container) == 24, "format partagé : taille figée");
@@ -45,7 +54,7 @@ struct Buffer
 {
     std::atomic<std::uint32_t> gen;   // impair pendant l'écriture
     std::uint32_t count[kKinds];
-    Container items[kKinds][kMaxPerKind];
+    Container items[kTotalItems];   // les types à la suite, à partir de offsetOf (type)
 };
 struct Header
 {
@@ -109,6 +118,8 @@ public:
     // Thread audio : sans verrou, sans allocation, sans appel système. Faux : pas de carte, ou rien à cette position.
     bool lookup (double beats, Kind kind, Container& out) const noexcept;   // conteneur qui couvre `beats` (début inclus, fin exclue)
     bool next (double beats, Kind kind, Container& out) const noexcept;     // premier conteneur qui commence après `beats`
+    int indexAt (double beats, Kind kind) const noexcept;                   // rang (depuis 0) du conteneur qui couvre `beats`, ou -1 (numéro de mesure du morceau)
+    int count (Kind kind) const noexcept;                                   // nombre de conteneurs publiés de ce type (0 sans carte)
 
 private:
     void disconnect();

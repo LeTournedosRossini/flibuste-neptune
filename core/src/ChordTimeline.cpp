@@ -34,6 +34,10 @@ const Quality kQualities[] = {
     { "m6", maskOf ({ 0, 3, 7, 9 }) },   { "9", maskOf ({ 0, 4, 7, 10, 2 }) }, { "maj9", maskOf ({ 0, 4, 7, 11, 2 }) },
     { "m9", maskOf ({ 0, 3, 7, 10, 2 }) }, { "add9", maskOf ({ 0, 4, 7, 2 }) }, { "madd9", maskOf ({ 0, 3, 7, 2 }) },
     { "5", maskOf ({ 0, 7 }) },          { "7b9", maskOf ({ 0, 4, 7, 10, 1 }) }, { "7#9", maskOf ({ 0, 4, 7, 10, 3 }) },
+    // comparées au dictionnaire de Scorsaire (5 novembre 2026) : ces huit-là manquaient à Carte
+    { "11", maskOf ({ 0, 4, 7, 10, 2, 5 }) }, { "13", maskOf ({ 0, 4, 7, 10, 2, 5, 9 }) }, { "69", maskOf ({ 0, 4, 7, 9, 2 }) },
+    { "7#11", maskOf ({ 0, 4, 7, 10, 2, 6 }) }, { "7b5", maskOf ({ 0, 4, 6, 10 }) }, { "7b13", maskOf ({ 0, 4, 7, 10, 8 }) },
+    { "alt", maskOf ({ 0, 4, 6, 8, 10, 1, 3 }) },
 };
 
 struct Alias
@@ -50,6 +54,7 @@ const Alias kAliases[] = {
     { "\xC3\xB8", "m7b5" }, { "\xC3\xB8" "7", "m7b5" }, { "min7b5", "m7b5" }, { "m7-5", "m7b5" },
     { "+", "aug" }, { "+7", "7#5" }, { "aug7", "7#5" }, { "sus", "sus4" }, { "min6", "m6" }, { "min9", "m9" }, { "maj9", "maj9" }, { "M9", "maj9" },
     { "2", "add9" }, { "add2", "add9" }, { "(add9)", "add9" }, { "mi7", "m7" },
+    { "7sus", "7sus4" },
 };
 
 bool isCollisionKey (const std::string& lower)
