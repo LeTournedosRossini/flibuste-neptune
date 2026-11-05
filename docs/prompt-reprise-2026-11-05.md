@@ -1,0 +1,28 @@
+# Prompt de reprise — Flibuste Suite / Neptune (2026-11-05)
+
+Tu reprends le travail sur la Flibuste Suite (Neptune : sampler / orgue / synthé / console de scènes en CLAP et Standalone, plus les plugins NOVA : Digue, Diapason, Mirador, AnalogSynth, FM6Op, Orgamon, Moussaillon, et les nouveaux **Carte** et **Essai Carte**). Jean est musicien et enseignant, il dicte : réponds en français, en langage simple, en disant ce qui est fait et ce qui est vérifié.
+
+**Commence par lire** : le fichier précédent `docs/prompt-reprise-2026-11-04.md` (règles qui ne bougent pas, où est tout, scripts Windows, vérification à l'écran) : tout y est encore valable. Ce fichier-ci ne raconte que ce qui a changé le 5 novembre. Les mémoires de `~/.claude/projects/-home-jean-Bureau-FlibusteSuite/memory/` donnent le reste.
+
+## Rappels utiles (les plus importants)
+- Pousser sur GitHub **seulement si Jean le demande**, commit avec `[skip ci]` ; demander avant chaque push. Dernier commit poussé : `1727205`. **Local, non poussé : `992717c` (Carte).**
+- Reaper fermé avant toute installation ; installer après chaque bonne compilation (Linux puis Windows), ancien fichier sauvegardé, SHA256 vérifié.
+- Compilations par `~/.local/bin/claude-build linux ...` ; **pour Windows : `claude-build windows ssh neptune-win 'C:\Users\lcj\neptune-build\build_xxx.cmd'`** (sans `ssh`, la commande s'exécute en local et échoue).
+- Jean est le chef d'orchestre entre toi et la conversation « banc » : tu écris dans `~/Bureau/FlibusteSuite/echanges/messages/`, Jean relaie ; tu tiens `echanges/etat-versions.md`.
+
+## Fait le 5 novembre (tout commité ; installé Linux ET Windows ; Jean a essayé dans Reaper : tout fonctionne)
+1. **Notes à l'échantillon dans Neptune** (`220ccca`, poussé) : les notes CLAP et MIDI démarrent à leur instant dans le bloc (bloc découpé aux événements). Mesuré par le banc (Linux et Windows) : 4801 aux blocs de 1 / 64 / 256 / 1024. Les changements de paramètres (automation) restent au début du bloc : **décision de Jean : inutile, seul le lissage compte** ; mesuré : pas de clics sur la coupure d'AnalogSynth, écouté par Jean : ok (`tests/test_automation_smoothing.cpp`).
+2. **Carte d'accords partagée** (phase 0 du plan `docs/plan-harmonie-arpegiateur.md`, poussé) : `core/include/neptune/core/SharedChordMap.h` et `core/src/SharedChordMap.cpp` ; mémoire partagée du système (POSIX `shm_open` / Windows `CreateFileMapping`), double tampon, signe de vie 5 s, version du format, canaux 1 à 8, 512 conteneurs par type, lecture sans verrou (35 à 70 ns). Tests `[chordmap]` : Linux 12 cas, Windows 10 cas, y compris un lecteur dans un autre processus (`neptune_chordmap_probe`). **Essai Carte** (`adapter-juce/src/EssaiCartePlugin.*`) : plugin d'essai, rôle Écrivain / Lecteur. Dans Reaper : deux pistes se parlent, y compris en traitement parallèle ; l'isolation de plugin n'existe pas pour les CLAP dans la version de Jean (non essayée).
+3. **Carte** (phase 1, commit local `992717c`, non poussé) : `core/include/neptune/core/ChordTimeline.h` / `core/src/ChordTimeline.cpp` (lecture et écriture des noms d'accords en lettres ou notes françaises, édition sans chevauchement, texte d'enregistrement, conversion vers la carte partagée ; tests `tests/test_chord_timeline.cpp`, 11 cas) ; plugin `adapter-juce/src/CartePlugin.h/.cpp` (cible CMake `Carte`, `Carte_CLAP` ; timeline avec règle, tête de lecture, double-clic pour ajouter / changer, glisser pour déplacer, bord droit pour la durée, Suppr, annuler / rétablir par `UndoManager`, zoom, boutons canal / grille / notation / suivre ; état = version + canal + notation + texte des accords ; canal publié par `Writer`, signe de vie par une minuterie de 500 ms). Vérifié : captures du Standalone sous Xvfb, lecteur dans un autre processus, chargement CLAP ; Jean a testé dans Reaper.
+4. `echanges/messages/2026-11-05_1225_de-neptune_carte-accords-partagee-prototype.md` écrit pour le banc (prototype de carte partagée) ; **Jean le relaie en rentrant**. Le message ne parle pas encore du plugin Carte : à compléter si utile.
+
+## Limites connues de Carte (à traiter ensuite)
+- Texte en français seulement (pas de `i18n::Translator`) ; pas de tonalité (conteneur `Key` prévu dans le format mais pas dans le plugin) ; mesure supposée constante pour la règle ; thème = réglages globaux, pas de menu dans Carte ; pas de copier / coller ni de sélection multiple ; accords posés seulement par saisie de nom ; pas de script Reaper pour remplir la carte depuis les marqueurs.
+- Course non traitée : deux écrivains qui démarrent exactement au même instant sur le même canal.
+- `tests/test_overdrive.cpp` ne compile pas sous MSVC (ancien, exclu des essais Windows) ; la CI (`.github/workflows/build.yml`) ne connaît pas les cibles `Carte_CLAP` ni `EssaiCarte_CLAP`.
+
+## Prochaines étapes proposées (Jean choisit)
+1. **Phase 2 du plan : Arpège** (arpégiateur / séquenceur de notes) : notes tenues en entrée, motifs, grille, durée de note, sortie de notes avec instant exact dans le bloc, jamais de note bloquée ; test à l'échantillon près avec l'hôte du banc. Puis phase 3 : accord et gamme lus dans la carte partagée (`Reader`).
+2. Compléter Carte : tonalité / gamme, traduction, sélection multiple, copier-coller, saisie des accords par notes.
+3. Pousser `992717c` si Jean le dit ; compléter le message du banc avec Carte.
+4. Reprises plus anciennes : étalonnage du constructeur d'instrument avec de vrais samples de piano (Jean doit donner un dossier et son système de dynamiques) ; vérifier Moussaillon pour le même défaut d'instants de note ; corriger `test_overdrive.cpp` pour MSVC ; préchargement des échantillons au changement de scène ; menu Ouvrir / Enregistrer du Standalone.
