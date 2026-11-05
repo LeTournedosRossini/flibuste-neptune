@@ -98,6 +98,17 @@ private:
     int lastVoiceCount_ = -1;
     int latencyTicks_ = 0;
     int diagH_ = 0;   // hauteur des lignes de diagnostic des pistes (chargement, activité) : les vues se placent dessous
+   #ifdef NEPTUNE_STANDALONE_APP
+    // Application autonome seulement : le projet est un fichier (.neptune) qu'on ouvre et qu'on enregistre (Ctrl+O, Ctrl+S, Ctrl+Maj+S).
+    juce::TextButton fileButton_;
+    std::unique_ptr<juce::FileChooser> fileChooser_;
+    void showFileMenu();
+    void openProject();
+    void openProjectFile (const juce::File&);
+    void saveProject (bool askName);
+    void saveProjectTo (const juce::File&);
+    void updateWindowTitle();
+   #endif
     juce::TextButton viewButton_; // bascule entre la vue Mapping et la vue Sonde (texte de diagnostic de l'hôte)
     juce::TextButton panicButton_;
     bool showProbe_ = false;

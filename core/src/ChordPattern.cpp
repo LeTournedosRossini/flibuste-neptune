@@ -161,6 +161,8 @@ bool readPattern (const json& j, Pattern& out)
             Alt a;
             if (! aj.is_object()) continue;
             a.id = aj.value ("id", std::string());
+            if (aj.contains ("name") && aj["name"].is_string()) a.name = aj["name"].get<std::string>();
+            a.extraJson = extrasOf (aj, { "id", "name", "chance", "from", "hits" });
             Frac from;
             a.from = (aj.contains ("from") && readFrac (aj["from"], from) && compare (from, barLen) < 0) ? from : makeFrac (1, 2);
             const double ch = aj.value ("chance", 0.0);
@@ -174,7 +176,7 @@ bool readPattern (const json& j, Pattern& out)
             if (! a.hits.empty() && p.alts.size() < 7) p.alts.push_back (std::move (a));
         }
     }
-    p.extraJson = extrasOf (j, { "id", "name", "length", "bars", "hits" });
+    p.extraJson = extrasOf (j, { "id", "name", "length", "bars", "hits", "alts" });
     if (! p.extraJson.empty())
     {
         const auto ex = json::parse (p.extraJson, nullptr, false);
@@ -183,6 +185,21 @@ bool readPattern (const json& j, Pattern& out)
     }
     out = p;
     return true;
+}
+
+json hitJson (const Hit& h)
+{
+    json hj = h.extraJson.empty() ? json::object() : json::parse (h.extraJson, nullptr, false);
+    if (! hj.is_object()) hj = json::object();
+    hj["at"] = fracJson (h.at);
+    hj["dur"] = fracJson (h.dur);
+    json parts = json::array();
+    for (const auto& pt : h.parts) parts.push_back (pt.text);
+    hj["parts"] = parts;
+    if (h.accent) hj["accent"] = true;
+    if (h.vel > 0) hj["vel"] = h.vel;
+    if (h.gate > 0.0) hj["gate"] = h.gate;
+    return hj;
 }
 
 json patternJson (const Pattern& p)
@@ -200,21 +217,26 @@ json patternJson (const Pattern& p)
     j["length"] = fracJson (p.length);
     if (p.bars > 1) j["bars"] = p.bars;
     json hits = json::array();
-    for (const auto& h : p.hits)
-    {
-        json hj = h.extraJson.empty() ? json::object() : json::parse (h.extraJson, nullptr, false);
-        if (! hj.is_object()) hj = json::object();
-        hj["at"] = fracJson (h.at);
-        hj["dur"] = fracJson (h.dur);
-        json parts = json::array();
-        for (const auto& pt : h.parts) parts.push_back (pt.text);
-        hj["parts"] = parts;
-        if (h.accent) hj["accent"] = true;
-        if (h.vel > 0) hj["vel"] = h.vel;
-        if (h.gate > 0.0) hj["gate"] = h.gate;
-        hits.push_back (hj);
-    }
+    for (const auto& h : p.hits) hits.push_back (hitJson (h));
     j["hits"] = hits;
+    if (! p.alts.empty())
+    {
+        json alts = json::array();
+        for (const auto& a : p.alts)
+        {
+            json aj = a.extraJson.empty() ? json::object() : json::parse (a.extraJson, nullptr, false);
+            if (! aj.is_object()) aj = json::object();
+            aj["id"] = a.id;
+            if (! a.name.empty()) aj["name"] = a.name;
+            aj["chance"] = a.chance;
+            aj["from"] = fracJson (a.from);
+            json ah = json::array();
+            for (const auto& h : a.hits) ah.push_back (hitJson (h));
+            aj["hits"] = ah;
+            alts.push_back (aj);
+        }
+        j["alts"] = alts;
+    }
     return j;
 }
 } // namespace
@@ -295,60 +317,78 @@ std::vector<Hit> hitsForMeasure (const Pattern& p, const Frac& measureLength, in
 
 namespace
 {
-Hit* hitAt (Pattern& p, const Frac& at)
+std::vector<Hit>* hitList (Pattern& p, int alt)
 {
-    for (auto& h : p.hits) if (compare (h.at, at) == 0) return &h;
+    if (alt < 0) return &p.hits;
+    return alt < (int) p.alts.size() ? &p.alts[(size_t) alt].hits : nullptr;
+}
+const std::vector<Hit>* hitListConst (const Pattern& p, int alt)
+{
+    if (alt < 0) return &p.hits;
+    return alt < (int) p.alts.size() ? &p.alts[(size_t) alt].hits : nullptr;
+}
+Hit* hitAt (Pattern& p, const Frac& at, int alt = -1)
+{
+    auto* l = hitList (p, alt);
+    if (l == nullptr) return nullptr;
+    for (auto& h : *l) if (compare (h.at, at) == 0) return &h;
     return nullptr;
 }
-const Hit* hitAtConst (const Pattern& p, const Frac& at)
+const Hit* hitAtConst (const Pattern& p, const Frac& at, int alt = -1)
 {
-    for (const auto& h : p.hits) if (compare (h.at, at) == 0) return &h;
+    const auto* l = hitListConst (p, alt);
+    if (l == nullptr) return nullptr;
+    for (const auto& h : *l) if (compare (h.at, at) == 0) return &h;
     return nullptr;
 }
-}
+} // namespace
 
-bool hasCell (const Pattern& p, const Frac& at, const std::string& partText)
+bool hasCell (const Pattern& p, const Frac& at, const std::string& partText, int alt)
 {
-    if (const auto* h = hitAtConst (p, at))
+    if (const auto* h = hitAtConst (p, at, alt))
         for (const auto& pt : h->parts) if (pt.text == partText) return true;
     return false;
 }
 
-bool toggleCell (Pattern& p, const Frac& at, const Frac& dur, const std::string& partText)
+bool toggleCell (Pattern& p, const Frac& at, const Frac& dur, const std::string& partText, int alt)
 {
     Part part;
-    if (! parsePart (partText, part) || compare (at, p.length) >= 0) return false;
-    if (auto* h = hitAt (p, at))
+    auto* list = hitList (p, alt);
+    if (list == nullptr || ! parsePart (partText, part)) return false;
+    const Frac limit = alt < 0 ? p.length : p.barLength();
+    if (compare (at, limit) >= 0) return false;
+    if (alt >= 0 && compare (at, p.alts[(size_t) alt].from) < 0) return false;   // une variante ne remplace que la fin de la mesure
+    if (auto* h = hitAt (p, at, alt))
     {
         for (size_t i = 0; i < h->parts.size(); ++i)
             if (h->parts[i].text == part.text)
             {
                 h->parts.erase (h->parts.begin() + (long) i);
-                if (h->parts.empty()) p.hits.erase (p.hits.begin() + (h - p.hits.data()));
+                if (h->parts.empty()) list->erase (list->begin() + (h - list->data()));
                 return false;
             }
         h->parts.push_back (part);
         return true;
     }
-    if (p.hits.size() >= (size_t) kMaxHits) return false;
+    if (list->size() >= (size_t) kMaxHits) return false;
     Hit n;
     n.at = at;
     n.dur = dur;
     n.parts.push_back (part);
-    p.hits.push_back (n);
-    std::stable_sort (p.hits.begin(), p.hits.end(), [] (const Hit& a, const Hit& b) { return compare (a.at, b.at) < 0; });
+    list->push_back (n);
+    std::stable_sort (list->begin(), list->end(), [] (const Hit& a, const Hit& b) { return compare (a.at, b.at) < 0; });
     return true;
 }
 
-bool hasAccent (const Pattern& p, const Frac& at)
+bool hasAccent (const Pattern& p, const Frac& at, int alt)
 {
-    const auto* h = hitAtConst (p, at);
+    const auto* h = hitAtConst (p, at, alt);
     return h != nullptr && h->accent;
 }
 
-bool toggleAccent (Pattern& p, const Frac& at)
+bool toggleAccent (Pattern& p, const Frac& at, int alt)
 {
-    if (auto* h = hitAt (p, at))
+    if (auto* h = hitAt (p, at, alt))
     {
         h->accent = ! h->accent;
         return h->accent;
@@ -356,22 +396,55 @@ bool toggleAccent (Pattern& p, const Frac& at)
     return false;
 }
 
-bool setHitVel (Pattern& p, const Frac& at, int vel)
+bool setHitVel (Pattern& p, const Frac& at, int vel, int alt)
 {
-    auto* h = hitAt (p, at);
+    auto* h = hitAt (p, at, alt);
     if (h == nullptr) return false;
     h->vel = vel <= 0 ? 0 : std::clamp (vel, 1, 127);
     return true;
 }
-bool setHitGate (Pattern& p, const Frac& at, double gate)
+bool setHitGate (Pattern& p, const Frac& at, double gate, int alt)
 {
-    auto* h = hitAt (p, at);
+    auto* h = hitAt (p, at, alt);
     if (h == nullptr) return false;
     h->gate = gate <= 0.0 ? 0.0 : std::clamp (gate, 0.05, 1.0);
     return true;
 }
-int hitVel (const Pattern& p, const Frac& at) { const auto* h = hitAtConst (p, at); return h != nullptr ? h->vel : 0; }
-double hitGate (const Pattern& p, const Frac& at) { const auto* h = hitAtConst (p, at); return h != nullptr ? h->gate : 0.0; }
+int hitVel (const Pattern& p, const Frac& at, int alt) { const auto* h = hitAtConst (p, at, alt); return h != nullptr ? h->vel : 0; }
+double hitGate (const Pattern& p, const Frac& at, int alt) { const auto* h = hitAtConst (p, at, alt); return h != nullptr ? h->gate : 0.0; }
+
+int addAlt (Pattern& p, const Frac& from, double chance)
+{
+    if (p.alts.size() >= 7 || compare (from, p.barLength()) >= 0 || from.n < 0) return -1;
+    Alt a;
+    a.id = "variante" + std::to_string (p.alts.size() + 1);
+    a.from = from;
+    a.chance = std::clamp (chance, 0.0, 1.0);
+    p.alts.push_back (std::move (a));
+    return (int) p.alts.size() - 1;
+}
+bool removeAlt (Pattern& p, int alt)
+{
+    if (alt < 0 || alt >= (int) p.alts.size()) return false;
+    p.alts.erase (p.alts.begin() + alt);
+    return true;
+}
+bool setAltChance (Pattern& p, int alt, double chance)
+{
+    if (alt < 0 || alt >= (int) p.alts.size()) return false;
+    p.alts[(size_t) alt].chance = std::clamp (chance, 0.0, 1.0);
+    return true;
+}
+bool setAltFrom (Pattern& p, int alt, const Frac& from)
+{
+    if (alt < 0 || alt >= (int) p.alts.size() || compare (from, p.barLength()) >= 0) return false;
+    auto& a = p.alts[(size_t) alt];
+    a.from = from;
+    std::vector<Hit> kept;
+    for (const auto& h : a.hits) if (compare (h.at, from) >= 0) kept.push_back (h);
+    a.hits = std::move (kept);
+    return true;
+}
 
 void setLengthAndBars (Pattern& p, const Frac& length, int bars)
 {
@@ -386,6 +459,21 @@ void setLengthAndBars (Pattern& p, const Frac& length, int bars)
         kept.push_back (h);
     }
     p.hits = std::move (kept);
+    // la mesure du motif a peut-être raccourci : les variantes qui n'y tiennent plus sont retirées, les autres coupées
+    const Frac bar = p.barLength();
+    for (auto it = p.alts.begin(); it != p.alts.end();)
+    {
+        if (compare (it->from, bar) >= 0) { it = p.alts.erase (it); continue; }
+        std::vector<Hit> keep;
+        for (auto h : it->hits)
+        {
+            if (compare (h.at, bar) >= 0) continue;
+            if (compare (h.at + h.dur, bar) > 0) h.dur = bar - h.at;
+            keep.push_back (h);
+        }
+        it->hits = std::move (keep);
+        ++it;
+    }
 }
 
 void clearHits (Pattern& p) { p.hits.clear(); }

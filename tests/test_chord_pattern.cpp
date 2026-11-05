@@ -411,3 +411,66 @@ TEST_CASE ("exemples d'essai : motifs-essai.json et les motifs d'essai d'Arpège
     CHECK (again.patterns[1].alts.size() == 1);
     CHECK (again.patterns[0].hits[7].vel == 120);
 }
+
+TEST_CASE ("motif : dessiner les variantes", "[pattern]")
+{
+    Pattern p;
+    p.length = makeFrac (1, 1);
+    const auto d = makeFrac (1, 8);
+    toggleCell (p, makeFrac (0, 1), makeFrac (1, 4), "1");
+    toggleCell (p, makeFrac (1, 2), d, "3");
+    CHECK (addAlt (p, makeFrac (1, 2), 0.5) == 0);
+    CHECK (addAlt (p, makeFrac (1, 1), 0.5) == -1);          // hors de la mesure
+    CHECK (setAltChance (p, 0, 0.25));
+    CHECK (p.alts[0].chance == 0.25);
+    // les coups de la variante se posent à partir de son début
+    CHECK (toggleCell (p, makeFrac (5, 8), d, "5", 0));
+    CHECK (toggleCell (p, makeFrac (3, 4), d, "5+1", 0));
+    CHECK (! toggleCell (p, makeFrac (1, 4), d, "5", 0));      // avant le début de la variante : refusé
+    CHECK (hasCell (p, makeFrac (5, 8), "5", 0));
+    CHECK (! hasCell (p, makeFrac (5, 8), "5"));               // et le motif de base n'a pas changé
+    CHECK (p.hits.size() == 2);
+    CHECK (toggleAccent (p, makeFrac (5, 8), 0));
+    CHECK (setHitVel (p, makeFrac (3, 4), 99, 0));
+    CHECK (hitVel (p, makeFrac (3, 4), 0) == 99);
+    CHECK (setHitGate (p, makeFrac (3, 4), 0.4, 0));
+    // aller-retour par le fichier : les variantes sortent de la structure, rien ne se perd
+    const auto again = fromJson (toJson ({ p }));
+    REQUIRE (again.ok);
+    REQUIRE (again.patterns[0].alts.size() == 1);
+    const auto& a = again.patterns[0].alts[0];
+    CHECK (a.chance == 0.25);
+    CHECK (compare (a.from, makeFrac (1, 2)) == 0);
+    REQUIRE (a.hits.size() == 2);
+    CHECK (a.hits[0].accent);
+    CHECK (a.hits[1].vel == 99);
+    CHECK (a.hits[1].gate == 0.4);
+    // changer le début retire les coups d'avant
+    CHECK (setAltFrom (p, 0, makeFrac (3, 4)));
+    CHECK (p.alts[0].hits.size() == 1);
+    // raccourcir la mesure retire les variantes qui n'y tiennent plus
+    setLengthAndBars (p, makeFrac (1, 2), 1);
+    CHECK (p.alts.empty());
+    // retirer
+    Pattern q;
+    q.length = makeFrac (1, 1);
+    addAlt (q, makeFrac (1, 4), 1.0);
+    CHECK (removeAlt (q, 0));
+    CHECK (! removeAlt (q, 0));
+}
+
+TEST_CASE ("motif : les champs inconnus d'une variante sont gardés", "[pattern]")
+{
+    const auto r = fromJson (R"({"id":"v","length":[1,1],"hits":[{"at":[0,1],"dur":[1,4],"parts":["1"]}],
+        "alts":[{"id":"f","name":"Remplissage","chance":0.4,"from":[1,2],"beats":[2,2],"x":{"k":1},
+                 "hits":[{"at":[5,8],"dur":[1,8],"parts":["5"],"stroke":"up"}]}]})");
+    REQUIRE (r.ok);
+    REQUIRE (r.patterns[0].alts.size() == 1);
+    CHECK (r.patterns[0].alts[0].name == "Remplissage");
+    const auto out = toJson (r.patterns);
+    CHECK (out.find ("\"beats\"") != std::string::npos);
+    CHECK (out.find ("\"stroke\"") != std::string::npos);
+    CHECK (out.find ("\"Remplissage\"") != std::string::npos);
+    const auto again = fromJson (out);
+    CHECK (again.patterns[0].alts[0].extraJson == r.patterns[0].alts[0].extraJson);
+}

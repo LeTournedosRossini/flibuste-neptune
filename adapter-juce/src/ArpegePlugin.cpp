@@ -8,7 +8,7 @@ namespace arp = neptune::core::arp;
 
 namespace
 {
-constexpr int kDesignW = 1100, kDesignH = 640;
+constexpr int kDesignW = 1100, kDesignH = 690;
 
 std::filesystem::path configDirectory()
 {
@@ -464,6 +464,8 @@ public:
 
     int grid = 2;
     std::function<void()> onChange;
+    int alt = -1;         // -1 : le motif ; sinon l'indice de la variante qu'on dessine
+    int altIndex (const pattern::Pattern& p) const { return (alt >= 0 && alt < (int) p.alts.size()) ? alt : -1; }
     bool notes = false;   // mode du motif affiché (lignes : rangs des notes tenues, ou degrés de l'accord)
     const char* rowPart (int r) const { return notes ? kRowPartsNotes[r] : kRowPartsChord[r]; }
 
@@ -472,7 +474,8 @@ public:
     {
         const auto p = proc_.slotPattern (slotIndex());
         const auto g = kGridFracs[grid];
-        return std::clamp ((int) ((p.length.n * g.d + p.length.d * g.n - 1) / (p.length.d * g.n)), 1, 96);
+        const auto len = (alt >= 0 && alt < (int) p.alts.size()) ? p.barLength() : p.length;   // une variante se dessine sur une mesure du motif
+        return std::clamp ((int) ((len.n * g.d + len.d * g.n - 1) / (len.d * g.n)), 1, 96);
     }
 
     void paint (juce::Graphics& g) override
@@ -512,8 +515,28 @@ public:
             const float x = geo.x0 + c * geo.cellW;
             g.drawLine (x, geo.y0, x, geo.y0 + geo.rowH * kNumRows, skin_.px (1.0f));
         }
+        const int a = altIndex (pat);
+        if (a >= 0)
+        {
+            // le motif de base, en filigrane, pour se repérer ; la variante ne remplace que la fin de la mesure (à partir de son début)
+            for (const auto& h : pat.hits)
+            {
+                const double colF = h.at.value() / gr.value();
+                if (std::abs (colF - std::round (colF)) > 1e-6 || (int) std::round (colF) >= cols) continue;
+                for (const auto& part : h.parts)
+                    for (int r = 0; r < kNumRows; ++r)
+                        if (juce::String (part.text) == rowPart (r))
+                            { g.setColour (skin_.colour (Token::TextDim2, 0.28f)); g.fillRoundedRectangle (juce::Rectangle<float> (geo.x0 + (float) std::round (colF) * geo.cellW, geo.y0 + r * geo.rowH, std::max (1.0f, (float) (h.dur.value() / gr.value())) * geo.cellW, geo.rowH).reduced (skin_.px (2.0f)), skin_.px (4.0f)); }
+            }
+            const float fx = geo.x0 + (float) (pat.alts[(size_t) a].from.value() / gr.value()) * geo.cellW;
+            g.setColour (skin_.colour (Token::BgApp, 0.55f));
+            g.fillRect (geo.x0, geo.y0, fx - geo.x0, geo.rowH * kNumRows);        // avant le début : rien ne se pose
+            g.setColour (skin_.colour (Token::Pink));
+            g.drawLine (fx, geo.y0, fx, geo.y0 + geo.rowH * kNumRows, skin_.px (2.0f));
+        }
+        const auto& drawn = a >= 0 ? pat.alts[(size_t) a].hits : pat.hits;
         // cases allumées (la longueur du coup est dessinée)
-        for (const auto& h : pat.hits)
+        for (const auto& h : drawn)
         {
             const double colF = (h.at.value()) / gr.value();
             if (std::abs (colF - std::round (colF)) > 1e-6) continue;   // coup hors de cette grille : visible dans une autre
@@ -607,12 +630,13 @@ private:
         if (c < 0 || c >= cols) return;
         auto pat = proc_.slotPattern (idx);
         notes = pat.notesMode;
+        const int a = altIndex (pat);
         const auto gr = kGridFracs[grid];
         const auto at = makeFrac (gr.n * c, gr.d);
         if (band_ == Band::Accent)
         {
             if (! first) return;
-            pattern::toggleAccent (pat, at);
+            pattern::toggleAccent (pat, at, a);
             proc_.setSlotPattern (idx, pat);
             dirty_ = true;
         }
@@ -622,8 +646,8 @@ private:
             const bool vel = band_ == Band::Vel;
             const float y0 = vel ? geo.velY : geo.gateY, h = vel ? geo.velH : geo.gateH;
             const double t = std::clamp (1.0 - (double) (pos.y - y0) / (double) h, 0.0, 1.0);
-            const bool ok = vel ? pattern::setHitVel (pat, at, reset_ ? 0 : std::max (1, (int) std::lround (t * 127.0)))
-                                : pattern::setHitGate (pat, at, reset_ ? 0.0 : 0.05 + 0.95 * t);
+            const bool ok = vel ? pattern::setHitVel (pat, at, reset_ ? 0 : std::max (1, (int) std::lround (t * 127.0)), a)
+                                : pattern::setHitGate (pat, at, reset_ ? 0.0 : 0.05 + 0.95 * t, a);
             if (ok) { proc_.setSlotPattern (idx, pat); dirty_ = true; }
         }
         else
@@ -634,11 +658,11 @@ private:
             last_ = { c, r };
             if (first)
             {
-                paintOn_ = ! pattern::hasCell (pat, at, rowPart (r));
+                paintOn_ = ! pattern::hasCell (pat, at, rowPart (r), a);
                 painting_ = true;
             }
-            if (pattern::hasCell (pat, at, rowPart (r)) == paintOn_) return;
-            pattern::toggleCell (pat, at, gr, rowPart (r));
+            if (pattern::hasCell (pat, at, rowPart (r), a) == paintOn_) return;
+            if (! pattern::toggleCell (pat, at, gr, rowPart (r), a) && paintOn_) return;   // refusé (avant le début de la variante) : rien n'a changé
             proc_.setSlotPattern (idx, pat);
             dirty_ = true;
         }
@@ -683,7 +707,7 @@ ArpegeEditor::ArpegeEditor (ArpegeProcessor& p)
     addAndMakeVisible (*matrix_);
 
     // actions : 0 grille, 1 durée, 2 mesures, 3 fourni, 4 charger, 5 importer, 6 exporter, 7 effacer, 8 mode du motif
-    for (int i = 0; i < 11; ++i)
+    for (int i = 0; i < 16; ++i)
     {
         actions_.push_back (std::make_unique<nova::Pill> (skin_, nova::Pill::Look::Small));
         addAndMakeVisible (*actions_.back());
@@ -744,6 +768,65 @@ ArpegeEditor::ArpegeEditor (ArpegeProcessor& p)
         });
     };
     actions_[8]->onClick = [withPattern] { withPattern ([] (pattern::Pattern& pt) { pattern::setNotesMode (pt, ! pt.notesMode); }); };
+    // variantes : 11 choisir, 12 ajouter, 13 probabilité, 14 début, 15 retirer
+    actions_[11]->onClick = [this]
+    {
+        const int idx = proc_.slot->get() - 1;
+        if (idx < 0) return;
+        const int n = (int) proc_.slotPattern (idx).alts.size();
+        matrix_->alt = matrix_->alt + 1 >= n ? -1 : matrix_->alt + 1;   // le motif, puis chaque variante
+        matrix_->repaint();
+        refreshActions();
+    };
+    actions_[12]->onClick = [this]
+    {
+        const int idx = proc_.slot->get() - 1;
+        if (idx < 0) return;
+        const auto before = proc_.slotPattern (idx);
+        auto after = before;
+        const auto bar = after.barLength();
+        const int k = pattern::addAlt (after, pattern::makeFrac (bar.n, bar.d * 2), 0.5);   // la 2e moitié de la mesure, une fois sur deux
+        if (k < 0) return;
+        proc_.commitSlot (idx, before, after, "Ajouter une variante");
+        matrix_->alt = k;
+        matrix_->repaint();
+        refreshActions();
+    };
+    actions_[13]->onClick = [this]
+    {
+        const int idx = proc_.slot->get() - 1;
+        const int a = matrix_->alt;
+        if (idx < 0 || a < 0) return;
+        editSlot ("Probabilité de la variante", [a] (pattern::Pattern& pt)
+        {
+            if (a >= (int) pt.alts.size()) return;
+            const double c = pt.alts[(size_t) a].chance;
+            pattern::setAltChance (pt, a, c >= 0.99 ? 0.0 : (c < 0.125 ? 0.25 : (c < 0.375 ? 0.5 : (c < 0.625 ? 0.75 : 1.0))));
+        });
+    };
+    actions_[14]->onClick = [this]
+    {
+        const int a = matrix_->alt;
+        if (a < 0) return;
+        editSlot ("Début de la variante", [a] (pattern::Pattern& pt)
+        {
+            if (a >= (int) pt.alts.size()) return;
+            const double bar = pt.barLength().toBeats();
+            const double cur = pt.alts[(size_t) a].from.toBeats();
+            double next = std::floor (cur + 1.0001);
+            if (next >= bar - 1e-9) next = 1.0;                                // un temps après le début, puis on recommence
+            pattern::setAltFrom (pt, a, pattern::makeFrac ((std::int64_t) std::llround (next), 4));
+        });
+    };
+    actions_[15]->onClick = [this]
+    {
+        const int a = matrix_->alt;
+        if (a < 0) return;
+        editSlot ("Retirer la variante", [a] (pattern::Pattern& pt) { pattern::removeAlt (pt, a); });
+        matrix_->alt = -1;
+        matrix_->repaint();
+        refreshActions();
+    };
     actions_[9]->setText ("Annuler");
     actions_[9]->onClick = [this] { proc_.undo().undo(); matrix_->repaint(); refreshActions(); };
     actions_[10]->setText (juce::String::fromUTF8 ("Rétablir"));
@@ -795,6 +878,29 @@ void ArpegeEditor::refreshActions()
     actions_[7]->setText (juce::String::fromUTF8 ("Effacer"));
     for (int i = 1; i < 8; ++i) if (i != 3) actions_[(size_t) i]->setDim (! on);
     actions_[0]->setDim (! on);
+    {
+        // variantes
+        const int nAlts = on ? (int) proc_.slotPattern (idx).alts.size() : 0;
+        if (matrix_->alt >= nAlts) matrix_->alt = -1;
+        const int a = matrix_->alt;
+        actions_[11]->setText (a < 0 ? juce::String::fromUTF8 ("Dessine : le motif") : juce::String::fromUTF8 ("Dessine : variante ") + juce::String (a + 1) + "/" + juce::String (nAlts));
+        actions_[12]->setText (juce::String::fromUTF8 ("+ Variante"));
+        actions_[15]->setText (juce::String::fromUTF8 ("Retirer la variante"));
+        if (a >= 0)
+        {
+            const auto pt = proc_.slotPattern (idx);
+            actions_[13]->setText (juce::String::fromUTF8 ("Probabilité ") + juce::String (juce::roundToInt (pt.alts[(size_t) a].chance * 100.0)) + " %");
+            actions_[14]->setText (juce::String::fromUTF8 ("Début : temps ") + juce::String (juce::roundToInt (pt.alts[(size_t) a].from.toBeats()) + 1));
+        }
+        else
+        {
+            actions_[13]->setText (juce::String::fromUTF8 ("Probabilité"));
+            actions_[14]->setText (juce::String::fromUTF8 ("Début"));
+        }
+        actions_[11]->setDim (! on || nAlts == 0);
+        actions_[12]->setDim (! on || nAlts >= 7);
+        for (int i : { 13, 14, 15 }) actions_[(size_t) i]->setDim (a < 0);
+    }
     actions_[9]->setDim (! proc_.undo().canUndo());
     actions_[10]->setDim (! proc_.undo().canRedo());
 }
@@ -832,7 +938,7 @@ void ArpegeEditor::resized()
     const auto px = [this] (float v) { return skin_.ipx (v); };
     const float w[] = { 260, 110, 150, 120, 120, 120, 120, 100, 190, 100, 170, 160, 150, 140, 110, 120 };
     const int rowOf[] = { 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 3, 3, 3 };
-    int x[4] = { px (16.0f), px (16.0f), px (16.0f), px (16.0f) };
+    int x[5] = { px (16.0f), px (16.0f), px (16.0f), px (16.0f), px (16.0f) };
     const int y0 = px (60.0f), h = px (30.0f), gap = px (40.0f);
     for (size_t i = 0; i < pills_.size(); ++i)
     {
@@ -840,15 +946,15 @@ void ArpegeEditor::resized()
         pills_[i]->setBounds (x[r], y0 + r * gap, px (w[i]), h);
         x[r] += px (w[i] + 8.0f);
     }
-    const float aw[] = { 160, 130, 100, 160, 90, 90, 90, 90, 170, 90, 100 };   // rangée 3 : Source, Canal Carte, puis ces actions ; Annuler et Rétablir en fin de rangée 1
-    const int aRow[] = { 2, 2, 2, 3, 3, 3, 3, 3, 2, 1, 1 };
+    const float aw[] = { 160, 130, 100, 160, 90, 90, 90, 90, 170, 90, 100, 180, 120, 170, 150, 190 };   // rangée 3 : Source, Canal Carte, puis ces actions ; Annuler et Rétablir en fin de rangée 1 ; rangée 4 : variantes
+    const int aRow[] = { 2, 2, 2, 3, 3, 3, 3, 3, 2, 1, 1, 4, 4, 4, 4, 4 };
     for (size_t i = 0; i < actions_.size(); ++i)
     {
         const int r = aRow[i];
         actions_[i]->setBounds (x[r], y0 + r * gap, px (aw[i]), h);
         x[r] += px (aw[i] + 8.0f);
     }
-    const int my = y0 + 4 * gap + px (4.0f);
+    const int my = y0 + 5 * gap + px (4.0f);
     matrix_->setBounds (px (16.0f), my, getWidth() - px (32.0f), getHeight() - my - px (40.0f));
 }
 
@@ -896,6 +1002,7 @@ void ArpegeEditor::timerCallback()
     if (idx != shownSlot_)
     {
         shownSlot_ = idx;
+        matrix_->alt = -1;
         if (idx >= 0 && ! proc_.slotUsed (idx)) proc_.setSlotPattern (idx, proc_.slotPattern (idx));   // emplacement libre : un motif vide, prêt à dessiner
         matrix_->repaint();
         refreshActions();

@@ -120,6 +120,13 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     };
     addAndMakeVisible (panicButton_);
 
+   #ifdef NEPTUNE_STANDALONE_APP
+    fileButton_.setButtonText (juce::String::fromUTF8 ("Fichier"));
+    fileButton_.setTooltip (juce::String::fromUTF8 ("Ouvrir, enregistrer le projet (Ctrl+O, Ctrl+S, Ctrl+Maj+S)"));
+    fileButton_.onClick = [this] { showFileMenu(); };
+    addAndMakeVisible (fileButton_);
+    juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<NeptuneEditor> (this)] { if (safe != nullptr) safe->updateWindowTitle(); });
+   #endif
     viewButton_.setButtonText ("Probe");
     viewButton_.onClick = [this] { setView (false, true); };
     addAndMakeVisible (viewButton_);
@@ -651,11 +658,140 @@ void NeptuneEditor::updateUndoButtons()
     redoButton_.setEnabled (processor_.undoManager().canRedo());
 }
 
+#ifdef NEPTUNE_STANDALONE_APP
+namespace
+{
+juce::File gProjectFile;   // le projet ouvert (le cadre reconstruit l'éditeur quand le thème change : ce fichier reste)
+
+juce::File recentsFile()
+{
+    auto dir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory);
+   #if JUCE_MAC
+    dir = dir.getChildFile ("Application Support");
+   #endif
+    return dir.getChildFile ("Neptune").getChildFile ("recent-projects.txt");
+}
+juce::StringArray readRecents()
+{
+    juce::StringArray lines;
+    lines.addLines (recentsFile().loadFileAsString());
+    lines.removeEmptyStrings();
+    return lines;
+}
+void addRecent (const juce::File& f)
+{
+    auto lines = readRecents();
+    lines.removeString (f.getFullPathName());
+    lines.insert (0, f.getFullPathName());
+    while (lines.size() > 8) lines.remove (lines.size() - 1);
+    recentsFile().getParentDirectory().createDirectory();
+    recentsFile().replaceWithText (lines.joinIntoString ("\n"));
+}
+} // namespace
+
+void NeptuneEditor::updateWindowTitle()
+{
+    if (auto* w = getTopLevelComponent())
+        if (w != this && dynamic_cast<juce::ResizableWindow*> (w) != nullptr)
+        {
+            w->setName (gProjectFile == juce::File() ? juce::String ("Neptune") : "Neptune - " + gProjectFile.getFileNameWithoutExtension());
+            w->repaint();
+        }
+}
+
+void NeptuneEditor::showFileMenu()
+{
+    juce::PopupMenu m;
+    m.addItem (1, juce::String::fromUTF8 ("Ouvrir...\tCtrl+O"));
+    m.addItem (2, juce::String::fromUTF8 ("Enregistrer\tCtrl+S"));
+    m.addItem (3, juce::String::fromUTF8 ("Enregistrer sous...\tCtrl+Maj+S"));
+    const auto recents = readRecents();
+    if (! recents.isEmpty())
+    {
+        m.addSeparator();
+        juce::PopupMenu sub;
+        for (int i = 0; i < recents.size(); ++i) sub.addItem (100 + i, juce::File (recents[i]).getFileName(), juce::File (recents[i]).existsAsFile());
+        m.addSubMenu (juce::String::fromUTF8 ("Projets récents"), sub);
+    }
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&fileButton_), [safe = juce::Component::SafePointer<NeptuneEditor> (this), recents] (int r)
+    {
+        if (safe == nullptr) return;
+        if (r == 1) safe->openProject();
+        else if (r == 2) safe->saveProject (false);
+        else if (r == 3) safe->saveProject (true);
+        else if (r >= 100 && r - 100 < recents.size()) safe->openProjectFile (juce::File (recents[r - 100]));
+    });
+}
+
+void NeptuneEditor::openProject()
+{
+    fileChooser_ = std::make_unique<juce::FileChooser> (juce::String::fromUTF8 ("Ouvrir un projet Neptune"), gProjectFile == juce::File() ? juce::File::getSpecialLocation (juce::File::userDocumentsDirectory) : gProjectFile.getParentDirectory(), "*.neptune");
+    fileChooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [safe = juce::Component::SafePointer<NeptuneEditor> (this)] (const juce::FileChooser& fc)
+    {
+        if (safe != nullptr && fc.getResult().existsAsFile()) safe->openProjectFile (fc.getResult());
+    });
+}
+
+void NeptuneEditor::openProjectFile (const juce::File& f)
+{
+    juce::MemoryBlock data;
+    if (! f.existsAsFile() || ! f.loadFileAsData (data) || data.getSize() == 0)
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Neptune", juce::String::fromUTF8 ("Impossible de lire le fichier : ") + f.getFullPathName());
+        return;
+    }
+    // ouvrir remplace le projet en cours : on demande confirmation (il n'y a pas de suivi des modifications non enregistrées)
+    juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Neptune", juce::String::fromUTF8 ("Ouvrir « ") + f.getFileName() + juce::String::fromUTF8 (" » remplace le projet en cours. Continuer ?"),
+                                       juce::String::fromUTF8 ("Ouvrir"), juce::String::fromUTF8 ("Annuler"), this,
+                                       juce::ModalCallbackFunction::create ([safe = juce::Component::SafePointer<NeptuneEditor> (this), f, data] (int ok)
+    {
+        if (ok == 0 || safe == nullptr) return;
+        safe->processor_.setStateInformation (data.getData(), static_cast<int> (data.getSize()));
+        gProjectFile = f;
+        addRecent (f);
+        safe->updateWindowTitle();
+        if (safe->onLookChanged) safe->onLookChanged();   // le cadre reconstruit l'éditeur : toutes les vues relisent le projet
+    }));
+}
+
+void NeptuneEditor::saveProject (bool askName)
+{
+    if (! askName && gProjectFile != juce::File()) { saveProjectTo (gProjectFile); return; }
+    fileChooser_ = std::make_unique<juce::FileChooser> (juce::String::fromUTF8 ("Enregistrer le projet Neptune"),
+                                                        gProjectFile != juce::File() ? gProjectFile : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("projet.neptune"), "*.neptune");
+    fileChooser_->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::warnAboutOverwriting, [safe = juce::Component::SafePointer<NeptuneEditor> (this)] (const juce::FileChooser& fc)
+    {
+        auto f = fc.getResult();
+        if (safe == nullptr || f == juce::File()) return;
+        if (f.getFileExtension().isEmpty()) f = f.withFileExtension ("neptune");
+        safe->saveProjectTo (f);
+    });
+}
+
+void NeptuneEditor::saveProjectTo (const juce::File& f)
+{
+    juce::MemoryBlock data;
+    processor_.getStateInformation (data);
+    if (! f.replaceWithData (data.getData(), data.getSize()))
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Neptune", juce::String::fromUTF8 ("Impossible d'enregistrer : ") + f.getFullPathName());
+        return;
+    }
+    gProjectFile = f;
+    addRecent (f);
+    updateWindowTitle();
+}
+#endif
+
 bool NeptuneEditor::keyPressed (const juce::KeyPress& k)
 {
     const auto m = k.getModifiers();
     if (! m.isCommandDown()) return false;
     const int code = k.getKeyCode();
+   #ifdef NEPTUNE_STANDALONE_APP
+    if (code == 'S' || code == 's') { saveProject (m.isShiftDown()); return true; }
+    if (code == 'O' || code == 'o') { openProject(); return true; }
+   #endif
     if (code == 'Z' || code == 'z')
     {
         if (m.isShiftDown()) processor_.uiRedo(); else processor_.uiUndo();
@@ -1200,7 +1336,12 @@ void NeptuneEditor::resized()
 {
     // Taille logique d'au moins 1100 x 760 ; en dessous, tout le contenu est réduit d'un même facteur.
     {
-        const auto logical = root_.fit (getWidth(), getHeight(), 1180, 760);
+       #ifdef NEPTUNE_STANDALONE_APP
+        constexpr int minLogicalW = 1260;   // le bouton « Fichier » prend de la place dans la barre du haut
+       #else
+        constexpr int minLogicalW = 1180;
+       #endif
+        const auto logical = root_.fit (getWidth(), getHeight(), minLogicalW, 760);
         lw_ = logical.getWidth();
         lh_ = logical.getHeight();
     }
@@ -1230,6 +1371,13 @@ void NeptuneEditor::resized()
         right -= 4;
         panicButton_.setBounds (right - panicW, barY, panicW, barH);
         int left = 250;   // après le logo, le nom et la version
+       #ifdef NEPTUNE_STANDALONE_APP
+        {
+            const int w = fit (fileButton_, 60);
+            fileButton_.setBounds (left, barY, w, barH);
+            left += w + gap;
+        }
+       #endif
         unlockButton_.setBounds (left, barY, fit (unlockButton_, 120), barH);
         trackBox_.setBounds (left, barY, 80, barH);
         left += 80 + gap + 2;

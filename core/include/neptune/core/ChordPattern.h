@@ -52,10 +52,11 @@ struct Hit
 // Variante d'un motif (Scorsaire : `alts`) : remplace la fin de la mesure du motif à partir de `from`, avec la probabilité `chance` (0 : seulement sur signal, jamais ici).
 struct Alt
 {
-    std::string id;
+    std::string id, name;
     Frac from = makeFrac (1, 2);   // depuis le début de la mesure du motif
     double chance = 0.0;
     std::vector<Hit> hits;         // `at` comptés depuis le début de la mesure du motif, tous >= from
+    std::string extraJson;         // champs inconnus de la variante, gardés
 };
 
 struct Pattern
@@ -64,7 +65,7 @@ struct Pattern
     Frac length = makeFrac (1, 1);   // longueur TOTALE (toutes les mesures du motif)
     int bars = 1;
     std::vector<Hit> hits;           // triés par `at`
-    std::vector<Alt> alts;           // variantes (gardées aussi telles quelles dans `extraJson`, qui reste la source de l'écriture)
+    std::vector<Alt> alts;           // variantes (jusqu'à 7), écrites depuis cette liste ; les champs inconnus d'une variante sont gardés
     std::string extraJson;           // champs inconnus, `alts` comprises
     // Mode « notes » : les parts « 1 » à « 15 » sont des RANGS des notes tenues (de la plus grave à la plus aiguë), pas des degrés d'accord. Repère dans le motif :
     // `x.arpege.mode = "notes"` (Scorsaire garde `x` sans le lire). Sans repère : mode « accord » (degrés).
@@ -90,17 +91,23 @@ std::vector<Hit> hitsForMeasure (const Pattern& p, const Frac& measureLength, in
 // Un coup commence à `at` ; `partText` est l'écriture d'une part (« 3 », « 5+1 », « B »). Retourne l'état de la case après l'appel (allumée ou non).
 // Change le mode du motif ET le repère gardé dans `extraJson`.
 void setNotesMode (Pattern& p, bool notes);
-bool toggleCell (Pattern& p, const Frac& at, const Frac& dur, const std::string& partText);
-bool hasCell (const Pattern& p, const Frac& at, const std::string& partText);
+// `alt` : -1 pour le motif, sinon l'indice d'une variante (ses coups sont comptés depuis le début de la mesure du motif, à partir de `from`).
+bool toggleCell (Pattern& p, const Frac& at, const Frac& dur, const std::string& partText, int alt = -1);
+bool hasCell (const Pattern& p, const Frac& at, const std::string& partText, int alt = -1);
 // Accent du coup qui commence à `at` ; faux (rien fait) s'il n'y a pas de coup. Retourne le nouvel état.
-bool toggleAccent (Pattern& p, const Frac& at);
-bool hasAccent (const Pattern& p, const Frac& at);
+bool toggleAccent (Pattern& p, const Frac& at, int alt = -1);
+bool hasAccent (const Pattern& p, const Frac& at, int alt = -1);
 // Vélocité (1..127) et durée de note (0,05..1 de la longueur du coup) propres au coup qui commence à `at` ; 0 retire la valeur (retour au réglage du plugin).
 // Faux (rien fait) s'il n'y a pas de coup à cet endroit.
-bool setHitVel (Pattern& p, const Frac& at, int vel);
-bool setHitGate (Pattern& p, const Frac& at, double gate);
-int hitVel (const Pattern& p, const Frac& at);          // 0 : pas de valeur propre
-double hitGate (const Pattern& p, const Frac& at);      // 0 : pas de valeur propre
+bool setHitVel (Pattern& p, const Frac& at, int vel, int alt = -1);
+bool setHitGate (Pattern& p, const Frac& at, double gate, int alt = -1);
+int hitVel (const Pattern& p, const Frac& at, int alt = -1);          // 0 : pas de valeur propre
+double hitGate (const Pattern& p, const Frac& at, int alt = -1);      // 0 : pas de valeur propre
+// Variantes : ajoute (retourne son indice, -1 si déjà 7 ou `from` hors de la mesure), retire, règle la probabilité (0..1) et le début (les coups avant le nouveau début sont retirés).
+int addAlt (Pattern& p, const Frac& from, double chance);
+bool removeAlt (Pattern& p, int alt);
+bool setAltChance (Pattern& p, int alt, double chance);
+bool setAltFrom (Pattern& p, int alt, const Frac& from);
 // Nouvelle longueur totale et nombre de mesures ; les coups qui ne tiennent plus dans le motif sont retirés, les autres coupés à la fin.
 void setLengthAndBars (Pattern& p, const Frac& length, int bars);
 void clearHits (Pattern& p);
