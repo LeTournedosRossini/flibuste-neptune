@@ -83,6 +83,8 @@ public:
     const pattern::Pattern* pattern() const { return pattern_; }
     // Environnement de Carte (accord, gamme, motif, mesures) ; nullptr : seulement les notes tenues et les mesures de l'hôte.
     void setEnvironment (const Environment* e) { env_ = e; }
+    // Octave de base quand Carte joue seule (aucune note tenue) : la fondamentale de l'accord est placée entre cette note (MIDI) et onze demi-tons au-dessus.
+    void setBaseNote (int midi) { baseNote_ = std::clamp (midi, 0, 108); }
 
     void setSampleRate (double sr) { sampleRate_ = sr > 0.0 ? sr : 44100.0; }
 
@@ -128,6 +130,7 @@ public:
 
         const double bps = std::max (1.0, tr.bpm) / 60.0 / sampleRate_;   // noires par échantillon
         const bool syncHost = tr.playing && tr.hasPosition;
+        carteLive_ = syncHost && env_ != nullptr;   // Carte ne joue seule que pendant la lecture (sa position n'a de sens que là)
 
         // ---- horloge
         bool resync = false;
@@ -196,7 +199,7 @@ public:
                 }
                 else
                 {
-                    doStep (stepAt, bps);
+                    doStep (stepAt, bps, start + (double) stepAt * bps);
                     ++nextIndex_;
                 }
             }
@@ -288,6 +291,7 @@ private:
 
     void doPatternHit (const Due& d, double bps)
     {
+        const CarteChordPool synth (*this, d.t);
         if (heldCount_ == 0 || d.pat == nullptr) return;
         const auto& h = d.pat->hits[(size_t) d.hit];
         int notes[kMaxHeld];
@@ -409,8 +413,28 @@ private:
         return n;
     }
 
-    void doStep (int at, double bps)
+    // Sans note tenue, pendant la lecture, l'accord de Carte tient lieu de notes tenues (ses notes à partir de l'octave de base) pour la durée d'un pas.
+    struct CarteChordPool
     {
+        CarteChordPool (Arpeggiator& a, double t) : self (a)
+        {
+            Harmony hm;
+            if (a.heldCount_ != 0 || ! a.carteLive_ || a.env_ == nullptr || ! a.env_->harmonyAt (t, hm)) return;
+            const int low = a.baseNote_;
+            const int root = low + (((hm.rootPc - low) % 12) + 12) % 12;
+            const auto vel = static_cast<std::uint8_t> (a.params_.fixedVelocity ? a.params_.velocity : 90);
+            for (int s = 0; s < 12 && a.heldCount_ < kMaxHeld; ++s)
+                if (((hm.rel >> s) & 1) != 0 && root + s <= 127) a.held_[(size_t) a.heldCount_++] = { static_cast<std::uint8_t> (root + s), vel };
+            active = a.heldCount_ > 0;
+        }
+        ~CarteChordPool() { if (active) self.heldCount_ = 0; }
+        Arpeggiator& self;
+        bool active = false;
+    };
+
+    void doStep (int at, double bps, double t)
+    {
+        const CarteChordPool pool_ (*this, t);
         if (heldCount_ == 0) return;
         std::array<Held, kMaxPool> pool {};
         const int n = buildPool (pool);
@@ -485,6 +509,8 @@ private:
     std::uint32_t rng_ = 2463534242u;
     const pattern::Pattern* pattern_ = nullptr;
     const Environment* env_ = nullptr;
+    bool carteLive_ = false;
+    int baseNote_ = 48;
     pattern::Absent absent_ = pattern::Absent::Skip;
     double lastHitT_ = -1e300;
     std::array<Due, kMaxDue> due_ {};

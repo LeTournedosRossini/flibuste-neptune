@@ -54,6 +54,7 @@ public:
     juce::AudioParameterChoice* absentMode = nullptr;  // degré absent de l'accord : sauter / jouer la note par défaut / prendre la note de la gamme (Carte)
     juce::AudioParameterChoice* source = nullptr;      // 0 : notes tenues et mesures de l'hôte ; 1 : Carte (accord, gamme, motif, mesures)
     juce::AudioParameterInt* carteChannel = nullptr;   // canal de liaison de Carte, 1 à 8
+    juce::AudioParameterInt* baseOctave = nullptr;     // octave où Carte joue seule (sans note tenue) : 1 à 6 (3 = do 48)
 
     static constexpr int kSlots = 16;
     // Emplacements de motifs (fil de messages). `slotPattern` : copie du motif (vide : emplacement libre).
@@ -67,6 +68,7 @@ public:
     int heldCount() const noexcept { return held_.load(); }
     // Ce que Carte dit : -1 pas connectée (ou source « notes tenues »), 0 connectée sans accord ici, sinon 1 ; `chordText` : l'accord en cours.
     int carteState() const noexcept { return carteState_.load(); }
+    bool carteHasPatterns() const noexcept { return carteHasPatterns_.load(); }   // la voie des motifs de Carte a des éléments (et Carte est la source)
     juce::String carteChordText() const;
     bool hostPlaying() const noexcept { return playing_.load(); }
 
@@ -102,6 +104,7 @@ private:
     std::unique_ptr<neptune::core::arp::ChordMapEnvironment> env_;
     Ticker ticker_ { *this };
     std::atomic<int> carteState_ { -1 };
+    std::atomic<bool> carteHasPatterns_ { false };
     std::atomic<std::uint32_t> carteChord_ { 0 };   // racine | basse << 8 | rel << 16 ; 0 : aucun accord
     std::atomic<bool> playing_ { false };
 

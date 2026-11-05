@@ -600,11 +600,12 @@ TEST_CASE ("arp carte : sans note tenue, rien ne sonne ; pas de note bloquée", 
 {
     const auto pat = patternFrom (kArpeggioJson);
     FakeEnv env;
-    env.chord = true;
+    env.chord = false;   // Carte n'a pas d'accord ici : rien à jouer sans note tenue
     env.early = &pat;
     auto a = make();
     a.setEnvironment (&env);
     CHECK (run (a, {}, (long long) (kSamplesPerBeat * 4), 256).empty());
+    env.chord = true;
     std::map<int, int> balance;
     for (const auto& e : run (a, kChord, (long long) (kSamplesPerBeat * 3), 100)) balance[e.note] += e.on ? 1 : -1;
     a.reset();
@@ -687,4 +688,70 @@ TEST_CASE ("de bout en bout : la carte publiée par Carte pilote l'arpégiateur"
         CHECK (onNotes (ev2) == onNotes (ev));
     }
     writer.close();
+}
+
+TEST_CASE ("arp carte : Carte joue seule, sans note tenue, pendant la lecture", "[arp][carte]")
+{
+    FakeEnv env;
+    env.chord = true;
+    env.hm.rootPc = 2;                 // ré
+    env.hm.rel = 0x489;                // m7 : 0 3 7 10
+    const long long len = (long long) (kSamplesPerBeat * 1.0);   // 4 pas de double-croche
+    SECTION ("motif automatique : l'accord de Carte est arpégé")
+    {
+        auto a = make();
+        a.setEnvironment (&env);
+        CHECK (onNotes (run (a, {}, len, 256)) == std::vector<int> { 50, 53, 57, 60 });
+    }
+    SECTION ("octave de base réglable")
+    {
+        auto a = make();
+        a.setEnvironment (&env);
+        a.setBaseNote (60);
+        CHECK (onNotes (run (a, {}, len, 256)) == std::vector<int> { 62, 65, 69, 72 });
+    }
+    SECTION ("motif en degrés")
+    {
+        const auto pat = patternFrom (R"({ "id": "d", "length": [1,1], "hits": [
+            { "at": [0,4], "dur": [1,4], "parts": ["1"] }, { "at": [1,4], "dur": [1,4], "parts": ["3"] },
+            { "at": [2,4], "dur": [1,4], "parts": ["5"] }, { "at": [3,4], "dur": [1,4], "parts": ["7"] } ] })");
+        auto a = make();
+        a.setPattern (&pat);
+        a.setEnvironment (&env);
+        CHECK (onNotes (run (a, {}, (long long) (kSamplesPerBeat * 3.9), 256)) == std::vector<int> { 50, 53, 57, 60 });
+    }
+    SECTION ("motif en rangs : les notes de l'accord tiennent lieu de notes tenues")
+    {
+        const auto pat = patternFrom (R"({ "id": "r", "length": [1,1], "x": { "arpege": { "mode": "notes" } }, "hits": [
+            { "at": [0,4], "dur": [1,4], "parts": ["1"] }, { "at": [1,4], "dur": [1,4], "parts": ["2"] },
+            { "at": [2,4], "dur": [1,4], "parts": ["3"] }, { "at": [3,4], "dur": [1,4], "parts": ["4"] } ] })");
+        auto a = make();
+        a.setPattern (&pat);
+        a.setEnvironment (&env);
+        CHECK (onNotes (run (a, {}, (long long) (kSamplesPerBeat * 3.9), 256)) == std::vector<int> { 50, 53, 57, 60 });
+    }
+    SECTION ("lecture arrêtée : rien ne sonne (la position de Carte n'a pas de sens)")
+    {
+        auto a = make();
+        a.setEnvironment (&env);
+        CHECK (run (a, {}, len * 4, 256, false).empty());
+    }
+    SECTION ("des notes tenues l'emportent sur l'accord synthétisé")
+    {
+        auto a = make();
+        a.setEnvironment (&env);
+        CHECK (onNotes (run (a, kChord, len, 256)) == std::vector<int> { 60, 64, 67, 60 });
+    }
+    SECTION ("pas de note bloquée")
+    {
+        auto a = make();
+        a.setEnvironment (&env);
+        std::map<int, int> balance;
+        for (const auto& e : run (a, {}, (long long) (kSamplesPerBeat * 2), 77)) balance[e.note] += e.on ? 1 : -1;
+        a.reset();
+        std::vector<NoteOut> out (64);
+        const int m = a.process (nullptr, 0, Transport {}, 64, out.data(), 64);
+        for (int i = 0; i < m; ++i) balance[out[i].note] += out[i].on ? 1 : -1;
+        for (const auto& kv : balance) CHECK (kv.second == 0);
+    }
 }
