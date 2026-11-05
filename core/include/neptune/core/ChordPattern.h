@@ -46,6 +46,7 @@ struct Hit
     bool accent = false;
     int vel = 0;           // 0 : absent ; sinon 1..127
     double gate = 0.0;     // 0 : absent ; sinon 0,05..1
+    bool muted = false;    // coup étouffé (grattage) : lu dans `x.arpege.muted` de `extraJson`
     std::string extraJson;   // champs inconnus (objet JSON), vide si aucun
 };
 

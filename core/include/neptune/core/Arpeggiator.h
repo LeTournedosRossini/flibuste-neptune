@@ -33,6 +33,19 @@ struct Params
     int transpose = 0;             // demi-tons, -48..48
 };
 
+// Grattage des parties « accord » (C) des motifs : les notes partent l'une après l'autre au lieu de ensemble (valeurs de Scorsaire, `strum.js`).
+struct StrumParams
+{
+    enum class Mode { Off, Down, Alternate };   // Alternate : coup bas sur les temps, haut sur les contretemps
+    Mode mode = Mode::Off;
+    double delayMs = 0.0;          // délai entre deux notes ; 0 = automatique d'après le tempo (14 ms à 120, borné à 5-30 ms)
+    int upStrings = 4;             // nombre de notes aiguës d'un coup haut
+    double upVelocity = 0.9;       // vélocité relative d'un coup haut
+    double fall = 0.03;            // chute de vélocité à chaque note suivante
+    double mutedSeconds = 0.06;    // durée d'une note de coup étouffé
+    double mutedVelocity = 0.6;
+};
+
 struct NoteIn { int offset = 0; bool on = false; std::uint8_t note = 0; std::uint8_t velocity = 0; };
 struct NoteOut { int offset = 0; bool on = false; std::uint8_t note = 0; std::uint8_t velocity = 0; };
 
@@ -94,6 +107,13 @@ public:
     // Vrai : tous les motifs ; faux : seulement ceux qui le demandent (`voices.rh = "led"`).
     void setVoiceLeading (bool all) { ledAll_ = all; }
 
+    void setStrum (const StrumParams& sp)
+    {
+        strum_ = sp;
+        strum_.delayMs = std::clamp (strum_.delayMs, 0.0, 100.0);
+        strum_.upStrings = std::clamp (strum_.upStrings, 1, 16);
+    }
+
     void setSampleRate (double sr) { sampleRate_ = sr > 0.0 ? sr : 44100.0; }
 
     void setParams (const Params& p)
@@ -124,6 +144,7 @@ public:
         releaseAllPending_ = true;
         counter_ = 0;
         ledCount_ = 0;
+        delayedCount_ = 0;
     }
 
     int heldCount() const { return heldCount_; }
@@ -152,6 +173,7 @@ public:
         {
             for (int i = 0; i < pendingCount_; ++i) emit (0, false, pending_[i].note, 0);
             pendingCount_ = 0;
+            delayedCount_ = 0;
             releaseAllPending_ = false;
         }
         if (resync)
@@ -175,6 +197,9 @@ public:
             int nextOff = -1, offAt = numSamples;
             for (int i = 0; i < pendingCount_; ++i)
                 if (pending_[i].at < offAt) { offAt = pending_[i].at; nextOff = i; }
+            int nextDel = -1, delAt = numSamples;   // débuts retardés (grattage)
+            for (int i = 0; i < delayedCount_; ++i)
+                if (delayed_[(size_t) i].at < delAt) { delAt = delayed_[(size_t) i].at; nextDel = i; }
             const int inAt = ie < nIn ? std::clamp (in[ie].offset, 0, numSamples - 1) : numSamples;
             int stepAt = numSamples;
             if (patternMode)
@@ -189,10 +214,16 @@ public:
                 stepAt = stepSample < numSamples ? (int) std::max<long long> (stepSample, 0) : numSamples;
             }
 
-            if (nextOff >= 0 && offAt <= inAt && offAt <= stepAt)
+            if (nextOff >= 0 && offAt <= inAt && offAt <= stepAt && offAt <= delAt)
             {
                 emit (offAt, false, pending_[nextOff].note, 0);
                 pending_[nextOff] = pending_[--pendingCount_];
+            }
+            else if (nextDel >= 0 && delAt <= inAt && delAt <= stepAt)
+            {
+                const Delayed dl = delayed_[(size_t) nextDel];
+                delayed_[(size_t) nextDel] = delayed_[(size_t) --delayedCount_];
+                startNote (std::max (dl.at, 0), dl.note, dl.vel, dl.len);
             }
             else if (ie < nIn && inAt <= stepAt)
             {
@@ -217,6 +248,7 @@ public:
         }
 
         for (int i = 0; i < pendingCount_; ++i) pending_[i].at -= numSamples;
+        for (int i = 0; i < delayedCount_; ++i) delayed_[(size_t) i].at -= numSamples;
         if (patternMode && dueN > 0) lastHitT_ = std::max (lastHitT_, due_[dueN - 1].t);
         expectedNext_ = start + blockBeats;
         if (! syncHost) clock_ = expectedNext_;
@@ -393,6 +425,8 @@ private:
             }
         }
         int played[32], nPlayed = 0;
+        int chordNotes[16], nChord = 0;   // notes des parties « accord » à gratter
+        const bool strumming = strum_.mode != StrumParams::Mode::Off;
         for (const auto& part : h.parts)
         {
             int out[16];
@@ -401,6 +435,18 @@ private:
             for (int k = 0; k < n; ++k)
             {
                 int note = out[k];
+                if (strumming && part.kind == pattern::Part::Kind::Chord)
+                {
+                    if (useLed)
+                    {
+                        const int pc = ((note % 12) + 12) % 12;
+                        for (int i = 0; i < ledN; ++i) if (ledNotes[(size_t) i] % 12 == pc) { note = ledNotes[(size_t) i]; break; }
+                    }
+                    bool dup = false;
+                    for (int i = 0; i < nChord; ++i) dup = dup || chordNotes[i] == note;
+                    if (! dup && nChord < 16) chordNotes[nChord++] = note;
+                    continue;
+                }
                 if (useLed)
                 {
                     const int pc = ((note % 12) + 12) % 12;
@@ -413,7 +459,44 @@ private:
                 startNote (d.at, std::clamp (note + params_.transpose, 0, 127), vel, len);
             }
         }
+        if (nChord > 0) strumChord (d, h, chordNotes, nChord, vel, len, bps);
     }
+
+    // Une partie « accord » grattée : coup bas (de la plus grave à la plus aiguë) ou haut (les notes aiguës, de l'aiguë à la grave), vélocité qui décroît, fin commune.
+    void strumChord (const Due& d, const pattern::Hit& h, int* notes, int n, int vel, int len, double bps)
+    {
+        std::sort (notes, notes + n);
+        bool up = false;
+        if (strum_.mode == StrumParams::Mode::Alternate)
+        {
+            const double pos = h.at.toBeats();
+            up = std::fabs (pos - std::round (pos)) > 1e-6;   // contretemps
+        }
+        int order[16], m = n;
+        if (up)
+        {
+            m = std::min (n, strum_.upStrings);
+            for (int i = 0; i < m; ++i) order[i] = notes[n - 1 - i];
+        }
+        else
+            for (int i = 0; i < n; ++i) order[i] = notes[i];
+        const double bpm = bps * 60.0 * sampleRate_;
+        const double delayMs = strum_.delayMs > 0.0 ? strum_.delayMs : std::clamp (std::round (14.0 * 120.0 / std::max (1.0, bpm)), 5.0, 30.0);
+        const int delay = std::max (1, (int) std::llround (delayMs * 0.001 * sampleRate_));
+        const bool muted = hitMuted (h);
+        const double base = (up ? strum_.upVelocity : 1.0) * (muted ? strum_.mutedVelocity : 1.0);
+        for (int i = 0; i < m; ++i)
+        {
+            const int off = std::min (i * delay, len / 2);
+            int l = len - off;
+            if (muted) l = std::min (l, std::max (1, (int) std::llround (strum_.mutedSeconds * sampleRate_)));
+            const int v = std::clamp ((int) std::llround (vel * std::max (0.05, base * (1.0 - strum_.fall * i))), 1, 127);
+            const int note = std::clamp (order[i] + params_.transpose, 0, 127);
+            if (off == 0) startNote (d.at, note, v, l);
+            else if (delayedCount_ < kMaxDelayed) delayed_[(size_t) delayedCount_++] = { d.at + off, (std::uint8_t) note, (std::uint8_t) v, l };
+        }
+    }
+    static bool hitMuted (const pattern::Hit& h) { return h.muted; }
 
     // Début de note avec sa fin programmée ; une note identique encore en cours est terminée d'abord.
     void startNote (int at, int note, int vel, int len)
@@ -430,6 +513,8 @@ private:
         pending_[pendingCount_++] = { at + len, (std::uint8_t) note };
     }
 
+    struct Delayed { int at = 0; std::uint8_t note = 0, vel = 0; int len = 0; };
+    static constexpr int kMaxDelayed = 128;
     struct Held { std::uint8_t note = 0, velocity = 0; };
     struct Pending { int at = 0; std::uint8_t note = 0; };
 
@@ -597,6 +682,9 @@ private:
     const Environment* env_ = nullptr;
     bool carteLive_ = false;
     int baseNote_ = 48;
+    StrumParams strum_;
+    std::array<Delayed, kMaxDelayed> delayed_ {};
+    int delayedCount_ = 0;
     bool ledAll_ = false;
     std::array<int, voice::kMaxVoices> ledPrev_ {};
     int ledCount_ = 0;

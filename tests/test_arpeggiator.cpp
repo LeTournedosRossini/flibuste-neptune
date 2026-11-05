@@ -1072,3 +1072,51 @@ TEST_CASE ("arp : voix conduites, l'accord suivant se pose au plus près du pré
     CHECK (topMove (ledNotes) <= topMove (fixedNotes));
     for (int n : ledNotes) { CHECK (n >= 55); CHECK (n <= 76); }
 }
+
+TEST_CASE ("arp : grattage, les notes de l'accord partent l'une après l'autre", "[arp][strum]")
+{
+    const auto pat = patternFrom (R"({ "id": "g", "length": [1,1], "hits": [ { "at": [0,1], "dur": [1,2], "parts": ["C"] }, { "at": [1,8], "dur": [1,8], "parts": ["C"] } ] })");
+    ChordListEnv env;
+    env.chords = { { 0.0, 4.0, 0, 0x091, -1 } };
+    auto go = [&] (neptune::core::arp::StrumParams::Mode mode, int block)
+    {
+        auto a = make();
+        a.setPattern (&pat);
+        a.setEnvironment (&env);
+        neptune::core::arp::StrumParams sp;
+        sp.mode = mode;
+        sp.delayMs = 10.0;
+        a.setStrum (sp);
+        return run (a, { { 0, true, 48, 90 } }, (long long) (kSamplesPerBeat * 1.9), block);
+    };
+    using Mode = neptune::core::arp::StrumParams::Mode;
+    const auto off = go (Mode::Off, 256);
+    std::vector<long long> at0;
+    for (const auto& e : off) if (e.on) at0.push_back (e.at);
+    CHECK (at0.size() >= 6);
+    CHECK (std::count (at0.begin(), at0.end(), 0) == 3);   // sans grattage : tout en même temps
+    const auto down = go (Mode::Down, 256);
+    std::vector<int> firstHit;
+    std::vector<long long> times;
+    for (const auto& e : down) if (e.on && e.at < (long long) (kSamplesPerBeat * 0.4)) { firstHit.push_back (e.note); times.push_back (e.at); }
+    REQUIRE (firstHit.size() == 3);
+    CHECK (firstHit == std::vector<int> { 48, 52, 55 });   // de la plus grave à la plus aiguë
+    CHECK (times[1] - times[0] == (long long) (kSr * 0.010));   // 10 ms
+    CHECK (times[2] - times[1] == (long long) (kSr * 0.010));
+    // le même résultat à toute taille de bloc, et chaque début a sa fin
+    for (int block : { 1, 64, 1000 })
+    {
+        const auto b = go (Mode::Down, block);
+        REQUIRE (b.size() == down.size());
+        for (size_t i = 0; i < b.size(); ++i) { CHECK (b[i].at == down[i].at); CHECK (b[i].note == down[i].note); CHECK (b[i].on == down[i].on); }
+    }
+    int ons = 0, offs = 0;
+    for (const auto& e : down) (e.on ? ons : offs)++;
+    CHECK (ons == offs);
+    // alterné : le coup sur le contretemps (1/8) va de l'aigu au grave
+    const auto alt = go (Mode::Alternate, 256);
+    std::vector<int> second;
+    for (const auto& e : alt) if (e.on && e.at >= (long long) (kSamplesPerBeat * 0.4)) second.push_back (e.note);
+    REQUIRE (second.size() == 3);
+    CHECK (second == std::vector<int> { 55, 52, 48 });
+}

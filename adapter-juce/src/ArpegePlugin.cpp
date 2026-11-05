@@ -130,6 +130,8 @@ ArpegeProcessor::ArpegeProcessor() : juce::AudioProcessor (BusesProperties())
     addParameter (source = new juce::AudioParameterChoice (juce::ParameterID { "source", 1 }, "Source", juce::StringArray { "Notes tenues", "Carte" }, 0));
     addParameter (carteChannel = new juce::AudioParameterInt (juce::ParameterID { "carteChannel", 1 }, "Canal de Carte", 1, chordmap::kChannels, 1));
     addParameter (baseOctave = new juce::AudioParameterInt (juce::ParameterID { "baseOctave", 1 }, "Octave de base", 1, 6, 3));
+    addParameter (strumMode = new juce::AudioParameterChoice (juce::ParameterID { "strum", 1 }, "Grattage", juce::StringArray { "Non", "Coup bas", "Alterné" }, 0));
+    addParameter (strumDelay = new juce::AudioParameterInt (juce::ParameterID { "strumDelay", 1 }, "Delai du grattage", 0, 60, 0, juce::AudioParameterIntAttributes().withStringFromValueFunction ([] (int v, int) { return v == 0 ? juce::String::fromUTF8 ("auto") : juce::String (v) + " ms"; })));
     addParameter (ledVoices = new juce::AudioParameterBool (juce::ParameterID { "ledVoices", 1 }, "Voix conduites", false));
 
     {
@@ -256,6 +258,12 @@ void ArpegeProcessor::processBlock (juce::AudioBuffer<float>& audio, juce::MidiB
         arp_.setEnvironment (source->getIndex() == 1 ? env_.get() : nullptr);
         arp_.setBaseNote (12 * (baseOctave->get() + 1));
         arp_.setVoiceLeading (ledVoices->get());
+        {
+            arp::StrumParams sp;
+            sp.mode = static_cast<arp::StrumParams::Mode> (strumMode->getIndex());
+            sp.delayMs = strumDelay->get();
+            arp_.setStrum (sp);
+        }
         carteHasPatterns_.store (source->getIndex() == 1 && reader_.connected() && env_->hasPatterns());
     }
 
@@ -705,6 +713,8 @@ ArpegeEditor::ArpegeEditor (ArpegeProcessor& p)
     add (proc_.carteChannel, "Canal Carte");
     add (proc_.baseOctave, "Octave de base");
     add (proc_.ledVoices, "Voix conduites");
+    add (proc_.strumMode, "Grattage");
+    add (proc_.strumDelay, "Délai");
 
     matrix_ = std::make_unique<MatrixView> (proc_, skin_);
     addAndMakeVisible (*matrix_);
@@ -939,8 +949,8 @@ void ArpegeEditor::resized()
 {
     skin_.setScale (nova::fitScale (getWidth(), getHeight(), kDesignW, kDesignH, 0.6f, 3.0f));
     const auto px = [this] (float v) { return skin_.ipx (v); };
-    const float w[] = { 260, 110, 150, 120, 120, 120, 120, 100, 190, 100, 170, 160, 150, 140, 110, 120, 110 };
-    const int rowOf[] = { 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 3, 3, 3, 3 };
+    const float w[] = { 260, 110, 150, 120, 120, 120, 120, 100, 190, 100, 170, 160, 150, 140, 110, 120, 110, 140, 130 };
+    const int rowOf[] = { 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 3, 3, 3, 3, 0, 0 };
     int x[5] = { px (16.0f), px (16.0f), px (16.0f), px (16.0f), px (16.0f) };
     const int y0 = px (60.0f), h = px (30.0f), gap = px (40.0f);
     for (size_t i = 0; i < pills_.size(); ++i)
@@ -998,6 +1008,8 @@ void ArpegeEditor::timerCallback()
     const bool carteSrc = proc_.source->getIndex() == 1;
     const bool autoActive = proc_.slot->get() == 0 && ! proc_.carteHasPatterns();
     for (size_t i : { 0u, 1u, 2u, 4u, 8u }) pills_[i]->setDim (! autoActive);   // motif auto, octaves, pas, swing, accent 1 pas sur : motifs automatiques seulement
+    pills_[17]->setDim (autoActive);                                           // grattage et son délai : motifs seulement
+    pills_[18]->setDim (autoActive || proc_.strumMode->getIndex() == 0);
     pills_[16]->setDim (autoActive);                                           // voix conduites : motifs en degrés seulement
     pills_[12]->setDim (autoActive);                                           // degré absent : motifs en degrés seulement
     pills_[14]->setDim (! carteSrc);                                           // canal de Carte

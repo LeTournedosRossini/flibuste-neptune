@@ -125,6 +125,12 @@ bool readHit (const json& j, const Frac& limit, Hit& out)
         if (g >= 0.05 && g <= 1.0) h.gate = g;
     }
     h.extraJson = extrasOf (j, { "at", "dur", "parts", "accent", "vel", "gate" });
+    if (! h.extraJson.empty())
+    {
+        const auto ex = json::parse (h.extraJson, nullptr, false);
+        if (ex.is_object() && ex.contains ("x") && ex["x"].is_object() && ex["x"].contains ("arpege") && ex["x"]["arpege"].is_object())
+            h.muted = ex["x"]["arpege"].value ("muted", false);
+    }
     out = h;
     return true;
 }
