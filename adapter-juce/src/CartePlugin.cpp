@@ -576,6 +576,11 @@ public:
         if (cmd && (code == 'D' || code == 'd')) { duplicateSelection(); return true; }
         if (cmd && (code == 'A' || code == 'a')) { selectAll(); return true; }
         if (code == juce::KeyPress::deleteKey || code == juce::KeyPress::backspaceKey) { deleteSelection(); return true; }
+        if (code == juce::KeyPress::leftKey || code == juce::KeyPress::rightKey)
+        {
+            nudge (code == juce::KeyPress::rightKey ? 1.0 : -1.0, k.getModifiers().isShiftDown());   // flèches : déplacer ; Maj + flèches : changer la fin
+            return true;
+        }
         if (code == juce::KeyPress::escapeKey) { sel_.clear(); repaint(); return true; }
         return false;
     }
@@ -675,8 +680,9 @@ public:
                 g.restoreState();
                 if (lane != LKey)
                 {
-                    g.setColour (skin_.colour (T::Handle, 0.8f));   // poignée de durée
+                    g.setColour (skin_.colour (T::Handle, 0.8f));   // poignées de durée : à droite (la fin) et à gauche (le début)
                     g.fillRoundedRectangle (r.getRight() - skin_.px (5.0f), r.getCentreY() - skin_.px (8.0f), skin_.px (3.0f), skin_.px (16.0f), 1.5f);
+                    g.fillRoundedRectangle (r.getX() + skin_.px (2.0f), r.getCentreY() - skin_.px (8.0f), skin_.px (3.0f), skin_.px (16.0f), 1.5f);
                 }
             }
         if (score_.chords.empty())
@@ -731,11 +737,19 @@ public:
             else if (! sel_.count ({ lane, st })) { sel_.clear(); sel_.insert ({ lane, st }); }
             before_ = score_;
             primary_ = { lane, st };
-            const double edgeX = beatToX (st + lengthOf (score_, lane, i));
-            dragMode_ = (lane != LKey && edgeX - e.position.x <= skin_.px (9.0f) && ! toggle) ? DragMode::Resize : DragMode::Move;
+            const double edgeX = beatToX (st + lengthOf (score_, lane, i)), startX = beatToX (st);
+            const float grip = skin_.px (9.0f);
+            dragMode_ = DragMode::Move;
+            if (lane != LKey && ! toggle)
+            {
+                const bool nearEnd = edgeX - e.position.x <= grip, nearStart = e.position.x - startX <= grip;
+                if (nearEnd && (! nearStart || edgeX - e.position.x <= e.position.x - startX)) dragMode_ = DragMode::Resize;
+                else if (nearStart) dragMode_ = DragMode::ResizeLeft;
+            }
             grab_ = xToBeat (e.position.x) - st;
             changed_ = false;
-            if (dragMode_ == DragMode::Resize) { sel_.clear(); sel_.insert ({ lane, st }); }
+            if (dragMode_ != DragMode::Move) { sel_.clear(); sel_.insert ({ lane, st }); }
+            dragSel_ = sel_;
         }
         else if (e.position.y >= skin_.px (30.0f))
         {
@@ -761,25 +775,15 @@ public:
         const int pi = indexIn (before_, plane, pstart);
         if (pi < 0) return;
         if (dragMode_ == DragMode::Move)
+            work = movedBy (before_, dragSel_, snap (xToBeat (e.position.x) - grab_) - pstart, newSel_);   // la sélection de départ : `sel_` suit l'élément pendant le glissement
+        else if (dragMode_ == DragMode::ResizeLeft)
         {
-            const double newStart = std::max (0.0, snap (xToBeat (e.position.x) - grab_));
-            double delta = newStart - pstart;
-            // les éléments sélectionnés se déplacent ensemble
-            std::vector<Clip> moved;
-            for (int lane = 0; lane < kLanes; ++lane)
-                for (int i = countOf (work, lane) - 1; i >= 0; --i)
-                    if (sel_.count ({ lane, startOf (work, lane, i) }))
-                    {
-                        moved.push_back (clipOf (work, lane, i));
-                        removeAt (work, lane, i);
-                    }
-            double minStart = 1e300;
-            for (const auto& c : moved) minStart = std::min (minStart, c.start);
-            delta = std::max (delta, -minStart);
-            std::set<std::pair<int, double>> now;
-            for (const auto& c : moved)
-                if (putClip (work, c, c.start + delta) >= 0) now.insert ({ c.lane, c.start + delta });
-            newSel_ = now;
+            const auto c = clipOf (work, plane, pi);
+            const double end = c.start + c.length;
+            const double newStart = std::min (std::max (0.0, snap (xToBeat (e.position.x))), end - carte::kMinLength);
+            removeAt (work, plane, pi);
+            putClip (work, c, newStart, end - newStart);
+            newSel_ = { { plane, newStart } };
         }
         else
         {
@@ -823,6 +827,19 @@ public:
         juce::ignoreUnused (e);
     }
 
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        const auto [lane, i] = hit (e.position);
+        bool edge = false;
+        if (lane >= 0 && lane != LKey && i >= 0)
+        {
+            const double st = startOf (score_, lane, i), en = st + lengthOf (score_, lane, i);
+            const float grip = skin_.px (9.0f);
+            edge = beatToX (en) - e.position.x <= grip || e.position.x - beatToX (st) <= grip;
+        }
+        setMouseCursor (edge ? juce::MouseCursor::LeftRightResizeCursor : (i >= 0 ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::NormalCursor));
+    }
+
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
         const auto [lane, i] = hit (e.position);
@@ -856,7 +873,7 @@ public:
     }
 
 private:
-    enum class DragMode { None, Move, Resize };
+    enum class DragMode { None, Move, Resize, ResizeLeft };
 
     int left() const { return static_cast<int> (skin_.px (10.0f)); }
     double beatToX (double beat) const { return left() + (beat - scroll_) * skin_.px (static_cast<float> (ppb_)); }
@@ -894,6 +911,53 @@ private:
         if (t.hasPosition && t.playing) return t.beats;
         if (hasCursor_) return cursor_;
         return t.hasPosition ? t.beats : 0.0;
+    }
+
+    // `base` avec la sélection décalée de `delta` temps (jamais avant 0) ; `now` reçoit la sélection à ses nouvelles places
+    Score movedBy (const Score& base, const std::set<std::pair<int, double>>& selection, double delta, std::set<std::pair<int, double>>& now) const
+    {
+        auto work = base;
+        std::vector<Clip> moved;
+        for (int lane = 0; lane < kLanes; ++lane)
+            for (int i = countOf (work, lane) - 1; i >= 0; --i)
+                if (selection.count ({ lane, startOf (work, lane, i) }))
+                {
+                    moved.push_back (clipOf (work, lane, i));
+                    removeAt (work, lane, i);
+                }
+        double minStart = 1e300;
+        for (const auto& c : moved) minStart = std::min (minStart, c.start);
+        delta = std::max (delta, -minStart);
+        now.clear();
+        for (const auto& c : moved)
+            if (putClip (work, c, c.start + delta) >= 0) now.insert ({ c.lane, c.start + delta });
+        return work;
+    }
+
+    double gridStep() const { return kGrids[grid_] == 0.0 ? measureLengthAt (pasteBeat()) : kGrids[grid_]; }
+
+    void nudge (double direction, bool resizeEnd)
+    {
+        if (sel_.empty()) return;
+        const double step = direction * gridStep();
+        auto after = score_;
+        std::set<std::pair<int, double>> now;
+        if (! resizeEnd) after = movedBy (score_, sel_, step, now);
+        else
+        {
+            for (const auto& [lane, start] : sel_)
+            {
+                const int i = indexIn (after, lane, start);
+                if (i < 0 || lane == LKey) { now.insert ({ lane, start }); continue; }
+                const auto c = clipOf (after, lane, i);
+                removeAt (after, lane, i);
+                putClip (after, c, c.start, std::max (carte::kMinLength, c.length + step));
+                now.insert ({ lane, start });
+            }
+        }
+        proc_.commit (score_, after, resizeEnd ? "Changer la durée" : "Déplacer");
+        sel_ = now;
+        reload();
     }
 
     int indexIn (const Score& s, int lane, double start) const
@@ -939,7 +1003,7 @@ private:
     const nova::Skin& skin_;
     CarteEditor& owner_;
     Score score_, before_;
-    std::set<std::pair<int, double>> sel_, newSel_;
+    std::set<std::pair<int, double>> sel_, newSel_, dragSel_;
     std::pair<int, double> primary_ { 0, 0.0 };
     int grid_ = 2;
     DragMode dragMode_ = DragMode::None;
