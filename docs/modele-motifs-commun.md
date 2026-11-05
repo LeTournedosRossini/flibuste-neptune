@@ -112,3 +112,20 @@ Affichage du motif : colonnes = coups sur la grille (`length` découpée en 1/16
 - Le **staccato** reste propre à Scorsaire (ignoré par Arpège) ; l'**accent** devient un surcroît de vélocité dans Arpège ; de Arpège vers Scorsaire, on choisit « ignorer la dynamique » ou « convertir en accents ».
 - **Mains gauche et droite ignorées** dans Arpège.
 - Une **ligne d'accords de Scorsaire importable dans Carte**.
+
+## Précisions de Scorsaire (message du 5 novembre 2026, à implémenter côté Flibuste)
+
+Source : `Scorsair/ClaudeCodeScorsaire/scorsaire-/docs/message-pour-flibuste-formats-accords-motifs.md`. **Jean confirme : Scorsaire prime sur la métrique et la structure du morceau.**
+
+- **Export déroulé** : la piste d'accords est le morceau tel qu'il se joue (reprises jouées deux fois, volta, sauts de MuseScore développés) ; les mêmes accords reviennent à des positions différentes. `dur` d'un accord = jusqu'à l'accord suivant ; un « pas d'accord » (`"nc": true`, sans `root`) arrête l'accord précédent : dans Carte, **un trou**. `%` et `%%` ne produisent pas d'entrée.
+- **`measures`** (toujours écrit) : une entrée par mesure jouée : `at`, `dur` (longueur réelle, peut différer du chiffrage), `ts`, `source`. **Carte dessine ses barres avec `measures`, jamais avec les chiffrages.** Anacrouse : la première mesure plus courte que son chiffrage est la **fin** d'une mesure pleine (les temps s'alignent sur la mesure pleine) ; une mesure raccourcie au milieu part de son début. `timeSignatures` est compté en mesures jouées.
+- **`qualities`** : intervalles des qualités utilisées ; **le fichier fait foi** pour ce morceau si la table de Carte diffère. Altérations de la fondamentale et de la basse : jusqu'à deux (`C##`, `Bbb`).
+- **Motifs** : Scorsaire conserve `vel`, `gate`, `x` (`x` ≤ 1024 octets par coup, ≤ 8192 par motif) ; il écrit `scorsaire-chord-patterns` et lit les deux enveloppes.
+
+### Conséquences pour la suite (décidées par neptune, à valider)
+
+1. **La carte partagée v2 porte aussi les mesures** : un type de conteneur « mesure » (début, longueur réelle, chiffrage). Arpège en a besoin pour savoir quelle mesure du morceau il joue (motifs de plusieurs mesures, `hitsForMeasure`) et sa longueur. Sans Carte, Arpège utilise la mesure de l'hôte.
+2. **Plafond relevé** : environ 4096 conteneurs par type (un morceau déroulé avec reprises dépasse 512).
+3. **Carte : position de départ à l'import** (où le morceau commence dans le projet) ; une anacrouse est alors réglée par les barres du fichier.
+4. **Degrés étendus** : la carte ne garde que des classes de hauteur ; 9, 11, 13 non signés se lisent comme 2, 4, 6 une octave plus haut (simplification assumée).
+5. Comparer la table de suffixes de Carte au dictionnaire `scorsaire-chord-qualities` et signaler les écarts à Jean (pas encore fait).
