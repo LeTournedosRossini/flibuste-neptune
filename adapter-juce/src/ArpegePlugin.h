@@ -3,9 +3,11 @@
 #include <array>
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <vector>
 #include "NovaKit.h"
 #include "neptune/core/Arpeggiator.h"
+#include "neptune/core/ChordPattern.h"
 #include "neptune/core/Settings.h"
 #include "neptune/core/Theme.h"
 
@@ -45,6 +47,16 @@ public:
     juce::AudioParameterInt *octaves = nullptr, *velocity = nullptr, *accentEvery = nullptr, *accentBoost = nullptr, *transpose = nullptr;
     juce::AudioParameterFloat *gate = nullptr, *swing = nullptr;
     juce::AudioParameterBool* hold = nullptr;
+    juce::AudioParameterInt* slot = nullptr;           // 0 : motifs automatiques ; 1..16 : motif dessiné dans la matrice
+    juce::AudioParameterChoice* absentMode = nullptr;  // degré absent de l'accord : sauter / jouer la note par défaut
+
+    static constexpr int kSlots = 16;
+    // Emplacements de motifs (fil de messages). `slotPattern` : copie du motif (vide : emplacement libre).
+    bool slotUsed (int index) const;
+    neptune::core::pattern::Pattern slotPattern (int index) const;
+    void setSlotPattern (int index, neptune::core::pattern::Pattern p);
+    void clearSlot (int index);
+    static std::vector<neptune::core::pattern::Pattern> builtinPatterns();
 
     const neptune::core::settings::GlobalSettings& settings() const { return settings_; }
     int heldCount() const noexcept { return held_.load(); }
@@ -61,6 +73,13 @@ private:
     std::vector<neptune::core::arp::NoteOut> out_;
     juce::MidiBuffer scratch_;
     std::atomic<int> held_ { 0 };
+
+    mutable juce::SpinLock slotLock_;
+    std::array<std::shared_ptr<const neptune::core::pattern::Pattern>, kSlots> slots_;
+    std::vector<std::shared_ptr<const neptune::core::pattern::Pattern>> retired_;   // gardés en vie : le fil audio peut encore les lire
+    std::atomic<int> slotsVersion_ { 0 };
+    std::shared_ptr<const neptune::core::pattern::Pattern> active_;                 // fil audio
+    int activeSlot_ = -1, activeVersion_ = -1;
     std::atomic<bool> playing_ { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ArpegeProcessor)
@@ -76,10 +95,16 @@ public:
 
 private:
     class ParamPill;
+    class MatrixView;
     void timerCallback() override;
+    void refreshActions();
 
     ArpegeProcessor& proc_;
     nova::Skin skin_;
     juce::ComponentBoundsConstrainer constrainer_;
     std::vector<std::unique_ptr<ParamPill>> pills_;
+    std::unique_ptr<MatrixView> matrix_;
+    std::vector<std::unique_ptr<nova::Pill>> actions_;
+    int fournis_ = 0, shownSlot_ = -2;
+    std::unique_ptr<juce::FileChooser> chooser_;
 };

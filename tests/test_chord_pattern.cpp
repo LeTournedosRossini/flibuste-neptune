@@ -214,3 +214,36 @@ TEST_CASE ("motif : fractions exactes (triolets)", "[pattern]")
     CHECK (makeFrac (6, 8).d == 4);
     CHECK (makeFrac (1, 4).toBeats() == 1.0);
 }
+
+TEST_CASE ("motif : édition de la matrice", "[pattern]")
+{
+    Pattern p;
+    p.length = makeFrac (1, 1);
+    const auto at0 = makeFrac (0, 1), at1 = makeFrac (1, 4);
+    const auto d = makeFrac (1, 4);
+    CHECK (toggleCell (p, at1, d, "3"));
+    CHECK (toggleCell (p, at0, d, "1"));
+    CHECK (toggleCell (p, at0, d, "5"));         // deux parts dans le même coup
+    REQUIRE (p.hits.size() == 2);
+    CHECK (compare (p.hits[0].at, at0) == 0);   // trié
+    CHECK (p.hits[0].parts.size() == 2);
+    CHECK (hasCell (p, at0, "5"));
+    CHECK (! toggleCell (p, at0, d, "5"));       // retirée
+    CHECK (! hasCell (p, at0, "5"));
+    CHECK (! toggleCell (p, at0, d, "1"));       // dernière part : le coup disparaît
+    CHECK (p.hits.size() == 1);
+    CHECK (! toggleCell (p, makeFrac (2, 1), d, "1"));   // hors du motif
+    CHECK (! toggleCell (p, at0, d, "zz"));              // part invalide
+    CHECK (! toggleAccent (p, at0));                      // pas de coup : rien
+    CHECK (toggleAccent (p, at1));
+    CHECK (hasAccent (p, at1));
+    CHECK (! toggleAccent (p, at1));
+    toggleCell (p, makeFrac (3, 4), makeFrac (1, 2), "1");   // dépasse la nouvelle fin
+    setLengthAndBars (p, makeFrac (1, 2), 1);
+    REQUIRE (p.hits.size() == 1);                         // celui à 1/4 reste, celui à 3/4 est retiré
+    CHECK (compare (p.hits[0].at, at1) == 0);
+    setLengthAndBars (p, makeFrac (2, 1), 99);
+    CHECK (p.bars == kMaxBars);
+    clearHits (p);
+    CHECK (p.hits.empty());
+}

@@ -313,3 +313,143 @@ TEST_CASE ("arp : toujours autant de fins que de débuts, quels que soient les s
     for (int i = 0; i < m; ++i) balance[out[i].note] += out[i].on ? 1 : -1;
     for (const auto& kv : balance) CHECK (kv.second == 0);
 }
+
+// ================================================================================================ mode motif
+
+namespace
+{
+using neptune::core::pattern::Pattern;
+Pattern patternFrom (const char* json)
+{
+    const auto r = neptune::core::pattern::fromJson (json);
+    REQUIRE (r.ok);
+    REQUIRE (r.patterns.size() == 1);
+    return r.patterns[0];
+}
+const char* kArpeggioJson = R"({ "id": "a", "length": [1,2], "hits": [
+    { "at": [0,8], "dur": [1,8], "parts": ["1"] }, { "at": [1,8], "dur": [1,8], "parts": ["3"] },
+    { "at": [2,8], "dur": [1,8], "parts": ["5"] }, { "at": [3,8], "dur": [1,8], "parts": ["5+1"] } ] })";
+}
+
+TEST_CASE ("arp motif : degrés de l'accord tenu, répétition dans la mesure, instants exacts", "[arp][pattern]")
+{
+    const auto pat = patternFrom (kArpeggioJson);
+    auto a = make();
+    a.setPattern (&pat);
+    const auto ev = run (a, kChord, (long long) (kSamplesPerBeat * 4), 333);
+    // un motif de 1/2 ronde (2 noires) dans une mesure de 4 noires : joué deux fois
+    CHECK (onNotes (ev) == std::vector<int> { 60, 64, 67, 79, 60, 64, 67, 79 });
+    int k = 0;
+    for (const auto& e : ev)
+        if (e.on) CHECK (e.at == (long long) std::llround (k++ * 0.5 * kSamplesPerBeat));
+}
+
+TEST_CASE ("arp motif : même résultat à toutes les tailles de blocs", "[arp][pattern]")
+{
+    const auto pat = patternFrom (kArpeggioJson);
+    std::vector<Event> ref;
+    for (int block : { 1, 7, 64, 256, 1000, 4096 })
+    {
+        auto a = make();
+        a.setPattern (&pat);
+        const auto ev = run (a, kChord, (long long) (kSamplesPerBeat * 8), block);
+        if (ref.empty()) ref = ev;
+        REQUIRE (ev.size() == ref.size());
+        for (size_t i = 0; i < ev.size(); ++i)
+        {
+            CHECK (ev[i].at == ref[i].at);
+            CHECK (ev[i].on == ref[i].on);
+            CHECK (ev[i].note == ref[i].note);
+        }
+    }
+}
+
+TEST_CASE ("arp motif : accord renversé reconnu, basse sous la fondamentale", "[arp][pattern]")
+{
+    const auto pat = patternFrom (R"({ "id": "b", "length": [1,1], "hits": [
+        { "at": [0,1], "dur": [1,4], "parts": ["B"] }, { "at": [1,4], "dur": [1,4], "parts": ["1"] },
+        { "at": [2,4], "dur": [1,4], "parts": ["3"] }, { "at": [3,4], "dur": [1,4], "parts": ["C"] } ] })");
+    auto a = make();
+    a.setPattern (&pat);
+    // mi sol do : do majeur en premier renversement (la basse est mi)
+    const std::vector<Event> in = { { 0, true, 64, 90 }, { 0, true, 67, 90 }, { 0, true, 72, 90 } };
+    const auto ons = onNotes (run (a, in, (long long) (kSamplesPerBeat * 3.9), 256));
+    REQUIRE (ons.size() >= 6);
+    CHECK (ons[0] == 64);          // la basse : mi, sous la fondamentale (do = 72)
+    CHECK (ons[1] == 72);          // 1 = do
+    CHECK (ons[2] == 76);          // 3 = mi
+    CHECK (ons[3] == 72);          // l'accord entier : do, mi, sol
+    CHECK (ons[4] == 76);
+    CHECK (ons[5] == 79);
+}
+
+TEST_CASE ("arp motif : vélocité, accent, durée propres au coup", "[arp][pattern]")
+{
+    const auto pat = patternFrom (R"({ "id": "v", "length": [1,1], "hits": [
+        { "at": [0,1], "dur": [1,4], "parts": ["1"], "vel": 110, "gate": 0.5 },
+        { "at": [1,4], "dur": [1,4], "parts": ["1"], "accent": true },
+        { "at": [2,4], "dur": [1,4], "parts": ["1"], "staccato": true } ] })");
+    auto a = make();
+    Params p = a.params();
+    p.accentBoost = 20;
+    p.gate = 1.0;
+    a.setParams (p);
+    a.setPattern (&pat);
+    const auto ev = run (a, kChord, (long long) (kSamplesPerBeat * 3), 256);
+    std::vector<Event> ons;
+    for (const auto& e : ev) if (e.on && e.note == 60) ons.push_back (e);
+    REQUIRE (ons.size() >= 3);
+    CHECK (ons[0].vel == 110);
+    CHECK (ons[1].vel == 90 + 20);   // vélocité jouée (90) + force de l'accent
+    CHECK (ons[2].vel == 90);        // le staccato est ignoré
+    // fin du premier coup : gate 0,5 de sa longueur (1 noire)
+    for (const auto& e : ev) if (! e.on && e.note == 60) { CHECK (e.at == (long long) (0.5 * kSamplesPerBeat)); break; }
+}
+
+TEST_CASE ("arp motif : deux mesures, la mesure du morceau choisit celle du motif", "[arp][pattern]")
+{
+    const auto pat = patternFrom (R"({ "id": "t", "length": [2,1], "bars": 2, "hits": [
+        { "at": [0,1], "dur": [1,4], "parts": ["1"] }, { "at": [1,1], "dur": [1,4], "parts": ["3"] } ] })");
+    auto a = make();
+    a.setPattern (&pat);
+    const auto ons = onNotes (run (a, kChord, (long long) (kSamplesPerBeat * 12), 500));
+    CHECK (ons == std::vector<int> { 60, 64, 60 });   // mesures 0, 1, 2 du morceau
+}
+
+TEST_CASE ("arp motif : pas de note bloquée, quels que soient les sauts", "[arp][pattern]")
+{
+    const auto pat = patternFrom (R"({ "id": "r", "length": [1,1], "hits": [
+        { "at": [0,1], "dur": [1,4], "parts": ["C"] }, { "at": [1,12], "dur": [1,12], "parts": ["5"] },
+        { "at": [1,2], "dur": [1,1], "parts": ["B","9"] } ] })");
+    auto a = make();
+    Params p = a.params();
+    p.gate = 1.0;
+    a.setParams (p);
+    a.setPattern (&pat);
+    std::map<int, int> balance;
+    std::vector<NoteOut> out (4096);
+    unsigned seed = 777;
+    auto rnd = [&] { seed = seed * 1664525u + 1013904223u; return seed >> 8; };
+    double ppq = 0.0;
+    for (int blockNo = 0; blockNo < 600; ++blockNo)
+    {
+        const int n = 1 + (int) (rnd() % 900);
+        std::vector<NoteIn> in;
+        if (rnd() % 5 == 0) in.push_back ({ (int) (rnd() % n), true, (std::uint8_t) (40 + rnd() % 40), 90 });
+        if (rnd() % 7 == 0) in.push_back ({ (int) (rnd() % n), false, (std::uint8_t) (40 + rnd() % 40), 0 });
+        std::stable_sort (in.begin(), in.end(), [] (const NoteIn& x, const NoteIn& y) { return x.offset < y.offset; });
+        Transport tr;
+        tr.playing = (blockNo % 50) < 40;
+        tr.hasPosition = tr.playing;
+        tr.bpm = 70.0 + (double) (rnd() % 120);
+        if (rnd() % 40 == 0) ppq = (double) (rnd() % 64);
+        tr.ppq = ppq;
+        const int m = a.process (in.data(), (int) in.size(), tr, n, out.data(), 4096);
+        for (int i = 0; i < m; ++i) balance[out[i].note] += out[i].on ? 1 : -1;
+        ppq += n * tr.bpm / 60.0 / kSr;
+    }
+    a.reset();
+    const int m = a.process (nullptr, 0, Transport {}, 64, out.data(), 4096);
+    for (int i = 0; i < m; ++i) balance[out[i].note] += out[i].on ? 1 : -1;
+    for (const auto& kv : balance) CHECK (kv.second == 0);
+}

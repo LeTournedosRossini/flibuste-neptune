@@ -73,6 +73,17 @@ std::string toJson (const std::vector<Pattern>& patterns, const std::string& fro
 // remplir la mesure ; un coup qui dépasse la fin de la mesure est coupé à la barre. `measureLength` en fractions de ronde.
 std::vector<Hit> hitsForMeasure (const Pattern& p, const Frac& measureLength, int measureIndex);
 
+// ---- édition (matrice d'Arpège) : tout se fait sur des fractions exactes
+// Un coup commence à `at` ; `partText` est l'écriture d'une part (« 3 », « 5+1 », « B »). Retourne l'état de la case après l'appel (allumée ou non).
+bool toggleCell (Pattern& p, const Frac& at, const Frac& dur, const std::string& partText);
+bool hasCell (const Pattern& p, const Frac& at, const std::string& partText);
+// Accent du coup qui commence à `at` ; faux (rien fait) s'il n'y a pas de coup. Retourne le nouvel état.
+bool toggleAccent (Pattern& p, const Frac& at);
+bool hasAccent (const Pattern& p, const Frac& at);
+// Nouvelle longueur totale et nombre de mesures ; les coups qui ne tiennent plus dans le motif sont retirés, les autres coupés à la fin.
+void setLengthAndBars (Pattern& p, const Frac& length, int bars);
+void clearHits (Pattern& p);
+
 // ---- degrés
 struct ChordContext
 {
@@ -80,6 +91,10 @@ struct ChordContext
     std::uint16_t rel = 0x091; // notes de l'accord relatives à la fondamentale, bit n = n demi-tons (défaut : majeur 0-4-7)
     int bassPc = -1;           // classe de hauteur de la basse (0..11) ou -1 : la fondamentale
 };
+// Accord à partir de notes tenues (notes MIDI) : la fondamentale est cherchée parmi les notes (la plus grave d'abord) de façon que l'ensemble des classes de
+// hauteur soit une qualité connue (majeur, mineur, 7, maj7, m7, dim, sus...). Renversement : `bassPc` = la note la plus grave. Sinon la plus grave est la
+// fondamentale et `rel` reprend les intervalles réellement tenus (les degrés se lisent alors comme les notes : 1, puis ce qui ressemble à 3, 5, 7...).
+ChordContext contextFromNotes (const int* notes, int count);
 enum class Absent { Skip, Play };
 // Demi-tons au-dessus de la fondamentale du degré (octave comprise), ou -1 si le degré est absent de l'accord et que `absent` = Skip.
 int degreeSemitones (const Part& part, std::uint16_t rel, Absent absent);

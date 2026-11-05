@@ -258,6 +258,88 @@ std::vector<Hit> hitsForMeasure (const Pattern& p, const Frac& measureLength, in
     return out;
 }
 
+// ================================================================================================ édition
+
+namespace
+{
+Hit* hitAt (Pattern& p, const Frac& at)
+{
+    for (auto& h : p.hits) if (compare (h.at, at) == 0) return &h;
+    return nullptr;
+}
+const Hit* hitAtConst (const Pattern& p, const Frac& at)
+{
+    for (const auto& h : p.hits) if (compare (h.at, at) == 0) return &h;
+    return nullptr;
+}
+}
+
+bool hasCell (const Pattern& p, const Frac& at, const std::string& partText)
+{
+    if (const auto* h = hitAtConst (p, at))
+        for (const auto& pt : h->parts) if (pt.text == partText) return true;
+    return false;
+}
+
+bool toggleCell (Pattern& p, const Frac& at, const Frac& dur, const std::string& partText)
+{
+    Part part;
+    if (! parsePart (partText, part) || compare (at, p.length) >= 0) return false;
+    if (auto* h = hitAt (p, at))
+    {
+        for (size_t i = 0; i < h->parts.size(); ++i)
+            if (h->parts[i].text == part.text)
+            {
+                h->parts.erase (h->parts.begin() + (long) i);
+                if (h->parts.empty()) p.hits.erase (p.hits.begin() + (h - p.hits.data()));
+                return false;
+            }
+        h->parts.push_back (part);
+        return true;
+    }
+    if (p.hits.size() >= (size_t) kMaxHits) return false;
+    Hit n;
+    n.at = at;
+    n.dur = dur;
+    n.parts.push_back (part);
+    p.hits.push_back (n);
+    std::stable_sort (p.hits.begin(), p.hits.end(), [] (const Hit& a, const Hit& b) { return compare (a.at, b.at) < 0; });
+    return true;
+}
+
+bool hasAccent (const Pattern& p, const Frac& at)
+{
+    const auto* h = hitAtConst (p, at);
+    return h != nullptr && h->accent;
+}
+
+bool toggleAccent (Pattern& p, const Frac& at)
+{
+    if (auto* h = hitAt (p, at))
+    {
+        h->accent = ! h->accent;
+        return h->accent;
+    }
+    return false;
+}
+
+void setLengthAndBars (Pattern& p, const Frac& length, int bars)
+{
+    if (length.n <= 0) return;
+    p.length = length;
+    p.bars = std::clamp (bars, 1, kMaxBars);
+    std::vector<Hit> kept;
+    for (auto h : p.hits)
+    {
+        if (compare (h.at, p.length) >= 0) continue;
+        if (compare (h.at + h.dur, p.length) > 0) h.dur = p.length - h.at;
+        kept.push_back (h);
+    }
+    p.hits = std::move (kept);
+}
+
+void clearHits (Pattern& p) { p.hits.clear(); }
+
 // ================================================================================================ degrés
 
 namespace
@@ -326,5 +408,57 @@ int resolvePart (const Part& part, const ChordContext& chord, Absent absent, int
         }
     }
     return k;
+}
+
+namespace
+{
+constexpr std::uint16_t m (std::initializer_list<int> v)
+{
+    std::uint16_t r = 0;
+    for (int x : v) r = (std::uint16_t) (r | (1u << x));
+    return r;
+}
+const std::uint16_t kKnown[] = {
+    m ({ 0, 4, 7 }), m ({ 0, 3, 7 }), m ({ 0, 3, 6 }), m ({ 0, 4, 8 }), m ({ 0, 2, 7 }), m ({ 0, 5, 7 }),
+    m ({ 0, 4, 7, 9 }), m ({ 0, 3, 7, 9 }), m ({ 0, 4, 7, 10 }), m ({ 0, 4, 7, 11 }), m ({ 0, 3, 7, 10 }), m ({ 0, 3, 7, 11 }),
+    m ({ 0, 3, 6, 10 }), m ({ 0, 3, 6, 9 }), m ({ 0, 5, 7, 10 }), m ({ 0, 2, 4, 7 }), m ({ 0, 2, 4, 7, 10 }), m ({ 0, 2, 4, 7, 11 }), m ({ 0, 2, 3, 7, 10 }) };
+}
+
+ChordContext contextFromNotes (const int* notes, int count)
+{
+    ChordContext c;
+    if (count <= 0) return c;
+    int lowest = notes[0];
+    for (int i = 1; i < count; ++i) lowest = std::min (lowest, notes[i]);
+    std::uint16_t pcs = 0;
+    for (int i = 0; i < count; ++i) pcs = (std::uint16_t) (pcs | (1u << (((notes[i] % 12) + 12) % 12)));
+    auto relTo = [&] (int root) {
+        std::uint16_t r = 0;
+        for (int s = 0; s < 12; ++s)
+            if ((pcs >> ((root + s) % 12)) & 1u) r = (std::uint16_t) (r | (1u << s));
+        return r;
+    };
+    // candidats : les notes tenues, de la plus grave à la plus aiguë
+    std::vector<int> order (notes, notes + count);
+    std::sort (order.begin(), order.end());
+    for (int cand : order)
+    {
+        const int pc = ((cand % 12) + 12) % 12;
+        const auto rel = relTo (pc);
+        for (auto k : kKnown)
+            if (k == rel)
+            {
+                c.rel = rel;
+                int rootMidi = -1;
+                for (int n : order) if (((n % 12) + 12) % 12 == pc) { rootMidi = n; break; }
+                c.rootMidi = rootMidi;
+                c.bassPc = ((lowest % 12) + 12) % 12 == pc ? -1 : ((lowest % 12) + 12) % 12;
+                return c;
+            }
+    }
+    c.rootMidi = lowest;
+    c.rel = relTo (((lowest % 12) + 12) % 12);
+    c.bassPc = -1;
+    return c;
 }
 } // namespace neptune::core::pattern

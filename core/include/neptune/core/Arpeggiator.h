@@ -11,6 +11,8 @@
 #include <cmath>
 #include <cstdint>
 
+#include "neptune/core/ChordPattern.h"
+
 namespace neptune::core::arp
 {
 enum class Pattern : int { Up = 0, Down, UpDown, UpDownRepeat, Random, AsPlayed, Chord, Count };
@@ -39,6 +41,8 @@ struct Transport
     bool hasPosition = false;
     double ppq = 0.0;      // position au début du bloc, en noires
     double bpm = 120.0;
+    double barStartPpq = 0.0;    // début de la mesure en cours (noires) ; sert à caler la grille des mesures en mode motif
+    double beatsPerBar = 4.0;    // longueur d'une mesure en noires
 };
 
 class Arpeggiator
@@ -47,6 +51,16 @@ public:
     static constexpr int kMaxHeld = 32;
     static constexpr int kMaxPool = 128;
     static constexpr int kMaxPending = 256;
+
+    // Mode motif : les pas viennent d'un motif en degrés d'accord (ChordPattern.h) au lieu de la grille automatique. `nullptr` : mode automatique.
+    // Le motif doit rester valide pendant les appels à `process` ; le changer coupe la file des coups à venir (les notes qui sonnent gardent leur fin).
+    void setPattern (const pattern::Pattern* p, pattern::Absent absent = pattern::Absent::Skip)
+    {
+        if (p != pattern_) lastHitT_ = -1e300;
+        pattern_ = p;
+        absent_ = absent;
+    }
+    const pattern::Pattern* pattern() const { return pattern_; }
 
     void setSampleRate (double sr) { sampleRate_ = sr > 0.0 ? sr : 44100.0; }
 
@@ -114,20 +128,31 @@ public:
         }
         wasSync_ = syncHost;
         const double start = syncHost ? tr.ppq : clock_;
+        if (resync) lastHitT_ = -1e300;
 
         // ---- fusion : fins programmées, événements d'entrée, pas de la grille (dans cet ordre à instant égal)
         int ie = 0;
         const double blockBeats = numSamples * bps;
+        int dueN = 0, di = 0;
+        if (pattern_ != nullptr) dueN = collectDue (start, blockBeats, bps, numSamples, tr);
         for (;;)
         {
             int nextOff = -1, offAt = numSamples;
             for (int i = 0; i < pendingCount_; ++i)
                 if (pending_[i].at < offAt) { offAt = pending_[i].at; nextOff = i; }
             const int inAt = ie < nIn ? std::clamp (in[ie].offset, 0, numSamples - 1) : numSamples;
-            const double stepT = stepTime (nextIndex_);
-            const double stepRel = stepT - start;
-            const long long stepSample = std::llround (stepRel / bps);   // arrondi une seule fois : même résultat quelle que soit la taille des blocs
-            const int stepAt = stepSample < numSamples ? (int) std::max<long long> (stepSample, 0) : numSamples;
+            int stepAt = numSamples;
+            if (pattern_ != nullptr)
+            {
+                if (di < dueN) stepAt = due_[di].at;
+            }
+            else
+            {
+                const double stepT = stepTime (nextIndex_);
+                const double stepRel = stepT - start;
+                const long long stepSample = std::llround (stepRel / bps);   // arrondi une seule fois : même résultat quelle que soit la taille des blocs
+                stepAt = stepSample < numSamples ? (int) std::max<long long> (stepSample, 0) : numSamples;
+            }
 
             if (nextOff >= 0 && offAt <= inAt && offAt <= stepAt)
             {
@@ -141,20 +166,111 @@ public:
             }
             else if (stepAt < numSamples)
             {
-                doStep (stepAt, bps);
-                ++nextIndex_;
+                if (pattern_ != nullptr)
+                {
+                    doPatternHit (due_[di], bps);
+                    ++di;
+                }
+                else
+                {
+                    doStep (stepAt, bps);
+                    ++nextIndex_;
+                }
             }
             else
                 break;
         }
 
         for (int i = 0; i < pendingCount_; ++i) pending_[i].at -= numSamples;
+        if (pattern_ != nullptr && dueN > 0) lastHitT_ = std::max (lastHitT_, due_[dueN - 1].t);
         expectedNext_ = start + blockBeats;
         if (! syncHost) clock_ = expectedNext_;
         return outN_;
     }
 
 private:
+    // un coup du motif à jouer dans ce bloc
+    struct Due
+    {
+        double t = 0.0;        // temps de l'hôte (noires)
+        int at = 0;            // instant dans le bloc (échantillons)
+        int hit = 0;           // indice du coup dans le motif
+        double durBeats = 0.0; // longueur (noires), coupée à la barre
+    };
+    static constexpr int kMaxDue = 2048;
+
+    // Coups du motif dont l'instant tombe dans [start, start + blockBeats), triés. Règle de Scorsaire : la mesure k joue la mesure k modulo `bars` du motif,
+    // le motif se répète pour remplir la mesure, un coup qui dépasse la barre est coupé.
+    int collectDue (double start, double blockBeats, double bps, int numSamples, const Transport& tr)
+    {
+        const auto& pat = *pattern_;
+        const double bb = std::max (0.25, tr.beatsPerBar);
+        const double origin = tr.barStartPpq - std::floor (tr.barStartPpq / bb + 0.5) * bb;   // décalage de la grille des mesures (0 en général)
+        const double barBeats = pat.barLength().toBeats();
+        if (barBeats <= 0.0 || pat.hits.empty()) return 0;
+        const int bars = std::max (1, pat.bars);
+        int n = 0;
+        const auto m0 = (long long) std::floor ((start - origin) / bb), m1 = (long long) std::floor ((start + blockBeats - origin) / bb);
+        for (long long mi = m0; mi <= m1; ++mi)
+        {
+            const int bar = (int) (((mi % bars) + bars) % bars);
+            const double first = barBeats * bar, last = first + barBeats;
+            const double measureStart = origin + (double) mi * bb, measureEnd = measureStart + bb;
+            for (int hi = 0; hi < (int) pat.hits.size(); ++hi)
+            {
+                const auto& h = pat.hits[(size_t) hi];
+                const double hAt = h.at.toBeats();
+                if (hAt < first - 1e-9 || hAt >= last - 1e-9) continue;
+                for (double rep = 0.0; rep + (hAt - first) < bb - 1e-9; rep += barBeats)
+                {
+                    const double t = measureStart + rep + (hAt - first);
+                    const long long sample = std::llround ((t - start) / bps);
+                    if (sample < -1 || sample >= numSamples || t <= lastHitT_ + 1e-9 || n >= kMaxDue) continue;
+                    due_[n++] = { t, (int) std::max<long long> (sample, 0), hi, std::min (h.dur.toBeats(), measureEnd - t) };
+                }
+            }
+        }
+        std::sort (due_.begin(), due_.begin() + n, [] (const Due& a, const Due& b) { return a.t < b.t || (a.t == b.t && a.hit < b.hit); });
+        return n;
+    }
+
+    void doPatternHit (const Due& d, double bps)
+    {
+        if (heldCount_ == 0) return;
+        const auto& h = pattern_->hits[(size_t) d.hit];
+        int notes[kMaxHeld];
+        int vsum = 0;
+        for (int i = 0; i < heldCount_; ++i) { notes[i] = held_[i].note; vsum += held_[i].velocity; }
+        const auto ctx = pattern::contextFromNotes (notes, heldCount_);
+        const int heldVel = std::clamp (vsum / heldCount_, 1, 127);
+        int vel = h.vel > 0 ? h.vel : (params_.fixedVelocity ? params_.velocity : heldVel);
+        if (h.accent) vel += params_.accentBoost;
+        vel = std::clamp (vel, 1, 127);
+        const double gate = h.gate > 0.0 ? h.gate : params_.gate;
+        const int len = std::max (1, (int) std::llround (gate * d.durBeats / bps));
+        for (const auto& part : h.parts)
+        {
+            int out[16];
+            const int n = pattern::resolvePart (part, ctx, absent_, out, 16);
+            for (int k = 0; k < n; ++k) startNote (d.at, std::clamp (out[k] + params_.transpose, 0, 127), vel, len);
+        }
+    }
+
+    // Début de note avec sa fin programmée ; une note identique encore en cours est terminée d'abord.
+    void startNote (int at, int note, int vel, int len)
+    {
+        for (int i = 0; i < pendingCount_; ++i)
+            if (pending_[i].note == note)
+            {
+                emit (at, false, (std::uint8_t) note, 0);
+                pending_[i] = pending_[--pendingCount_];
+                break;
+            }
+        if (outN_ >= outCap_ || pendingCount_ >= kMaxPending) return;   // pas de début sans fin programmée
+        emit (at, true, (std::uint8_t) note, (std::uint8_t) vel);
+        pending_[pendingCount_++] = { at + len, (std::uint8_t) note };
+    }
+
     struct Held { std::uint8_t note = 0, velocity = 0; };
     struct Pending { int at = 0; std::uint8_t note = 0; };
 
@@ -298,6 +414,10 @@ private:
     double clock_ = 0.0, expectedNext_ = 0.0;
     bool clockValid_ = false, wasSync_ = false;
     std::uint32_t rng_ = 2463534242u;
+    const pattern::Pattern* pattern_ = nullptr;
+    pattern::Absent absent_ = pattern::Absent::Skip;
+    double lastHitT_ = -1e300;
+    std::array<Due, kMaxDue> due_ {};
 
     NoteOut* out_ = nullptr;
     int outN_ = 0, outCap_ = 0;
