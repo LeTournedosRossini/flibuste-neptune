@@ -70,6 +70,8 @@ struct Pattern
     // Mode « notes » : les parts « 1 » à « 15 » sont des RANGS des notes tenues (de la plus grave à la plus aiguë), pas des degrés d'accord. Repère dans le motif :
     // `x.arpege.mode = "notes"` (Scorsaire garde `x` sans le lire). Sans repère : mode « accord » (degrés).
     bool notesMode = false;
+    // `voices.rh = "led"` (Scorsaire, lu dans `extraJson`) : les degrés ne donnent que les notes, les octaves sont choisies par la conduite de voix.
+    bool voicesLed = false;
     Frac barLength() const;          // longueur d'une mesure du motif : length / bars
 };
 

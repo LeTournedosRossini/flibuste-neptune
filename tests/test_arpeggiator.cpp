@@ -1028,3 +1028,47 @@ TEST_CASE ("suiveur : voix conduites, peu de mouvement d'un accord à l'autre, b
     for (const auto& e : again) if (e.on && e.ch == 0) a0.push_back (e.note);
     CHECK (a0 == hands[0]);
 }
+
+TEST_CASE ("motif : voices.rh = led est lu", "[arp][pattern][voice]")
+{
+    const auto r = neptune::core::pattern::fromJson (R"({"id":"a","length":[1,1],"voices":{"rh":"led","lh":"literal"},"hits":[{"at":[0,1],"dur":[1,4],"parts":["C"]}]})");
+    REQUIRE (r.ok);
+    CHECK (r.patterns[0].voicesLed);
+    const auto r2 = neptune::core::pattern::fromJson (R"({"id":"a","length":[1,1],"hits":[{"at":[0,1],"dur":[1,4],"parts":["C"]}]})");
+    CHECK (! r2.patterns[0].voicesLed);
+}
+
+TEST_CASE ("arp : voix conduites, l'accord suivant se pose au plus près du précédent", "[arp][carte][voice]")
+{
+    const auto pat = patternFrom (R"({ "id": "c", "length": [1,1], "hits": [ { "at": [0,1], "dur": [1,1], "parts": ["C"] } ] })");
+    ChordListEnv env;
+    env.chords = { { 0.0, 4.0, 0, 0x091, -1 }, { 4.0, 4.0, 5, 0x091, -1 }, { 8.0, 4.0, 7, 0x491, -1 } };   // do, fa, sol7
+    auto spread = [&] (bool led)
+    {
+        auto a = make();
+        a.setPattern (&pat);
+        a.setEnvironment (&env);
+        a.setVoiceLeading (led);
+        const auto ons = onNotes (run (a, { { 0, true, 48, 90 } }, (long long) (kSamplesPerBeat * 11.9), 256));
+        REQUIRE (ons.size() >= 9);
+        return ons;
+    };
+    const auto fixedNotes = spread (false), ledNotes = spread (true);
+    auto topMove = [] (const std::vector<int>& v)
+    {
+        int worst = 0, prevTop = -1;
+        size_t i = 0;
+        while (i < v.size())
+        {
+            const size_t n = i == 0 ? 3 : (v.size() - i >= 4 && i >= 6 ? 4 : 3);
+            int top = 0;
+            for (size_t k = i; k < i + n && k < v.size(); ++k) top = std::max (top, v[k]);
+            if (prevTop >= 0) worst = std::max (worst, std::abs (top - prevTop));
+            prevTop = top;
+            i += n;
+        }
+        return worst;
+    };
+    CHECK (topMove (ledNotes) <= topMove (fixedNotes));
+    for (int n : ledNotes) { CHECK (n >= 55); CHECK (n <= 76); }
+}

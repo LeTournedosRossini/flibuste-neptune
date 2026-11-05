@@ -182,6 +182,8 @@ bool readPattern (const json& j, Pattern& out)
         const auto ex = json::parse (p.extraJson, nullptr, false);
         if (ex.is_object() && ex.contains ("x") && ex["x"].is_object() && ex["x"].contains ("arpege") && ex["x"]["arpege"].is_object())
             p.notesMode = ex["x"]["arpege"].value ("mode", std::string()) == "notes";
+        if (ex.is_object() && ex.contains ("voices") && ex["voices"].is_object())
+            p.voicesLed = ex["voices"].value ("rh", std::string()) == "led";   // Scorsaire : voices { rh: "led" } = octaves choisies par la conduite de voix
     }
     out = p;
     return true;

@@ -12,6 +12,7 @@
 #include <cstdint>
 
 #include "neptune/core/ChordPattern.h"
+#include "neptune/core/VoiceLeading.h"
 
 namespace neptune::core::arp
 {
@@ -89,6 +90,10 @@ public:
     // Octave de base quand Carte joue seule (aucune note tenue) : la fondamentale de l'accord est placée entre cette note (MIDI) et onze demi-tons au-dessus.
     void setBaseNote (int midi) { baseNote_ = std::clamp (midi, 0, 108); }
 
+    // Conduite de voix pour les motifs en degrés : chaque coup est posé au plus près du précédent (les octaves écrites sont ignorées ; la basse « B » reste telle quelle).
+    // Vrai : tous les motifs ; faux : seulement ceux qui le demandent (`voices.rh = "led"`).
+    void setVoiceLeading (bool all) { ledAll_ = all; }
+
     void setSampleRate (double sr) { sampleRate_ = sr > 0.0 ? sr : 44100.0; }
 
     void setParams (const Params& p)
@@ -118,6 +123,7 @@ public:
         down_.fill (false);
         releaseAllPending_ = true;
         counter_ = 0;
+        ledCount_ = 0;
     }
 
     int heldCount() const { return heldCount_; }
@@ -156,7 +162,7 @@ public:
         }
         wasSync_ = syncHost;
         const double start = syncHost ? tr.ppq : clock_;
-        if (resync) lastHitT_ = -1e300;
+        if (resync) { lastHitT_ = -1e300; ledCount_ = 0; }   // saut de position, arrêt, départ : plus de mémoire du voicing
 
         // ---- fusion : fins programmées, événements d'entrée, pas de la grille (dans cet ordre à instant égal)
         int ie = 0;
@@ -356,11 +362,56 @@ private:
         vel = std::clamp (vel, 1, 127);
         const double gate = h.gate > 0.0 ? h.gate : params_.gate;
         const int len = std::max (1, (int) std::llround (gate * d.durBeats / bps));
+        const bool led = ! d.pat->notesMode && (ledAll_ || d.pat->voicesLed);
+        std::array<int, voice::kMaxVoices> ledNotes {};
+        int ledN = 0;
+        if (led)
+        {
+            // classes de hauteur de toutes les parts de la main droite (accord, degrés), puis une position conduite depuis le coup précédent
+            int pcs[voice::kMaxVoices], np = 0;
+            for (const auto& part : h.parts)
+            {
+                if (part.kind == pattern::Part::Kind::Bass || part.leftHand) continue;
+                int out[16];
+                const int n = pattern::resolvePart (part, ctx, absent_, out, 16);
+                for (int k = 0; k < n; ++k)
+                {
+                    const int pc = ((out[k] % 12) + 12) % 12;
+                    bool seen = false;
+                    for (int i = 0; i < np; ++i) seen = seen || pcs[i] == pc;
+                    if (! seen && np < voice::kMaxVoices) pcs[np++] = pc;
+                }
+            }
+            const int anchor = (synth.active ? baseNote_ : (sorted[0] / 12) * 12);   // tessiture 55..76 pour une base de 48
+            const auto v = voice::voiceLead (ledCount_ > 0 ? ledPrev_.data() : nullptr, ledCount_, pcs, np, voice::kHandLow + anchor - 48, voice::kHandHigh + anchor - 48, voice::Rules::usual());
+            if (v.count > 0)
+            {
+                ledNotes = v.notes;
+                ledN = v.count;
+                ledPrev_ = v.notes;
+                ledCount_ = v.count;
+            }
+        }
+        int played[32], nPlayed = 0;
         for (const auto& part : h.parts)
         {
             int out[16];
             const int n = d.pat->notesMode ? pattern::resolveRank (part, sorted.data(), heldCount_, out, 16) : pattern::resolvePart (part, ctx, absent_, out, 16);
-            for (int k = 0; k < n; ++k) startNote (d.at, std::clamp (out[k] + params_.transpose, 0, 127), vel, len);
+            const bool useLed = ledN > 0 && part.kind != pattern::Part::Kind::Bass && ! part.leftHand;
+            for (int k = 0; k < n; ++k)
+            {
+                int note = out[k];
+                if (useLed)
+                {
+                    const int pc = ((note % 12) + 12) % 12;
+                    for (int i = 0; i < ledN; ++i) if (ledNotes[(size_t) i] % 12 == pc) { note = ledNotes[(size_t) i]; break; }
+                    bool dup = false;
+                    for (int i = 0; i < nPlayed; ++i) dup = dup || played[i] == note;
+                    if (dup) continue;
+                    if (nPlayed < 32) played[nPlayed++] = note;
+                }
+                startNote (d.at, std::clamp (note + params_.transpose, 0, 127), vel, len);
+            }
         }
     }
 
@@ -546,6 +597,9 @@ private:
     const Environment* env_ = nullptr;
     bool carteLive_ = false;
     int baseNote_ = 48;
+    bool ledAll_ = false;
+    std::array<int, voice::kMaxVoices> ledPrev_ {};
+    int ledCount_ = 0;
     pattern::Absent absent_ = pattern::Absent::Skip;
     double lastHitT_ = -1e300;
     std::array<Due, kMaxDue> due_ {};

@@ -55,6 +55,7 @@ public:
     juce::AudioParameterChoice* absentMode = nullptr;  // degré absent de l'accord : sauter / jouer la note par défaut / prendre la note de la gamme (Carte)
     juce::AudioParameterChoice* source = nullptr;      // 0 : notes tenues et mesures de l'hôte ; 1 : Carte (accord, gamme, motif, mesures)
     juce::AudioParameterInt* carteChannel = nullptr;   // canal de liaison de Carte, 1 à 8
+    juce::AudioParameterBool* ledVoices = nullptr;     // voix conduites : les motifs en degrés se posent au plus près du coup précédent (sinon seulement ceux qui le demandent)
     juce::AudioParameterInt* baseOctave = nullptr;     // octave où Carte joue seule (sans note tenue) : 1 à 6 (3 = do 48)
 
     static constexpr int kSlots = 16;
