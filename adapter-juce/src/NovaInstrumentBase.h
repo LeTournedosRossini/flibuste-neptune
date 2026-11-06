@@ -21,6 +21,8 @@ struct InstrumentLink
     std::function<std::uint64_t (int word)> heldKeys;             // touches tenues (bits 0..63 puis 64..127)
     std::function<void (float)> pitchBend;                        // molette de hauteur à l'écran, -1..+1 (plugin seul ; nul : pas de molette)
     std::function<void (float)> modWheel;                         // molette de modulation à l'écran, 0..1 (CC 1)
+    std::function<juce::String()> carteText;                      // plugin seul (facultatif) : « Carte : ON · canal 1 · Dm7 » ; sans lui, pas de bouton Carte
+    std::function<void (juce::Component*)> carteMenu;             // menu de Carte, ancré au bouton
     int track = 0;                                                // piste dont on règle les paramètres automatisables
     std::vector<neptune::core::ParamId> outputs;                  // potards de la colonne de gauche (volume, pan, gain, accordage)
 };
@@ -80,6 +82,8 @@ private:
     nova::Panel *outPanel_ = nullptr, *navPanel_ = nullptr;
     std::vector<nova::KnobCard*> outKnobs_;
     nova::Pill* kbPill_ = nullptr;
+    nova::Pill* cartePill_ = nullptr;      // barre du bas : état de Carte et son menu (plugins seuls)
+    juce::String carteShown_;
     nova::Panel* matrixPanel_ = nullptr;
     nova::PresetTiles* tiles_ = nullptr;
     nova::PresetFields* fields_ = nullptr;

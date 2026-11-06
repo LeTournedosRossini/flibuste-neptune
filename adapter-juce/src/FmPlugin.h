@@ -7,6 +7,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include <memory>
 #include <string>
 #include <vector>
+#include "CarteDriver.h"
 #include "HostProbe.h"
 #include "ModulationHost.h"
 #include "NovaFmEditor.h"
@@ -115,6 +116,7 @@ public:
 
     neptune::core::fm::FmSynthEngine& engine() { return engine_; }
     const neptune::core::settings::GlobalSettings& settings() const { return settings_; }
+    CarteDriver& carte() { return carte_; }
     void applySettings (const neptune::core::settings::GlobalSettings&);   // met à jour et enregistre les réglages globaux de la suite (thème, contraste, langue)
 
 private:
@@ -133,6 +135,7 @@ private:
     std::unique_ptr<neptune::core::preset::Library> library_;
     std::string currentPresetId_;
     std::uint32_t presetRevision_ = 1;
+    CarteDriver carte_ { 1, 1, "fm6op" };   // joue d'après la carte partagée : tout sur le canal 1 (un seul instrument, pédale comprise)
     std::atomic<float> uiBend_ { 0.0f }, uiMod_ { 0.0f };   // molettes de l'écran
     float lastUiBend_ = 0.0f, lastUiMod_ = 0.0f;              // thread audio : dernières positions transmises
     std::atomic<int> midiBank_ { 0 };

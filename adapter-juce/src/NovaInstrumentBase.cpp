@@ -114,6 +114,11 @@ void NovaInstrumentBase::buildCommon (const char* outputHelpKey)
     for (const auto id : link_.outputs) outKnobs_.push_back (knob (-1, id, {}, true));
     kbPill_ = add<nova::Pill> (-1, skin(), nova::Pill::Look::Small);
     kbPill_->onClick = [this] { keyboardShown_ = ! keyboardShown_; if (! keyboardShown_) keyboard_->releaseAll(); applyKeyboard(); resized(); };
+    if (link_.carteMenu)
+    {
+        cartePill_ = add<nova::Pill> (-1, skin());
+        cartePill_->onClick = [this] { link_.carteMenu (cartePill_); };
+    }
     addInfo (-1, outPanel_, outputHelpKey, 1);
 
     // page MATRICE
@@ -269,6 +274,7 @@ void NovaInstrumentBase::layoutCommon()
 
     // ---- barre du bas, en-tête, gestionnaire
     abPill()->setBounds (R (14, 724 + 12, 40, 32));
+    if (cartePill_ != nullptr) cartePill_->setBounds (R (64, 724 + 12, 380, 32));
     presetPill()->setBounds (R (440, 11, 280, 36));
     ui_->resized();
 }
@@ -276,6 +282,12 @@ void NovaInstrumentBase::layoutCommon()
 void NovaInstrumentBase::tickCommon()
 {
     presetPill()->setText (ui_->label());
+    if (cartePill_ != nullptr && link_.carteText)
+    {
+        const auto t = link_.carteText();
+        if (t != carteShown_) { carteShown_ = t; cartePill_->setText (t); }
+        cartePill_->setOn (t.startsWith (juce::String::fromUTF8 ("Carte : ON")));
+    }
     for (auto& f : updaters_[0]) f();
     const int page = currentPage();
     if (page >= 0 && page + 1 < static_cast<int> (updaters_.size())) for (auto& f : updaters_[static_cast<std::size_t> (page + 1)]) f();

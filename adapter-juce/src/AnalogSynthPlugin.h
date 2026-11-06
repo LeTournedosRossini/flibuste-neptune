@@ -7,6 +7,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include <memory>
 #include <string>
 #include <vector>
+#include "CarteDriver.h"
 #include "HostProbe.h"
 #include "ModulationHost.h"
 #include "ParamHost.h"
@@ -124,6 +125,7 @@ public:
 
     neptune::core::analogsynth::AnalogSynthEngine& engine() { return engine_; }
     const neptune::core::settings::GlobalSettings& settings() const { return settings_; }
+    CarteDriver& carte() { return carte_; }
     void applySettings (const neptune::core::settings::GlobalSettings&);   // met à jour et enregistre les réglages globaux de la suite (thème, contraste, langue)
 
 private:
@@ -143,6 +145,7 @@ private:
     std::string currentPresetId_;
     std::uint32_t presetRevision_ = 1;
 
+    CarteDriver carte_ { 1, 1, "analogsynth" };   // joue d'après la carte partagée : tout sur le canal 1 (un seul instrument, pédale comprise)
     std::atomic<float> uiBend_ { 0.0f }, uiMod_ { 0.0f };   // molettes de l'écran
     float lastUiBend_ = 0.0f, lastUiMod_ = 0.0f;              // thread audio : dernières positions transmises
     std::atomic<int> midiBank_ { 0 };           // dernier CC 0 reçu (Bank Select MSB)

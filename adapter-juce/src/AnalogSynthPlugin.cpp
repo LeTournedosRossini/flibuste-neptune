@@ -58,6 +58,7 @@ void AnalogSynthProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     engine_.prepare (sampleRate, samplesPerBlock);
     rig_.prepare (sampleRate);
     rig_.reset (engine_.params());
+    carte_.prepare (sampleRate);
 }
 
 void AnalogSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -86,6 +87,9 @@ void AnalogSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     // Matrice de modulation : évaluée une fois par bloc, avant le rendu (les décalages sont lus par le moteur à chaque morceau de bloc)
     rig_.process (n, engine_.params());
+
+    // Carte : pendant la lecture, le synthé joue d'après la carte (notes ajoutées aux événements de l'hôte, à leur instant dans le bloc)
+    carte_.process (getPlayHead(), getSampleRate(), n, midi);
 
     // Les événements MIDI sont appliqués à leur position dans le bloc : le rendu est découpé aux événements.
     int pos = 0;
@@ -136,7 +140,14 @@ void AnalogSynthProcessor::handleAsyncUpdate()
 void AnalogSynthProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
     const auto matrix = rig_.matrix();
-    const auto text = analog::stateToJson (engine_.params(), engine_.description(), currentPresetId_, &matrix);
+    auto text = analog::stateToJson (engine_.params(), engine_.description(), currentPresetId_, &matrix);
+    // les réglages de Carte ne sont pas des paramètres : une clé de plus dans le document d'état (les anciens états n'en ont pas)
+    auto doc = nlohmann::json::parse (text, nullptr, false);
+    if (doc.is_object())
+    {
+        carte_.saveState (doc);
+        text = doc.dump();
+    }
     dest.append (text.data(), text.size());
 }
 
@@ -148,6 +159,7 @@ void AnalogSynthProcessor::setStateInformation (const void* data, int size)
     modulation::Matrix matrix;
     const std::string text (static_cast<const char*> (data), static_cast<std::size_t> (size));
     if (! analog::stateFromJson (text, engine_.params(), d, presetId, &matrix)) return;
+    carte_.loadState (nlohmann::json::parse (text, nullptr, false));
     engine_.setDescription (d);
     rig_.setMatrix (matrix, engine_.params());
     currentPresetId_ = presetId;
@@ -413,6 +425,8 @@ void NovaSynthPluginEditor::buildContent()
     link.track = 0;
     link.pitchBend = [&p] (float v) { p.uiPitchBend (v); };
     link.modWheel = [&p] (float v) { p.uiModWheel (v); };
+    link.carteText = [&p] { return p.carte().text(); };
+    link.carteMenu = [&p] (juce::Component* anchor) { p.carte().showMenu (anchor); };
     link.modulation = &p;   // la page MOD : la matrice de modulation du plugin
     link.outputs = { analog::volume, analog::pan, static_cast<ParamId> (sampler::gain), static_cast<ParamId> (sampler::tuneSemitones), static_cast<ParamId> (sampler::tuneCents) };
     content_.reset();

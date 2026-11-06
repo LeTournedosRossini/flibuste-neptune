@@ -15,9 +15,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "PresetHost.h"
 #include "NovaOrganEditor.h"
 #include "PresetManager.h"
-#include "neptune/core/Arpeggiator.h"
-#include "neptune/core/ChordFollower.h"
-#include "neptune/core/ChordMapEnvironment.h"
+#include "CarteDriver.h"
 #include "neptune/core/I18n.h"
 #include "neptune/core/OrganPreset.h"
 #include "neptune/core/OrganSynth.h"
@@ -34,7 +32,7 @@ class OrganProcessor : public juce::AudioProcessor,
 {
 public:
     OrganProcessor();
-    ~OrganProcessor() override { ticker_.stopTimer(); cancelPendingUpdate(); }
+    ~OrganProcessor() override { cancelPendingUpdate(); }
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -80,40 +78,8 @@ public:
     const neptune::core::preset::Preset* currentPreset() const override { return currentPresetId_.empty() ? nullptr : library_->find (currentPresetId_); }
     std::uint32_t presetRevision() const override { return presetRevision_; }
     void touchPresets() override { ++presetRevision_; }
-    // ---- Carte : l'orgue tient l'accord de la carte partagée pendant la lecture (voir docs/plan-harmonie-arpegiateur.md)
-    bool carteFollow() const noexcept { return carteFollow_.load(); }
-    void setCarteFollow (bool on) { carteFollow_.store (on); }
-    int carteChannel() const noexcept { return carteChannel_.load(); }                 // canal de liaison, 1..8
-    void setCarteChannel (int c) { carteChannel_.store (juce::jlimit (1, 8, c)); tick(); }
-    int chordMidiChannel() const noexcept { return chordChannel_.load(); }             // canal MIDI des accords, 1..16
-    void setChordMidiChannel (int c) { chordChannel_.store (juce::jlimit (1, 16, c)); }
-    int chordMidiChannel2() const noexcept { return chordChannel2_.load(); }           // second clavier recevant les mêmes notes (« upper et lower »), 0 : aucun
-    void setChordMidiChannel2 (int c) { chordChannel2_.store (juce::jlimit (0, 16, c)); }
-    int pedalMotifSlot() const noexcept { return pedalSlot_.load(); }                  // motif joué par la pédale (0 : aucun : la partie B du motif principal)
-    void setPedalMotifSlot (int s) { pedalSlot_.store (juce::jlimit (0, 16, s)); }
-    int approachChance() const noexcept { return approachChance_.load(); }             // part des changements qui reçoivent une approche, en % (25, 50, 75, 100)
-    void setApproachChance (int pct) { approachChance_.store (juce::jlimit (0, 100, pct)); }
-    int approachBelow() const noexcept { return approachBelow_.load(); }               // part des approches parallèles venues d'en dessous, en % (0 : toujours au-dessus)
-    void setApproachBelow (int pct) { approachBelow_.store (juce::jlimit (0, 100, pct)); }
-    void importMotifs();                       // choisit un fichier de motifs et range chaque motif dans la bibliothèque (fil de messages)
-    void exportMotif (int slot);               // écrit l'emplacement dans un fichier au choix
-    bool saveMotifToLibrary (int slot);        // écrit l'emplacement dans la bibliothèque, sous son nom
-    int bassMidiChannel() const noexcept { return bassChannel_.load(); }               // canal MIDI de la basse, 0 : pas de basse, 1..16
-    void setBassMidiChannel (int c) { bassChannel_.store (juce::jlimit (0, 16, c)); }
-    int carteApproach() const noexcept { return carteApproach_.load(); }              // 0 non, 1 dominante, 2 triton, 3 chromatique, 4 parallèle (motifs joués)
-    void setCarteApproach (int k) { carteApproach_.store (juce::jlimit (0, 4, k)); }
-    bool carteLed() const noexcept { return carteLed_.load(); }                        // voix conduites (défaut) ou position fixe
-    void setCarteLed (bool on) { carteLed_.store (on); }
-    int carteOctave() const noexcept { return carteOctave_.load(); }                   // octave de base, 1..6 (3 = do 48)
-    void setCarteOctave (int o) { carteOctave_.store (juce::jlimit (1, 6, o)); }
-    // Motifs : 16 emplacements, copiés dans l'état du projet (le projet reste autonome) ; le motif joué (0 = aucun : l'orgue tient l'accord) remplace le suivi d'accord.
-    static constexpr int kMotifSlots = 16;
-    int motifSlot() const noexcept { return motifSlot_.load(); }
-    void setMotifSlot (int s) { motifSlot_.store (juce::jlimit (0, kMotifSlots, s)); }
-    bool motifUsed (int index) const;
-    juce::String motifName (int index) const;
-    void setMotif (int index, const neptune::core::pattern::Pattern* p);   // nullptr : vide l'emplacement
-    juce::String carteText() const;                                                    // « Carte : ON · canal 1 · Dm7 »
+    // ---- Carte : l'orgue joue d'après la carte partagée (voir CarteDriver.h)
+    CarteDriver& carte() { return carte_; }
     bool ccEnabled() const noexcept { return ccEnabled_.load(); }
     void uiSetCcEnabled (bool on) { ccEnabled_.store (on); }
     bool loadPreset (const std::string& id) override;
@@ -162,43 +128,7 @@ private:
     std::atomic<bool> ccEnabled_ { false }; // contrôleurs MIDI (hors banque et notes) : désactivés par défaut
     std::atomic<int> pendingBank_ { -1 }, pendingProgram_ { -1 };
 
-    // Carte : lecteur de la carte partagée (relevé depuis le fil de messages, consulté sans verrou par le fil audio)
-    struct Ticker : juce::Timer
-    {
-        explicit Ticker (OrganProcessor& p) : owner (p) {}
-        void timerCallback() override { owner.tick(); }
-        OrganProcessor& owner;
-    };
-    void tick();
-    neptune::core::chordmap::Reader reader_;
-    neptune::core::arp::ChordMapEnvironment::Slots noSlots_;
-    std::unique_ptr<neptune::core::arp::ChordMapEnvironment> carteEnv_;
-    neptune::core::arp::ChordFollower follower_;
-    std::array<neptune::core::arp::FollowEvent, 64> followOut_ {};
-    Ticker ticker_ { *this };
-    std::atomic<bool> carteFollow_ { false }, carteLed_ { true };
-    std::atomic<int> carteApproach_ { 0 }, chordChannel2_ { 0 }, pedalSlot_ { 0 }, approachChance_ { 100 }, approachBelow_ { 0 };
-    std::shared_ptr<juce::FileChooser> chooser_;
-    std::atomic<int> carteChannel_ { 1 }, chordChannel_ { 1 }, bassChannel_ { 3 }, carteOctave_ { 3 };
-    // Motifs (fil de messages : motifs_ sous verrou ; fil audio : copie audioMotifs_ refaite quand la version change)
-    mutable juce::SpinLock motifLock_;
-    neptune::core::arp::ChordMapEnvironment::Slots motifs_, audioMotifs_;
-    std::vector<std::shared_ptr<const neptune::core::pattern::Pattern>> retiredMotifs_;
-    std::atomic<int> motifsVersion_ { 0 }, motifSlot_ { 0 };
-    int audioMotifsVersion_ = -1;
-    // la pédale a son propre moteur de motifs : il ne lit de Carte que l'harmonie (pas la voie des motifs, qui est pour le clavier)
-    struct HarmonyOnly : neptune::core::arp::Environment
-    {
-        const neptune::core::arp::Environment* base = nullptr;
-        bool harmonyAt (double t, neptune::core::arp::Harmony& h) const noexcept override { return base != nullptr && base->harmonyAt (t, h); }
-        bool measureAt (double t, double& a, double& b, int& c) const noexcept override { return base != nullptr && base->measureAt (t, a, b, c); }
-        bool nextChordStart (double t, double& s) const noexcept override { return base != nullptr && base->nextChordStart (t, s); }
-        bool nextMeasureStart (double t, double& s) const noexcept override { return base != nullptr && base->nextMeasureStart (t, s); }
-    } pedalEnv_;
-    neptune::core::arp::Arpeggiator arp_, pedalArp_;
-    std::array<neptune::core::arp::NoteOut, 256> pedalOut_ {};
-    std::array<neptune::core::arp::NoteOut, 256> arpOut_ {};
-    std::atomic<int> carteChordNow_ { -2 };   // -2 : pas en lecture ou pas de Carte ; sinon racine | rel << 8
+    CarteDriver carte_ { 1, 3, "orgamon" };   // clavier sur le canal 1 (upper), pédale sur le canal 3
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OrganProcessor)
 };

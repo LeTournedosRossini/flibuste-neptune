@@ -9,6 +9,7 @@
 #include "neptune/core/FmEngine.h"
 #include "neptune/core/FmPatch.h"
 #include "neptune/core/FmVoices.h"
+#include <nlohmann/json.hpp>
 
 using namespace neptune::core;
 using namespace neptune::core::fm;
@@ -748,4 +749,20 @@ TEST_CASE ("fm state: the modulation matrix is saved when it is not empty, and a
     REQUIRE (stateFromJson (without, other.params(), back, id, &none));
     CHECK (none == modulation::Matrix {});
     CHECK (stateFromJson (without, other.params(), back, id));   // l'appel d'avant, sans matrice, marche toujours
+}
+
+TEST_CASE ("fm : une clé « carte » dans l'état (réglages de Carte) ne gêne pas la lecture", "[fm][carte]")
+{
+    FmSynthEngine a;
+    FmDescription d;
+    d.unisonVoices = 2;
+    auto doc = nlohmann::json::parse (stateToJson (a.params(), d, "p2"));
+    doc["carte"] = { { "follow", true }, { "motifs", nlohmann::json::array() } };
+    ParameterSet set;
+    REQUIRE (addSynthParams (set));
+    FmDescription back;
+    std::string id;
+    REQUIRE (stateFromJson (doc.dump(), set, back, id));
+    CHECK (back == sanitised (d));
+    CHECK (id == "p2");
 }

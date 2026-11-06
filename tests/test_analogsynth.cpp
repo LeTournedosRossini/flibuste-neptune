@@ -13,6 +13,7 @@
 #include "neptune/core/ProbePool.h"
 #include "neptune/core/SamplerParams.h"
 #include "neptune/core/WaveCatalog.h"
+#include <nlohmann/json.hpp>
 
 using namespace neptune::core;
 using namespace neptune::core::analogsynth;
@@ -758,4 +759,20 @@ TEST_CASE ("neptune engine: synth and FM tracks follow the pitch wheel of the ho
         CHECK (run (type, 0, 0.0f) / centre == Approx (std::pow (2.0, -2.0 / 12.0)).epsilon (0.01));       // en bas : -2
         CHECK (run (type, 16383, 0.5f) / centre == Approx (std::pow (2.0, 1.0 / 12.0)).epsilon (0.01));    // la molette de l'écran prime tant qu'elle n'est pas au repos
     }
+}
+
+TEST_CASE ("analogsynth : une clé « carte » dans l'état (réglages de Carte) ne gêne pas la lecture", "[analogsynth][carte]")
+{
+    AnalogSynthEngine a;
+    SynthDescription d;
+    d.glideMs = 77;
+    auto doc = nlohmann::json::parse (stateToJson (a.params(), d, "p1"));
+    doc["carte"] = { { "follow", true }, { "motifs", nlohmann::json::array() } };
+    ParameterSet set;
+    REQUIRE (addParams (set));
+    SynthDescription back;
+    std::string id;
+    REQUIRE (stateFromJson (doc.dump(), set, back, id));
+    CHECK (back == sanitised (d));
+    CHECK (id == "p1");
 }
