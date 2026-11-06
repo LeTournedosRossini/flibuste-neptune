@@ -865,6 +865,61 @@ target_link_libraries(Digue
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
 
+# ---- Trident : séparateur à trois chemins (parallèle ou multibande) qui héberge les effets de la suite, plugin CLAP effet indépendant ---------------
+# Cœur : neptune::core::trident::Trident (Crossover.h, Trident.h) ; interface NOVA (TridentPlugin.cpp) avec les éditeurs des modules stock.
+set(TRIDENT_CLAP_ID "com.tournedosrossini.trident" CACHE STRING "Identifiant CLAP de Trident")
+
+juce_add_plugin(Trident
+  COMPANY_NAME                "Le Tournedos Rossini"
+  PRODUCT_NAME                "Trident"
+  PLUGIN_MANUFACTURER_CODE    Trss
+  PLUGIN_CODE                 Trid
+  IS_SYNTH                    FALSE
+  NEEDS_MIDI_INPUT            FALSE
+  FORMATS                     Standalone)
+
+clap_juce_extensions_plugin(
+  TARGET        Trident
+  CLAP_ID       "${TRIDENT_CLAP_ID}"
+  CLAP_FEATURES audio-effect utility stereo)
+
+target_sources(Trident PRIVATE
+  src/TridentPlugin.cpp
+  src/UtilityEditor.cpp
+  src/NovaShaperEditor.cpp
+  src/NovaShaperWaveView.cpp
+  src/NovaDelayEditor.cpp
+  src/NovaChorusEditor.cpp
+  src/NovaMicrodecaleEditor.cpp
+  src/NovaConvolutionEditor.cpp
+  src/NovaFournaiseEditor.cpp
+  src/NovaDigueEditor.cpp
+  src/NovaDiapasonEditor.cpp
+  src/NovaCompressorEditor.cpp
+  src/NovaHistoryView.cpp
+  src/NovaEqualizerEditor.cpp
+  src/NovaSpectrum.cpp
+  src/NovaEditor.cpp
+  src/NovaKit.cpp
+  src/NeptuneKnob.cpp
+  src/KnobModal.cpp)
+
+target_compile_definitions(Trident PUBLIC
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+  JUCE_VST3_CAN_REPLACE_VST2=0)
+
+target_link_libraries(Trident
+  PRIVATE
+    neptune_core
+    juce::juce_audio_utils
+    juce::juce_audio_plugin_client
+    clap_juce_extensions
+  PUBLIC
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_lto_flags
+    juce::juce_recommended_warning_flags)
+
 # ---- NovaGallery : rendu hors-ligne en PNG des composants communs NOVA (NovaKit), pour la comparaison avec les maquettes HTML ----------
 # Outil de développement (CI Linux : exécuté sous xvfb, images archivées) ; non installé.
 juce_add_console_app(NovaGallery PRODUCT_NAME "NovaGallery")

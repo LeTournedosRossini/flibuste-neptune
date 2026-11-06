@@ -70,7 +70,7 @@ public:
         }
         for (int k = 0; k < kAssignables; ++k)
         {
-            auto s = ParamSpec::continuous (pid::assign (k), "Assignable " + std::to_string (k + 1), Unit::None, 0.0, 1.0, 0.0);
+            auto s = ParamSpec::continuous (pid::assign (k), "Macro " + std::to_string (k + 1), Unit::None, 0.0, 1.0, 0.0);
             s.decimals = 3;
             add (std::move (s));
         }
