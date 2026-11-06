@@ -33,8 +33,9 @@ L'hôte ne voit qu'un nombre limité de paramètres automatisables, appelés ici
 5. **Neptune** : macros 32 → 256 (tailles des tableaux, `macroSeen_`, couche de contrôle, états), liste réduite par défaut, menu « Prochain emplacement libre » + « Choisir... » (liste groupée par 16, un menu de 256 lignes n'est pas utilisable), page de gestion des macros adaptée.
 6. Compilation Linux + Windows, installation, essai dans Reaper par Jean (automatiser un réglage, rouvrir le projet, réassigner), puis CI sur les trois systèmes.
 
-## Questions à trancher avec Jean
-- 128 emplacements pour les plugins moyens : suffisant ? (Jean : « jamais plus de 128 »). Neptune 256.
-- Réglages d'affichage : assignables ou non ? (recommandé : non)
-- Réserve de 16 pour les plugins de 128 paramètres ou moins : assez ?
-- Presets sans les assignations : d'accord ?
+## Décisions de Jean (2026-11-06)
+- 128 emplacements pour les plugins moyens, 256 pour Neptune. (On en ajoutera si besoin.)
+- Réglages d'affichage : non assignables.
+- La « réserve de 16 » est abandonnée : sans réglages d'affichage assignables, il ne reste rien à y mettre. Les plugins de 128 paramètres ou moins gardent leurs réglages déclarés directement, sans emplacements. Seuls Égaliseur, Neptune et Trident (dont les effets internes ne sont pas déclarés) ont une réserve d'emplacements.
+- Retirer une assignation : prévu partout (menu clic droit « Retirer l'automatisation », liste des emplacements, verrou qui empêche la suppression accidentelle).
+- Presets : les assignations ne sont pas enregistrées dans les presets (un preset ne doit pas recâbler les courbes d'un projet). À part : **un paramètre « Preset » automatisable** (zones discrètes pour passer d'un preset à l'autre), à étudier plus tard ; voir la discussion.
