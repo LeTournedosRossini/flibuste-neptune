@@ -34,3 +34,13 @@ Tout est déjà dans les plugins : un Arpège neuf contient les motifs d'essai d
 ## Orgamon suit la carte
 
 Avec la même Carte (le morceau d'essai), mettez **Orgamon** sur une autre piste. Dans sa page **ORGUE**, le bouton « Carte : ... » (sous le bouton des contrôleurs) ouvre un menu : cochez **Suivre les accords de Carte**. Lancez la lecture : l'orgue tient l'accord en cours, sans touche, et change d'accord à l'instant exact. Le bouton affiche « Carte : ON · canal 1 · Dm7 ». Réglages du menu : canal de Carte, canal MIDI des accords (celui d'un clavier de l'orgue : 1, 2 ou 3 selon votre routage), canal MIDI de la basse (pédalier ; « aucune basse » par défaut), octave de base. À l'arrêt de la lecture, tout est relâché.
+
+## Mise à jour du 6 novembre : voix conduites, grattage, approche, coups étouffés, bibliothèque
+
+- **Voix conduites.** Orgamon, AnalogSynth et FM6Op (menu « Carte : ... ») posent chaque accord au plus près du précédent (notes communes gardées, voix du haut calme, pas de seconde mineure). Arpège fait de même pour les coups dont `voices.rh` vaut `led` dans le fichier de motif. « Position fixe » redonne l'ancien comportement.
+- **Grattage** (Arpège et menu Carte des instruments, sauf Orgamon) : délai entre les notes, coup bas / haut en alternance, vélocité décroissante.
+- **Approche** : accord de dominante, de triton, chromatique ou parallèle placé avant un changement d'accord.
+- **Coups étouffés** : un coup peut être marqué étouffé (`x.arpege.muted` dans le fichier) ; il sonne court et faible. Dans la matrice d'Arpège, bande « Muted ».
+- **Motifs appelés par Carte dans les instruments** : le menu Carte choisit le motif pour les claviers (haut, bas ou les deux) et pour la pédale.
+- **Bibliothèque de motifs** : dossier `~/.config/Neptune/motifs/` (Windows : `%APPDATA%\Neptune\motifs`), un motif par fichier. Arpège y exporte par défaut ; les instruments y choisissent, avec Importer et Exporter dans leur menu. Neuf exemples dans `docs/exemples-motifs/` (« Essai orgue - 1 » à « 9 »), à copier dans ce dossier.
+- **Canaux MIDI par défaut** : clavier haut 1, bas 2, pédale 3.
