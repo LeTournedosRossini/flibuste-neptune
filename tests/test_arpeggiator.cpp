@@ -1168,3 +1168,41 @@ TEST_CASE ("arp : accord d'approche devant un changement d'accord", "[arp][carte
     CHECK (roots (Kind::Chromatic) == std::vector<int> { 0, 0, 0, 6, 7 });   // fa dièse : un demi-ton sous sol
     CHECK (roots (Kind::Parallel) == std::vector<int> { 0, 0, 0, 8, 7 });    // sol un demi-ton plus haut
 }
+
+TEST_CASE ("motif : coup étouffé, bascule, lecture et écriture ; note courte et douce", "[arp][pattern][muted]")
+{
+    using namespace neptune::core::pattern;
+    auto pat = patternFrom (R"({ "id": "m", "length": [1,1], "hits": [ { "at": [0,4], "dur": [1,4], "parts": ["C"] }, { "at": [1,4], "dur": [1,4], "parts": ["C"] } ] })");
+    CHECK (! hasMuted (pat, makeFrac (1, 4)));
+    CHECK (toggleMuted (pat, makeFrac (1, 4)));
+    CHECK (hasMuted (pat, makeFrac (1, 4)));
+    CHECK (! hasMuted (pat, makeFrac (0, 4)));
+    // aller-retour par le JSON (Scorsaire garde `x` sans le lire)
+    const auto back = fromJson (toJson ({ pat }, "arpege"));
+    REQUIRE (back.ok);
+    CHECK (hasMuted (back.patterns[0], makeFrac (1, 4)));
+    // la bascule inverse retire le repère
+    auto copy = back.patterns[0];
+    CHECK (! toggleMuted (copy, makeFrac (1, 4)));
+    CHECK (copy.hits[1].extraJson.empty());
+    // jeu : le coup étouffé est plus court et plus doux que l'autre
+    ChordListEnv env;
+    env.chords = { { 0.0, 4.0, 0, 0x091, -1 } };
+    auto a = make();
+    a.setPattern (&pat);
+    a.setEnvironment (&env);
+    const auto ev = run (a, { { 0, true, 48, 90 } }, (long long) (kSamplesPerBeat * 1.9), 256);
+    long long lenPlain = 0, lenMuted = 0;
+    int velPlain = 0, velMuted = 0;
+    for (const auto& e : ev)
+    {
+        if (e.note != 48 && e.note != 52 && e.note != 55) continue;
+        if (e.on && e.at < (long long) kSamplesPerBeat) { lenPlain -= e.at; velPlain = e.vel; }
+        if (! e.on && e.at <= (long long) kSamplesPerBeat) lenPlain += e.at;
+        if (e.on && e.at >= (long long) kSamplesPerBeat) { lenMuted -= e.at; velMuted = e.vel; }
+        if (! e.on && e.at > (long long) kSamplesPerBeat) lenMuted += e.at;
+    }
+    CHECK (lenMuted > 0);
+    CHECK (lenMuted < lenPlain);
+    CHECK (velMuted < velPlain);
+}

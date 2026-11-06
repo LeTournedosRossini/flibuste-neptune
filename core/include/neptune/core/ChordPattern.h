@@ -100,6 +100,9 @@ bool hasCell (const Pattern& p, const Frac& at, const std::string& partText, int
 // Accent du coup qui commence à `at` ; faux (rien fait) s'il n'y a pas de coup. Retourne le nouvel état.
 bool toggleAccent (Pattern& p, const Frac& at, int alt = -1);
 bool hasAccent (const Pattern& p, const Frac& at, int alt = -1);
+// Coup étouffé (note courte, vélocité réduite) : même principe que l'accent ; écrit dans `x.arpege.muted` du coup, que Scorsaire garde sans le lire.
+bool toggleMuted (Pattern& p, const Frac& at, int alt = -1);
+bool hasMuted (const Pattern& p, const Frac& at, int alt = -1);
 // Vélocité (1..127) et durée de note (0,05..1 de la longueur du coup) propres au coup qui commence à `at` ; 0 retire la valeur (retour au réglage du plugin).
 // Faux (rien fait) s'il n'y a pas de coup à cet endroit.
 bool setHitVel (Pattern& p, const Frac& at, int vel, int alt = -1);

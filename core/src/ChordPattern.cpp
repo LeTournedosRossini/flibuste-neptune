@@ -404,6 +404,45 @@ bool toggleAccent (Pattern& p, const Frac& at, int alt)
     return false;
 }
 
+namespace
+{
+void writeMuted (Hit& h)
+{
+    json j = h.extraJson.empty() ? json::object() : json::parse (h.extraJson, nullptr, false);
+    if (! j.is_object()) j = json::object();
+    if (h.muted)
+    {
+        if (! j.contains ("x") || ! j["x"].is_object()) j["x"] = json::object();
+        if (! j["x"].contains ("arpege") || ! j["x"]["arpege"].is_object()) j["x"]["arpege"] = json::object();
+        j["x"]["arpege"]["muted"] = true;
+    }
+    else if (j.contains ("x") && j["x"].is_object() && j["x"].contains ("arpege") && j["x"]["arpege"].is_object())
+    {
+        j["x"]["arpege"].erase ("muted");
+        if (j["x"]["arpege"].empty()) j["x"].erase ("arpege");
+        if (j["x"].empty()) j.erase ("x");
+    }
+    h.extraJson = j.empty() ? std::string() : j.dump();
+}
+}
+
+bool toggleMuted (Pattern& p, const Frac& at, int alt)
+{
+    if (auto* h = hitAt (p, at, alt))
+    {
+        h->muted = ! h->muted;
+        writeMuted (*h);
+        return h->muted;
+    }
+    return false;
+}
+
+bool hasMuted (const Pattern& p, const Frac& at, int alt)
+{
+    const auto* h = hitAt (const_cast<Pattern&> (p), at, alt);
+    return h != nullptr && h->muted;
+}
+
 bool setHitVel (Pattern& p, const Frac& at, int vel, int alt)
 {
     auto* h = hitAt (p, at, alt);

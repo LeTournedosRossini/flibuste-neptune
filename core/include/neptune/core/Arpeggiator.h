@@ -444,7 +444,12 @@ private:
         if (h.accent) vel += params_.accentBoost;
         vel = std::clamp (vel, 1, 127);
         const double gate = h.gate > 0.0 ? h.gate : params_.gate;
-        const int len = std::max (1, (int) std::llround (gate * d.durBeats / bps));
+        int len = std::max (1, (int) std::llround (gate * d.durBeats / bps));
+        if (h.muted)   // coup étouffé : note courte et plus douce, pour toutes les notes du coup
+        {
+            vel = std::clamp ((int) std::llround (vel * strum_.mutedVelocity), 1, 127);
+            len = std::min (len, std::max (1, (int) std::llround (strum_.mutedSeconds * sampleRate_)));
+        }
         const bool led = ! d.pat->notesMode && (ledAll_ || d.pat->voicesLed);
         std::array<int, voice::kMaxVoices> ledNotes {};
         int ledN = 0;
@@ -534,20 +539,17 @@ private:
         const double bpm = bps * 60.0 * sampleRate_;
         const double delayMs = strum_.delayMs > 0.0 ? strum_.delayMs : std::clamp (std::round (14.0 * 120.0 / std::max (1.0, bpm)), 5.0, 30.0);
         const int delay = std::max (1, (int) std::llround (delayMs * 0.001 * sampleRate_));
-        const bool muted = hitMuted (h);
-        const double base = (up ? strum_.upVelocity : 1.0) * (muted ? strum_.mutedVelocity : 1.0);
+        const double base = up ? strum_.upVelocity : 1.0;   // le coup étouffé a déjà réduit `vel` et `len`
         for (int i = 0; i < m; ++i)
         {
             const int off = std::min (i * delay, len / 2);
             int l = len - off;
-            if (muted) l = std::min (l, std::max (1, (int) std::llround (strum_.mutedSeconds * sampleRate_)));
             const int v = std::clamp ((int) std::llround (vel * std::max (0.05, base * (1.0 - strum_.fall * i))), 1, 127);
             const int note = std::clamp (order[i] + params_.transpose, 0, 127);
             if (off == 0) startNote (d.at, note, v, l);
             else if (delayedCount_ < kMaxDelayed) delayed_[(size_t) delayedCount_++] = { d.at + off, (std::uint8_t) note, (std::uint8_t) v, l };
         }
     }
-    static bool hitMuted (const pattern::Hit& h) { return h.muted; }
 
     // Début de note avec sa fin programmée ; une note identique encore en cours est terminée d'abord.
     void startNote (int at, int note, int vel, int len, bool bass = false)

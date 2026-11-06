@@ -574,6 +574,10 @@ public:
             const auto acc = juce::Rectangle<float> (geo.x0 + c * geo.cellW, geo.accentY, geo.cellW, geo.accentH).reduced (skin_.px (2.0f));
             g.setColour (skin_.colour (h.accent ? Token::Pink : Token::TextDim2, h.accent ? 1.0f : 0.5f));
             g.fillRoundedRectangle (acc, skin_.px (3.0f));
+            // bande d'étouffé
+            const auto mu = juce::Rectangle<float> (geo.x0 + c * geo.cellW, geo.mutedY, geo.cellW, geo.mutedH).reduced (skin_.px (2.0f));
+            g.setColour (skin_.colour (h.muted ? Token::Accent2 : Token::TextDim2, h.muted ? 1.0f : 0.5f));
+            g.fillRoundedRectangle (mu, skin_.px (3.0f));
             // vélocité et durée propres au coup (barre pleine) ; sans valeur propre : une barre discrète au niveau du réglage du plugin
             const float colW = std::max (2.0f, geo.cellW - skin_.px (4.0f));
             const float vh = (h.vel > 0 ? (float) h.vel : 100.0f) / 127.0f * geo.velH;
@@ -595,6 +599,7 @@ public:
         g.setColour (skin_.colour (Token::TextDim));
         g.setFont (skin_.font (11.0f));
         g.drawText (juce::String::fromUTF8 ("accent"), juce::Rectangle<float> (0.0f, geo.accentY, geo.x0 - skin_.px (6.0f), geo.accentH), juce::Justification::centredRight);
+        g.drawText (juce::String::fromUTF8 ("étouffé"), juce::Rectangle<float> (0.0f, geo.mutedY, geo.x0 - skin_.px (6.0f), geo.mutedH), juce::Justification::centredRight);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -605,7 +610,7 @@ public:
         strokeBefore_ = proc_.slotPattern (slotIndex());
         dirty_ = false;
         const auto geo = geometry (columns());
-        band_ = e.position.y >= geo.gateY ? Band::Gate : (e.position.y >= geo.velY ? Band::Vel : (e.position.y >= geo.accentY ? Band::Accent : Band::Cells));
+        band_ = e.position.y >= geo.gateY ? Band::Gate : (e.position.y >= geo.velY ? Band::Vel : (e.position.y >= geo.mutedY ? Band::Muted : (e.position.y >= geo.accentY ? Band::Accent : Band::Cells)));
         reset_ = e.mods.isRightButtonDown();   // clic droit sur une barre : retour au réglage du plugin
         apply (e.position, true);
     }
@@ -618,20 +623,22 @@ public:
     }
 
 private:
-    struct Geo { float x0, y0, w, rowH, cellW, accentY, accentH, velY, velH, gateY, gateH; };
+    struct Geo { float x0, y0, w, rowH, cellW, accentY, accentH, mutedY, mutedH, velY, velH, gateY, gateH; };
     Geo geometry (int cols) const
     {
         Geo g {};
         g.x0 = skin_.px (46.0f);
         g.y0 = skin_.px (6.0f);
         g.accentH = skin_.px (16.0f);
+        g.mutedH = skin_.px (16.0f);
         g.velH = skin_.px (34.0f);
         g.gateH = skin_.px (34.0f);
         g.w = (float) getWidth() - g.x0 - skin_.px (8.0f);
-        g.rowH = ((float) getHeight() - g.y0 - g.accentH - g.velH - g.gateH - skin_.px (26.0f)) / (float) kNumRows;
+        g.rowH = ((float) getHeight() - g.y0 - g.accentH - g.mutedH - g.velH - g.gateH - skin_.px (30.0f)) / (float) kNumRows;
         g.cellW = g.w / (float) cols;
         g.accentY = g.y0 + g.rowH * kNumRows + skin_.px (4.0f);
-        g.velY = g.accentY + g.accentH + skin_.px (4.0f);
+        g.mutedY = g.accentY + g.accentH + skin_.px (4.0f);
+        g.velY = g.mutedY + g.mutedH + skin_.px (4.0f);
         g.gateY = g.velY + g.velH + skin_.px (4.0f);
         return g;
     }
@@ -652,6 +659,13 @@ private:
         {
             if (! first) return;
             pattern::toggleAccent (pat, at, a);
+            proc_.setSlotPattern (idx, pat);
+            dirty_ = true;
+        }
+        else if (band_ == Band::Muted)
+        {
+            if (! first) return;
+            pattern::toggleMuted (pat, at, a);
             proc_.setSlotPattern (idx, pat);
             dirty_ = true;
         }
@@ -689,7 +703,7 @@ private:
     const nova::Skin& skin_;
     juce::Point<int> last_ { -1, -1 };
     bool painting_ = false, paintOn_ = true, dirty_ = false, reset_ = false;
-    enum class Band { Cells, Accent, Vel, Gate } band_ = Band::Cells;
+    enum class Band { Cells, Accent, Muted, Vel, Gate } band_ = Band::Cells;
     pattern::Pattern strokeBefore_;
 };
 
