@@ -288,3 +288,46 @@ TEST_CASE ("trident : état, aller-retour (réglages, effets, assignations)", "[
     CHECK_FALSE (b.stateFromJson ("garbage"));
     CHECK_FALSE (b.stateFromJson (R"({"format":"autre"})"));
 }
+
+TEST_CASE ("trident : la réserve refuse les doublons et le verrou, le réglage à l'écran fait suivre l'emplacement", "[trident][assign][reserve]")
+{
+    Trident t;
+    t.prepare (kSr, 512);
+    t.setEffect (0, 0, "utility");
+    REQUIRE (t.effect (0, 0) != nullptr);
+    int taken = -1;
+    REQUIRE (t.assignChecked (0, -1, 0, pid::outputGain) == ParamReserve::Result::Ok);
+    CHECK (t.assignChecked (1, -1, 0, pid::outputGain, false, &taken) == ParamReserve::Result::TargetTaken);
+    CHECK (taken == 0);
+    CHECK (t.assignChecked (0, -1, 0, pid::inputGain) == ParamReserve::Result::SlotTaken);
+    t.reserve().setLocked (0, true);
+    CHECK (t.assignChecked (0, -1, 0, pid::inputGain, true) == ParamReserve::Result::Locked);
+    CHECK_FALSE (t.unassign (0));
+    CHECK (t.assignment (0).active);
+    t.reserve().setLocked (0, false);
+    // le potard bouge : l'emplacement suit après un bloc
+    t.params().setNormalizedAt (t.params().indexOf (pid::outputGain), 0.25);
+    std::vector<float> l (512, 0.0f), r (512, 0.0f);
+    t.process (l.data(), r.data(), 512);
+    CHECK_THAT (t.params().getNormalizedAt (t.params().indexOf (pid::assign (0))), WithinAbs (0.25, 1e-9));
+    CHECK (t.takeFollowed (0));
+}
+
+TEST_CASE ("trident : un état écrit avant la réserve (path / slot) se relit", "[trident][state][reserve]")
+{
+    Trident a;
+    a.prepare (kSr, 512);
+    a.setEffect (1, 2, "utility");
+    REQUIRE (a.assign (7, 1, 2, stock::outputTrim));
+    auto doc = nlohmann::json::parse (a.stateToJson());
+    doc["assign"] = nlohmann::json::array();
+    for (int k = 0; k < 32; ++k) doc["assign"].push_back (k == 7 ? nlohmann::json { { "path", 1 }, { "slot", 2 }, { "param", stock::outputTrim } } : nlohmann::json (nullptr));
+    Trident b;
+    b.prepare (kSr, 512);
+    REQUIRE (b.stateFromJson (doc.dump()));
+    const auto t = b.assignment (7);
+    CHECK (t.active);
+    CHECK (t.path == 1);
+    CHECK (t.slot == 2);
+    CHECK (t.param == stock::outputTrim);
+}

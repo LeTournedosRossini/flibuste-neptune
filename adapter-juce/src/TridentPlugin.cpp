@@ -89,13 +89,21 @@ void TridentProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     trident_.prepare (sampleRate, samplesPerBlock);
     declaredLatency_ = trident_.latencySamples();
     setLatencySamples (declaredLatency_);
-    startTimerHz (5);
+    startTimerHz (20);
 }
 
 // La latence totale dépend des effets posés et de leurs réglages : on la redéclare à l'hôte quand elle change.
 void TridentProcessor::timerCallback()
 {
     trident_.collect();
+    // un réglage assigné qu'on a bougé à l'écran : son emplacement l'a suivi, l'hôte doit le savoir (affichage, écriture d'automation)
+    for (int k = 0; k < kAssignables; ++k)
+        if (trident_.takeFollowed (k))
+        {
+            const auto i = trident_.params().indexOf (pid::assign (k));
+            if (i != neptune::core::ParameterSet::npos && hostIndex_[i] >= 0)
+                if (auto* p = getParameters()[hostIndex_[i]]) p->setValueNotifyingHost (p->getValue());
+        }
     const int latency = trident_.latencySamples();
     if (latency == declaredLatency_) return;
     declaredLatency_ = latency;

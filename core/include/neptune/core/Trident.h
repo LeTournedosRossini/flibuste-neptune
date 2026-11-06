@@ -18,6 +18,7 @@
 
 #include "neptune/core/Crossover.h"
 #include "neptune/core/HandoffSlot.h"
+#include "neptune/core/ParamReserve.h"
 #include "neptune/core/Parameter.h"
 #include "neptune/core/StockModule.h"
 
@@ -157,34 +158,44 @@ public:
         ParamId param = 0;
         bool operator== (const Target& o) const noexcept { return active == o.active && path == o.path && slot == o.slot && param == o.param; }
     };
-    Target assignment (int k) const noexcept { return k >= 0 && k < kAssignables ? targets_[static_cast<std::size_t> (k)] : Target {}; }
-    // Vise un réglage ; la valeur de l'assignable prend celle du réglage (pas de saut). Faux si la cible n'existe pas.
+    Target assignment (int k) const noexcept
+    {
+        const auto t = reserve_.target (k);
+        return t.active ? Target { true, static_cast<int> (t.scope) - 1, static_cast<int> (t.sub), t.param } : Target {};
+    }
+    const ParamReserve& reserve() const noexcept { return reserve_; }
+    ParamReserve& reserve() noexcept { return reserve_; }
+    // Vise un réglage ; la valeur de l'assignable prend celle du réglage (pas de saut). Refus (sans rien changer) : cible absente, emplacement verrouillé, ou occupé
+    // sans `replace`, ou réglage déjà sur un autre emplacement (`takenBy` dit lequel).
+    ParamReserve::Result assignChecked (int k, int path, int slot, ParamId param, bool replace = false, int* takenBy = nullptr)
+    {
+        if (k < 0 || k >= kAssignables) return ParamReserve::Result::BadSlot;
+        const ParameterSet* set = targetSet (path, slot);
+        if (set == nullptr) return ParamReserve::Result::BadSlot;
+        const auto idx = set->indexOf (param);
+        if (idx == ParameterSet::npos) return ParamReserve::Result::BadSlot;
+        const double n = set->getNormalizedAt (idx);
+        const auto r = reserve_.assign (k, static_cast<std::uint32_t> (path + 1), static_cast<std::uint32_t> (slot), param, n, replace, takenBy);
+        if (r == ParamReserve::Result::Ok) params_.setNormalizedAt (assignIdx_[static_cast<std::size_t> (k)], n);
+        return r;
+    }
+    // Comme avant la réserve : l'assignation prend la place (le réglage quitte son ancien emplacement s'il n'est pas verrouillé). Faux si refusée.
     bool assign (int k, int path, int slot, ParamId param)
     {
-        if (k < 0 || k >= kAssignables) return false;
-        const ParameterSet* set = targetSet (path, slot);
-        if (set == nullptr) return false;
-        const auto idx = set->indexOf (param);
-        if (idx == ParameterSet::npos) return false;
-        const auto ku = static_cast<std::size_t> (k);
-        targets_[ku] = { true, path, slot, param };
-        packed_[ku].store (pack (targets_[ku]), std::memory_order_relaxed);
-        const double n = set->getNormalizedAt (idx);
-        lastApplied_[ku].store (n, std::memory_order_relaxed);
-        params_.setNormalizedAt (assignIdx_[ku], n);
-        return true;
+        int taken = -1;
+        auto r = assignChecked (k, path, slot, param, true, &taken);
+        if (r == ParamReserve::Result::TargetTaken && taken >= 0 && reserve_.unassign (taken) == ParamReserve::Result::Ok)
+            r = assignChecked (k, path, slot, param, true);
+        return r == ParamReserve::Result::Ok;
     }
-    void unassign (int k)
-    {
-        if (k < 0 || k >= kAssignables) return;
-        targets_[static_cast<std::size_t> (k)] = {};
-        packed_[static_cast<std::size_t> (k)].store (0, std::memory_order_relaxed);
-    }
+    bool unassign (int k) { return reserve_.unassign (k) == ParamReserve::Result::Ok; }
     // Après un rappel d'état : les assignables ne doivent pas écraser les réglages rappelés.
     void syncAssignments() noexcept
     {
-        for (int k = 0; k < kAssignables; ++k) lastApplied_[static_cast<std::size_t> (k)].store (params_.getNormalizedAt (assignIdx_[static_cast<std::size_t> (k)]), std::memory_order_relaxed);
+        reserve_.resync (params_, assignIdx_[0], [this] (std::uint32_t scope, std::uint32_t sub, ParamId param) { return resolveMsg (scope, sub, param); });
     }
+    // Les emplacements dont le réglage a bougé à l'écran : vrai une fois (pour prévenir l'hôte). Fil de messages.
+    bool takeFollowed (int k) noexcept { return reserve_.takeFollowed (k); }
 
     // ---------------------------------------------------------------- état
     // L'état complet : paramètres de Trident, assignations, effets (type, valeurs, état texte).
@@ -196,13 +207,7 @@ public:
         nlohmann::json own = nlohmann::json::object();
         for (std::size_t i = 0; i < params_.size(); ++i) own[std::to_string (params_.spec (i).id)] = params_.getAt (i);
         doc["params"] = own;
-        auto assigns = nlohmann::json::array();
-        for (int k = 0; k < kAssignables; ++k)
-        {
-            const auto& t = targets_[static_cast<std::size_t> (k)];
-            assigns.push_back (t.active ? nlohmann::json { { "path", t.path }, { "slot", t.slot }, { "param", t.param } } : nlohmann::json (nullptr));
-        }
-        doc["assign"] = assigns;
+        doc["assign"] = reserve_.toJson();
         auto fx = nlohmann::json::array();
         for (int p = 0; p < kPaths; ++p)
             for (int s = 0; s < kSlotsPerPath; ++s)
@@ -247,21 +252,18 @@ public:
                     }
                     publish (p, s, std::move (inst));
                 }
-        for (int k = 0; k < kAssignables; ++k)
-        {
-            targets_[static_cast<std::size_t> (k)] = {};
-            packed_[static_cast<std::size_t> (k)].store (0, std::memory_order_relaxed);
-            if (doc.contains ("assign") && doc["assign"].is_array() && static_cast<std::size_t> (k) < doc["assign"].size() && doc["assign"][static_cast<std::size_t> (k)].is_object())
-            {
-                const auto& a = doc["assign"][static_cast<std::size_t> (k)];
-                Target t { true, a.value ("path", -1), a.value ("slot", 0), static_cast<ParamId> (a.value ("param", 0u)) };
-                if (targetSet (t.path, t.slot) != nullptr && targetSet (t.path, t.slot)->indexOf (t.param) != ParameterSet::npos)
+        // assignations : le format d'avant la réserve donnait { path, slot, param } ; on le convertit
+        nlohmann::json assigns = doc.contains ("assign") ? doc["assign"] : nlohmann::json::array();
+        if (assigns.is_array())
+            for (auto& e : assigns)
+                if (e.is_object() && e.contains ("path") && ! e.contains ("scope"))
                 {
-                    targets_[static_cast<std::size_t> (k)] = t;
-                    packed_[static_cast<std::size_t> (k)].store (pack (t), std::memory_order_relaxed);
+                    e["scope"] = e.value ("path", -1) + 1;
+                    e["sub"] = e.value ("slot", 0);
                 }
-            }
-        }
+        reserve_.fromJson (assigns,
+                           [this] (const ParamReserve::Target& t) { const auto* set = targetSet (static_cast<int> (t.scope) - 1, static_cast<int> (t.sub)); return set != nullptr && set->indexOf (t.param) != ParameterSet::npos; },
+                           [this] (const ParamReserve::Target& t) { const auto* set = targetSet (static_cast<int> (t.scope) - 1, static_cast<int> (t.sub)); return set->getNormalizedAt (set->indexOf (t.param)); });
         syncAssignments();
         return true;
     }
@@ -351,18 +353,23 @@ private:
     };
 
     static bool valid (int path, int slot) noexcept { return path >= 0 && path < kPaths && slot >= 0 && slot < kSlotsPerPath; }
-    static std::uint32_t pack (const Target& t) noexcept
+    // Où se trouve le réglage visé : fil de messages (jeu de paramètres de l'instance publiée côté messages) ou fil audio (instance en service).
+    ParamReserve::Ref resolveMsg (std::uint32_t scope, std::uint32_t sub, ParamId param) noexcept
     {
-        return 1u | (static_cast<std::uint32_t> (t.path + 1) & 0x3u) << 1 | (static_cast<std::uint32_t> (t.slot) & 0x7u) << 3 | (static_cast<std::uint32_t> (t.param) & 0xFFFFFFu) << 6;
+        const auto* set = targetSet (static_cast<int> (scope) - 1, static_cast<int> (sub));
+        if (set == nullptr) return {};
+        const auto idx = set->indexOf (param);
+        return idx == ParameterSet::npos ? ParamReserve::Ref {} : ParamReserve::Ref { const_cast<ParameterSet*> (set), idx };
     }
-    static Target unpack (std::uint32_t v) noexcept
+    ParamReserve::Ref resolveAudio (std::uint32_t scope, std::uint32_t sub, ParamId param) noexcept
     {
-        Target t;
-        t.active = (v & 1u) != 0;
-        t.path = static_cast<int> (v >> 1 & 0x3u) - 1;
-        t.slot = static_cast<int> (v >> 3 & 0x7u);
-        t.param = static_cast<ParamId> (v >> 6 & 0xFFFFFFu);
-        return t;
+        ParameterSet* set = nullptr;
+        if (scope == 0) set = &params_;
+        else if (valid (static_cast<int> (scope) - 1, static_cast<int> (sub)))
+            if (auto* inst = const_cast<InsertInstance*> (slots_[scope - 1][sub].current())) set = &inst->runner.params();
+        if (set == nullptr) return {};
+        const auto idx = set->indexOf (param);
+        return idx == ParameterSet::npos ? ParamReserve::Ref {} : ParamReserve::Ref { set, idx };
     }
     const ParameterSet* targetSet (int path, int slot) const noexcept
     {
@@ -377,42 +384,14 @@ private:
         slots_[static_cast<std::size_t> (path)][static_cast<std::size_t> (slot)].publish (std::move (inst));
         collect();
         // une assignation dont la cible a disparu ou changé de type est retirée
-        for (int k = 0; k < kAssignables; ++k)
-        {
-            const auto& t = targets_[static_cast<std::size_t> (k)];
-            if (t.active && t.path == path && t.slot == slot)
-            {
-                const auto* set = targetSet (path, slot);
-                if (set == nullptr || set->indexOf (t.param) == ParameterSet::npos) unassign (k);
-            }
-        }
+        reserve_.prune ([this] (const ParamReserve::Target& t) { return resolveMsg (t.scope, t.sub, t.param).set != nullptr; });
     }
 
     static float dbToGain (double db) noexcept { return db <= -59.9 ? 0.0f : static_cast<float> (std::pow (10.0, db / 20.0)); }
 
     void applyAssignments() noexcept
     {
-        for (int k = 0; k < kAssignables; ++k)
-        {
-            const auto ku = static_cast<std::size_t> (k);
-            const auto packed = packed_[ku].load (std::memory_order_relaxed);
-            if (packed == 0) continue;
-            const double v = params_.getNormalizedAt (assignIdx_[ku]);
-            if (v == lastApplied_[ku].load (std::memory_order_relaxed)) continue;
-            lastApplied_[ku].store (v, std::memory_order_relaxed);
-            const Target t = unpack (packed);
-            if (t.path < 0)
-            {
-                const auto idx = params_.indexOf (t.param);
-                if (idx != ParameterSet::npos) params_.setNormalizedAt (idx, v);
-            }
-            else if (valid (t.path, t.slot))
-                if (auto* inst = const_cast<InsertInstance*> (slots_[static_cast<std::size_t> (t.path)][static_cast<std::size_t> (t.slot)].current()))
-                {
-                    const auto idx = inst->runner.params().indexOf (t.param);
-                    if (idx != ParameterSet::npos) inst->runner.params().setNormalizedAt (idx, v);
-                }
-        }
+        reserve_.sync (params_, assignIdx_[0], [this] (std::uint32_t scope, std::uint32_t sub, ParamId param) { return resolveAudio (scope, sub, param); });
     }
 
     void processBlock (float* left, float* right, int n) noexcept
@@ -541,8 +520,6 @@ private:
 
     std::array<std::array<HandoffSlot<InsertInstance>, kSlotsPerPath>, kPaths> slots_;
     std::array<std::array<std::shared_ptr<InsertInstance>, kSlotsPerPath>, kPaths> msg_;   // fil de messages
-    std::array<Target, kAssignables> targets_ {};                                          // fil de messages
-    std::array<std::atomic<std::uint32_t>, kAssignables> packed_ {};                       // lu par le fil audio
-    std::array<std::atomic<double>, kAssignables> lastApplied_ {};                         // fil audio (après rappel d'état : syncAssignments)
+    ParamReserve reserve_ { kAssignables };
 };
 } // namespace neptune::core::trident
