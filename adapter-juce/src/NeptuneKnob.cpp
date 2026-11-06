@@ -1,5 +1,6 @@
 #include <algorithm>
 #include "NeptuneKnob.h"
+#include "ReserveMenu.h"
 #include <cmath>
 
 using neptune::core::theme::Token;
@@ -122,11 +123,18 @@ void NeptuneKnob::mouseDrag (const juce::MouseEvent& e)
 
 void NeptuneKnob::mouseUp (const juce::MouseEvent& e)
 {
-    interaction_.pointerUp (nowMs());
+    // Clic droit sans déplacement sur un réglage de la réserve d'automation : le menu remplace la modale que ce geste ouvrirait.
+    const bool reserveClick = e.mods.isPopupMenu() && e.getDistanceFromDragStart() < 4 && reservemenu::available (&processor_, id_);
+    if (reserveClick) interaction_.pointerCancel();
+    else interaction_.pointerUp (nowMs());
     if (index_ != neptune::core::ParameterSet::npos) interaction_.setValue (shownNormalised());
     repaint();
     // Clic droit sans déplacement : menu des macros (le glissement avec le bouton droit reste le réglage fin).
-    if (e.mods.isPopupMenu() && e.getDistanceFromDragStart() < 4 && processor_.canAssignMacro (id_)) showMacroMenu();
+    if (e.mods.isPopupMenu() && e.getDistanceFromDragStart() < 4)
+    {
+        if (reservemenu::available (&processor_, id_)) reservemenu::show (processor_, id_, *this);   // la réserve d'automation (Trident)
+        else if (processor_.canAssignMacro (id_)) showMacroMenu();                                       // les macros de Neptune
+    }
 }
 
 void NeptuneKnob::showMacroMenu()

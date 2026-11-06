@@ -130,12 +130,14 @@ void TridentProcessor::setStateInformation (const void* data, int size)
     const std::string text (static_cast<const char*> (data), static_cast<std::size_t> (size));
     if (! trident_.stateFromJson (text)) return;
     undo_.clear();
+    refreshReserveNames();
     updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
 }
 
 void TridentProcessor::setEffect (int path, int slot, const std::string& type)
 {
     trident_.setEffect (path, slot, type);
+    refreshReserveNames();   // un effet retiré libère ses emplacements
     notifyStateChanged();
 }
 
@@ -193,32 +195,54 @@ bool TridentProcessor::uiRedo()
 
 std::string TridentProcessor::uiText (std::string_view key) const { return std::string (i18n::Translator (settings_.language).tr (key)); }
 
-bool TridentProcessor::canAssignMacro (ParamId id) const { return id < pid::assignBase; }
-
-std::vector<int> TridentProcessor::macrosOf (ParamId id) const
+std::string TridentProcessor::reserveSlotName (int slot) const
 {
-    std::vector<int> out;
+    const auto t = trident_.assignment (slot);
+    if (! t.active) return {};
+    const i18n::Translator tr (settings_.language);
+    const auto fx = trident_.effect (t.path, t.slot);
+    const auto* spec = fx != nullptr ? fx->runner.params().find (t.param) : nullptr;
+    return "Chemin " + std::to_string (t.path + 1) + "." + std::to_string (t.slot + 1) + " " + (fx != nullptr ? std::string (tr.tr ("module." + fx->type)) : std::string())
+           + " - " + (spec != nullptr ? spec->name : std::string());
+}
+
+int TridentProcessor::reserveAssign (int path, int slot, ParamId id, int reserveSlot, bool replace)
+{
+    if (reserveSlot < 0) reserveSlot = trident_.reserve().firstFree();
+    if (reserveSlot < 0) return -1;
+    if (trident_.assignChecked (reserveSlot, path, slot, id, replace) != neptune::core::ParamReserve::Result::Ok) return -1;
+    refreshReserveNames();
+    notifyStateChanged();
+    return reserveSlot;
+}
+
+void TridentProcessor::uiReserveReleaseSlot (int slot)
+{
+    if (! trident_.unassign (slot)) return;
+    refreshReserveNames();
+    notifyStateChanged();
+}
+
+void TridentProcessor::uiReserveSetLocked (int slot, bool locked)
+{
+    trident_.reserve().setLocked (slot, locked);
+    refreshReserveNames();
+    notifyStateChanged();
+}
+
+void TridentProcessor::refreshReserveNames()
+{
     for (int k = 0; k < kAssignables; ++k)
     {
-        const auto t = trident_.assignment (k);
-        if (t.active && t.path < 0 && t.param == id) out.push_back (k);
+        const auto i = trident_.params().indexOf (pid::assign (k));
+        if (i == neptune::core::ParameterSet::npos || hostIndex_[i] < 0) continue;
+        if (auto* p = dynamic_cast<NeptuneParameter*> (getParameters()[hostIndex_[i]]))
+        {
+            const auto name = reserveSlotName (k);
+            p->setDisplayName (name.empty() ? juce::String() : juce::String (k + 1) + U (" \xc2\xb7 ") + juce::String::fromUTF8 (name.c_str()));
+        }
     }
-    return out;
-}
-
-void TridentProcessor::uiToggleMacro (ParamId id, int macro)
-{
-    if (! canAssignMacro (id) || macro < 0 || macro >= kAssignables) return;
-    const auto t = trident_.assignment (macro);
-    if (t.active && t.path < 0 && t.param == id) trident_.unassign (macro);
-    else trident_.assign (macro, -1, 0, id);
-    notifyStateChanged();
-}
-
-void TridentProcessor::uiClearMacros (ParamId id)
-{
-    for (const int k : macrosOf (id)) trident_.unassign (k);
-    notifyStateChanged();
+    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withParameterInfoChanged (true));
 }
 
 juce::AudioProcessorEditor* TridentProcessor::createEditor() { return new TridentPluginEditor (*this); }
@@ -273,30 +297,23 @@ public:
     neptune::core::uistate::Size modalSize (neptune::core::uistate::Terminal t) const override { return owner_.modalSize (t); }
     void setModalSize (neptune::core::uistate::Terminal t, neptune::core::uistate::Size s) override { owner_.setModalSize (t, s); }
 
-    bool canAssignMacro (ParamId id) const override { return id != stock::bypass; }
-    std::vector<int> macrosOf (ParamId id) const override
+    int reserveCount() const override { return kAssignables; }
+    bool reserveCanAssign (ParamId id) const override { return id != stock::bypass; }
+    int reserveSlotOf (ParamId id) const override
     {
-        std::vector<int> out;
         for (int k = 0; k < kAssignables; ++k)
         {
             const auto t = owner_.trident().assignment (k);
-            if (t.active && t.path == path_ && t.slot == slot_ && t.param == id) out.push_back (k);
+            if (t.active && t.path == path_ && t.slot == slot_ && t.param == id) return k;
         }
-        return out;
+        return -1;
     }
-    void uiToggleMacro (ParamId id, int macro) override
-    {
-        if (macro < 0 || macro >= kAssignables || ! canAssignMacro (id)) return;
-        const auto t = owner_.trident().assignment (macro);
-        if (t.active && t.path == path_ && t.slot == slot_ && t.param == id) owner_.trident().unassign (macro);
-        else owner_.trident().assign (macro, path_, slot_, id);
-        owner_.notifyStateChanged();
-    }
-    void uiClearMacros (ParamId id) override
-    {
-        for (const int k : macrosOf (id)) owner_.trident().unassign (k);
-        owner_.notifyStateChanged();
-    }
+    std::string reserveSlotName (int k) const override { return owner_.reserveSlotName (k); }
+    bool reserveLocked (int k) const override { return owner_.reserveLocked (k); }
+    int uiReserveAssign (ParamId id, int k, bool replace) override { return owner_.reserveAssign (path_, slot_, id, k, replace); }
+    void uiReserveRelease (ParamId id) override { if (const int k = reserveSlotOf (id); k >= 0) owner_.uiReserveReleaseSlot (k); }
+    void uiReserveReleaseSlot (int k) override { owner_.uiReserveReleaseSlot (k); }
+    void uiReserveSetLocked (int k, bool on) override { owner_.uiReserveSetLocked (k, on); }
 
 private:
     TridentProcessor& owner_;
@@ -562,7 +579,10 @@ private:
         nova::Text* latency = nullptr;
         struct SlotUi { nova::Pill *name = nullptr, *bypass = nullptr, *menu = nullptr; juce::String shown; } slots[kSlotsPerPath];
     } paths_[kPaths];
-    struct AssignUi { nova::Text* text = nullptr; nova::Pill* clear = nullptr; juce::String shown; } assigns_[kAssignables];
+    static constexpr int kRowsPerPage = 32;
+    struct AssignUi { nova::Text* text = nullptr; nova::Pill *lock = nullptr, *clear = nullptr; juce::String shown; } assigns_[kRowsPerPage];
+    nova::Pill* assignPagePills_[kAssignables / kRowsPerPage] {};
+    int assignPage_ = 0;
     nova::Text* assignNote_ = nullptr;
 };
 
@@ -730,7 +750,7 @@ NovaTridentEditor::NovaTridentEditor (TridentProcessor& p, const theme::Palette&
     : EditorBase (p, palette, knob, tr, std::move (options), U ("TRIDENT")), processor_ (p), palette_ (palette), knobStyle_ (knob)
 {
     addPage (U ("ROUTAGE"), iconPath (0));
-    addPage (U ("MACROS"), iconPath (1));
+    addPage (U ("AUTOMATION"), iconPath (1));
     addPage (tx ("nv.page_settings"), iconPath (2));
     auto& host = p;
 
@@ -812,17 +832,33 @@ NovaTridentEditor::NovaTridentEditor (TridentProcessor& p, const theme::Palette&
         }
     }
 
-    // page MACROS : les 32 paramètres assignables
+    // page AUTOMATION : les 128 emplacements de la réserve
     assignPanel_ = add<nova::Panel> (1, skin());
-    assignPanel_->setTitle (U ("MACROS : 32 PARAMÈTRES ASSIGNABLES"));
+    assignPanel_->setTitle (U ("AUTOMATION : 128 EMPLACEMENTS"));
     assignNote_ = add<nova::Text> (1, skin(), Token::TextDim2, 11.0f);
-    assignNote_->setText (U ("Clic droit sur un potard (de Trident ou d'un effet) : « Assigner à une macro ». Chaque macro est un paramètre que l'hôte peut automatiser."));
-    for (int k = 0; k < kAssignables; ++k)
+    assignNote_->setText (U ("Clic droit sur un réglage d'un effet : « Automatiser ce réglage ». L'emplacement porte son nom dans l'hôte."));
+    for (int pg = 0; pg < kAssignables / kRowsPerPage; ++pg)
     {
-        assigns_[k].text = add<nova::Text> (1, skin(), Token::TextDim, 12.0f);
-        assigns_[k].clear = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
-        assigns_[k].clear->setText (U ("Retirer"));
-        assigns_[k].clear->onClick = [this, k] { processor_.trident().unassign (k); processor_.notifyStateChanged(); };
+        assignPagePills_[pg] = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
+        assignPagePills_[pg]->setText (juce::String (pg * kRowsPerPage + 1) + U ("-") + juce::String ((pg + 1) * kRowsPerPage));
+        assignPagePills_[pg]->onClick = [this, pg] { assignPage_ = pg; };
+    }
+    for (int r = 0; r < kRowsPerPage; ++r)
+    {
+        assigns_[r].text = add<nova::Text> (1, skin(), Token::TextDim, 12.0f);
+        assigns_[r].lock = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
+        assigns_[r].lock->onClick = [this, r]
+        {
+            const int k = assignPage_ * kRowsPerPage + r;
+            processor_.uiReserveSetLocked (k, ! processor_.reserveLocked (k));
+        };
+        assigns_[r].clear = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
+        assigns_[r].clear->setText (U ("Retirer"));
+        assigns_[r].clear->onClick = [this, r]
+        {
+            processor_.uiReserveReleaseSlot (assignPage_ * kRowsPerPage + r);
+            repaint();
+        };
     }
     buildSettingsPage (2);
     setPage (0);
@@ -951,15 +987,18 @@ void NovaTridentEditor::layout()
         }
     }
 
-    // page MACROS
+    // page AUTOMATION
     assignPanel_->setBounds (R (204, 72, 942, 638));
-    assignNote_->setBounds (R (220, 104, 910, 20));
-    for (int k = 0; k < kAssignables; ++k)
+    assignNote_->setBounds (R (220, 104, 470, 20));
+    for (int pg = 0; pg < kAssignables / kRowsPerPage; ++pg)
+        assignPagePills_[pg]->setBounds (R (700.0f + static_cast<float> (pg) * 60.0f, 100, 56, 26));
+    for (int r = 0; r < kRowsPerPage; ++r)
     {
-        const int col = k / 16, row = k % 16;
+        const int col = r / 16, row = r % 16;
         const float x = 220.0f + static_cast<float> (col) * 458.0f, y = 134.0f + static_cast<float> (row) * 34.0f;
-        assigns_[k].text->setBounds (R (x, y + 4, 340, 22));
-        assigns_[k].clear->setBounds (R (x + 352, y, 90, 28));
+        assigns_[r].text->setBounds (R (x, y + 4, 280, 22));
+        assigns_[r].lock->setBounds (R (x + 288, y, 70, 28));
+        assigns_[r].clear->setBounds (R (x + 364, y, 80, 28));
     }
 }
 
@@ -985,17 +1024,26 @@ void NovaTridentEditor::tick()
             const auto text = fx == nullptr ? U ("+ effet") : effectName (i, s);
             if (text != su.shown) { su.shown = text; su.name->setText (text); }
             su.name->setDim (fx == nullptr);
-            su.bypass->setVisible (fx != nullptr);
+            su.bypass->setVisible (currentPage() == 0 && fx != nullptr);
             su.bypass->setOn (fx != nullptr && fx->runner.params().get (stock::bypass) >= 0.5);
         }
     }
     if (currentPage() == 1)
-        for (int k = 0; k < kAssignables; ++k)
+    {
+        for (int pg = 0; pg < kAssignables / kRowsPerPage; ++pg) assignPagePills_[pg]->setOn (pg == assignPage_);
+        for (int r = 0; r < kRowsPerPage; ++r)
         {
+            const int k = assignPage_ * kRowsPerPage + r;
+            const bool used = t.assignment (k).active, locked = processor_.reserveLocked (k);
             const auto text = juce::String (k + 1) + U ("   ") + targetText (k);
-            if (text != assigns_[k].shown) { assigns_[k].shown = text; assigns_[k].text->setText (text); }
-            assigns_[k].clear->setVisible (t.assignment (k).active);
+            if (text != assigns_[r].shown) { assigns_[r].shown = text; assigns_[r].text->setText (text); }
+            assigns_[r].clear->setVisible (used);
+            assigns_[r].clear->setDim (locked);
+            assigns_[r].lock->setVisible (used || locked);
+            assigns_[r].lock->setText (locked ? U ("Verrouillé") : U ("Verrouiller"));
+            assigns_[r].lock->setOn (locked);
         }
+    }
 }
 
 // ================================================================================================ fenêtre du plugin

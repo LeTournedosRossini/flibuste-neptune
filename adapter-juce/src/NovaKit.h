@@ -135,6 +135,7 @@ public:
     std::function<void()> onClick;
 
     void paint (juce::Graphics&) override;
+    void paintOverChildren (juce::Graphics&) override;   // pastille numérotée de la réserve d'automation
     void mouseEnter (const juce::MouseEvent&) override { hover_ = true; repaint(); }
     void mouseExit (const juce::MouseEvent&) override { hover_ = false; repaint(); }
     void mouseDown (const juce::MouseEvent&) override;
@@ -186,6 +187,7 @@ public:
     void refresh() override;
     std::function<void (bool)> onChange;
     void paint (juce::Graphics&) override;
+    void paintOverChildren (juce::Graphics&) override;
     void mouseUp (const juce::MouseEvent&) override;
 
 private:
@@ -231,6 +233,7 @@ public:
     void refresh() override;
     void resized() override;
     void paint (juce::Graphics&) override;
+    void paintOverChildren (juce::Graphics&) override;
 
 private:
     const Skin& skin_;
@@ -249,6 +252,7 @@ public:
     SubSlider (const Skin&, ParamHost&, neptune::core::ParamId, juce::String title, bool pink = false);
     void refresh() override;
     void paint (juce::Graphics&) override;
+    void paintOverChildren (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;

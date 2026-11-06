@@ -4,7 +4,7 @@
 //     Parallèle pur : complet / complet / complet. Deux bandes plus un complet : grave / aigu / complet. Trois bandes : grave / médium / aigu.
 //   - Chaque chemin a quatre emplacements d'effets (InsertInstance, comme les inserts de Neptune), un volume, un mute, un solo et une inversion de polarité.
 //   - Les chemins n'ont pas la même latence (convolution, limiteur...) : chacun est retardé pour que tout soit aligné à la somme ; la latence totale est annoncée à l'hôte.
-//   - Banque de 32 paramètres assignables : chacun vise un réglage au choix (d'un effet ou de Trident) ; l'automation de l'hôte passe par eux.
+//   - Réserve de 128 emplacements d'automation (ParamReserve.h) : chacun vise un réglage au choix (d'un effet ou de Trident) ; l'automation de l'hôte passe par eux.
 // Fil de messages : effets, assignations, état. Fil audio : `process`, rien d'autre ; aucune allocation ni verrou.
 #include <algorithm>
 #include <array>
@@ -26,7 +26,7 @@ namespace neptune::core::trident
 {
 constexpr int kPaths = 3;
 constexpr int kSlotsPerPath = 4;
-constexpr int kAssignables = 32;
+constexpr int kAssignables = 128;   // emplacements de la réserve d'automation (ParamReserve.h)
 
 enum class Source : int { Full = 0, Low, Mid, High };
 
@@ -71,7 +71,7 @@ public:
         }
         for (int k = 0; k < kAssignables; ++k)
         {
-            auto s = ParamSpec::continuous (pid::assign (k), "Macro " + std::to_string (k + 1), Unit::None, 0.0, 1.0, 0.0);
+            auto s = ParamSpec::continuous (pid::assign (k), "Auto " + std::to_string (k + 1), Unit::None, 0.0, 1.0, 0.0);
             s.decimals = 3;
             add (std::move (s));
         }

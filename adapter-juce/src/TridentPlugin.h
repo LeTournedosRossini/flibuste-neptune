@@ -54,10 +54,15 @@ public:
     bool uiUndo() override;
     bool uiRedo() override;
     std::string uiText (std::string_view key) const override;
-    bool canAssignMacro (neptune::core::ParamId) const override;   // les macros de Trident : les réglages propres, sauf les macros elles-mêmes
-    std::vector<int> macrosOf (neptune::core::ParamId) const override;
-    void uiToggleMacro (neptune::core::ParamId, int macro) override;
-    void uiClearMacros (neptune::core::ParamId) override;
+    // Réserve d'automation : les réglages propres de Trident sont déjà automatisables directement ; ceux des effets passent par les emplacements.
+    int reserveCount() const override { return neptune::core::trident::kAssignables; }
+    std::string reserveSlotName (int slot) const override;
+    bool reserveLocked (int slot) const override { return trident_.reserve().locked (slot); }
+    void uiReserveReleaseSlot (int slot) override;
+    void uiReserveSetLocked (int slot, bool locked) override;
+    // Pour les hôtes des effets (chemin, emplacement d'effet) : relier, libérer.
+    int reserveAssign (int path, int slot, neptune::core::ParamId, int reserveSlot, bool replace);
+    void refreshReserveNames();   // le nom de chaque emplacement vu par l'hôte : « 12 · Chemin 1.2 Compresseur · Seuil »
     neptune::core::uistate::Size modalSize (neptune::core::uistate::Terminal t) const override { return modal_[t == neptune::core::uistate::Terminal::Touch ? 1 : 0]; }
     void setModalSize (neptune::core::uistate::Terminal t, neptune::core::uistate::Size s) override { modal_[t == neptune::core::uistate::Terminal::Touch ? 1 : 0] = s; }
 

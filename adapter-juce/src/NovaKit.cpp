@@ -1,4 +1,5 @@
 #include "NovaKit.h"
+#include "ReserveMenu.h"
 #include "neptune/core/Version.h"
 
 #include <algorithm>
@@ -8,6 +9,19 @@ using neptune::core::theme::ControlStyle;
 using neptune::core::theme::KnobStyle;
 using neptune::core::theme::ThemeId;
 using neptune::core::theme::Token;
+
+
+namespace
+{
+// Pastille numérotée de la réserve d'automation, si le réglage est relié à un emplacement.
+void drawReserveBadge (juce::Graphics& g, const nova::Skin& skin, const ParamHost* host, neptune::core::ParamId id, juce::Rectangle<float> area)
+{
+    using neptune::core::theme::Token;
+    const int slot = reservemenu::slotOf (host, id);
+    if (slot < 0) return;
+    reservemenu::drawBadge (g, area, skin.scale(), skin.colour (Token::Accent), skin.colour (Token::PanelBg), slot, host->reserveLocked (slot));
+}
+} // namespace
 
 namespace nova
 {
@@ -285,8 +299,14 @@ void Pill::mouseDoubleClick (const juce::MouseEvent& e)
     if (valueMode_ && ! e.mods.isPopupMenu() && onClick) onClick();
 }
 
+void Pill::paintOverChildren (juce::Graphics& g) { drawReserveBadge (g, skin_, host_, id_, getLocalBounds().toFloat()); }
+void Switch::paintOverChildren (juce::Graphics& g) { drawReserveBadge (g, skin_, host_, id_, getLocalBounds().toFloat()); }
+void KnobCard::paintOverChildren (juce::Graphics& g) { drawReserveBadge (g, skin_, &host_, id_, getLocalBounds().toFloat()); }
+void SubSlider::paintOverChildren (juce::Graphics& g) { drawReserveBadge (g, skin_, &host_, id_, getLocalBounds().toFloat()); }
+
 void Pill::mouseUp (const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu() && e.getDistanceFromDragStart() < 4 && reservemenu::available (host_, id_)) { reservemenu::show (*host_, id_, *this); return; }
     if (valueMode_)
     {
         if (dragging_ && host_ != nullptr) host_->uiEndEdit (id_);
@@ -385,6 +405,7 @@ void Switch::refresh()
 
 void Switch::mouseUp (const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu() && e.getDistanceFromDragStart() < 4 && reservemenu::available (host_, id_)) { reservemenu::show (*host_, id_, *this); return; }
     if (! isEnabled() || e.mods.isPopupMenu() || ! getLocalBounds().contains (e.getPosition())) return;
     setOn (! on_);
     if (host_ != nullptr) setParam (*host_, id_, on_ ? 1.0 : 0.0);
@@ -579,8 +600,9 @@ void SubSlider::mouseDown (const juce::MouseEvent& e)
     applyFromX (e.position.x);
 }
 void SubSlider::mouseDrag (const juce::MouseEvent& e) { if (dragging_) applyFromX (e.position.x); }
-void SubSlider::mouseUp (const juce::MouseEvent&)
+void SubSlider::mouseUp (const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu() && e.getDistanceFromDragStart() < 4 && reservemenu::available (&host_, id_)) { reservemenu::show (host_, id_, *this); return; }
     if (dragging_) host_.uiEndEdit (id_);
     dragging_ = false;
 }

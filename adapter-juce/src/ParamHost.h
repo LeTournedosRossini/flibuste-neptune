@@ -25,6 +25,17 @@ public:
     virtual std::vector<int> macrosOf (neptune::core::ParamId) const { return {}; }       // indices 0..31
     virtual void uiToggleMacro (neptune::core::ParamId, int /*macro*/) {}
     virtual void uiClearMacros (neptune::core::ParamId) {}
+    // Réserve d'automation : l'hôte du plugin ne voit que des emplacements ; un réglage s'y relie en un clic droit (voir ReserveMenu.h).
+    virtual int reserveCount() const { return 0; }                                        // 0 : pas de réserve dans ce plugin
+    virtual bool reserveCanAssign (neptune::core::ParamId) const { return false; }
+    virtual int reserveSlotOf (neptune::core::ParamId) const { return -1; }               // emplacement du réglage, ou -1
+    virtual std::string reserveSlotName (int /*slot*/) const { return {}; }               // nom du réglage visé, vide si libre
+    virtual bool reserveLocked (int /*slot*/) const { return false; }
+    // Relie le réglage à `slot` (-1 : le premier libre). `replace` : l'emplacement occupé est repris. Renvoie l'emplacement utilisé, ou -1 si refusé.
+    virtual int uiReserveAssign (neptune::core::ParamId, int /*slot*/, bool /*replace*/) { return -1; }
+    virtual void uiReserveRelease (neptune::core::ParamId) {}
+    virtual void uiReserveReleaseSlot (int /*slot*/) {}
+    virtual void uiReserveSetLocked (int /*slot*/, bool /*locked*/) {}
     virtual std::string uiText (std::string_view key) const { return std::string (key); }  // texte de l'interface dans la langue des réglages
     // Changement d'un état « texte » d'un module (le fichier d'IR de la convolution), annulable : `apply` écrit la valeur dans le module. Sans historique : appliqué tel quel.
     virtual void uiEditText (std::function<void (const std::string&)> apply, std::string /*oldValue*/, std::string newValue, std::string /*name*/) { apply (newValue); }

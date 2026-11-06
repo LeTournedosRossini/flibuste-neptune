@@ -35,9 +35,21 @@ public:
     void setValue (float newValue) override { set_.setNormalizedAt (index_, static_cast<double> (newValue)); }
     float getDefaultValue() const override { return static_cast<float> (spec_.toNormalized (spec_.defaultValue)); }
 
+    // Nom affiché à l'hôte, modifiable (les emplacements de la réserve d'automation portent le nom du réglage qu'ils pilotent). Vide : le nom du paramètre.
+    void setDisplayName (const juce::String& name)
+    {
+        const juce::SpinLock::ScopedLockType lock (nameLock_);
+        displayName_ = name;
+    }
+
     juce::String getName (int maximumStringLength) const override
     {
-        const auto s = juce::String::fromUTF8 (spec_.name.c_str());
+        juce::String shown;
+        {
+            const juce::SpinLock::ScopedLockType lock (nameLock_);
+            shown = displayName_;
+        }
+        const auto s = shown.isNotEmpty() ? shown : juce::String::fromUTF8 (spec_.name.c_str());
         return maximumStringLength > 0 ? s.substring (0, maximumStringLength) : s;
     }
     juce::String getLabel() const override { return {}; } // l'unité est incluse dans le texte
@@ -66,6 +78,8 @@ public:
     }
 
 private:
+    mutable juce::SpinLock nameLock_;
+    juce::String displayName_;
     neptune::core::ParameterSet& set_;
     std::size_t index_;
     const neptune::core::ParamSpec& spec_;
