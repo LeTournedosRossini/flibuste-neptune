@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 #ifdef _WIN32
@@ -46,6 +48,14 @@ std::string regionName (const std::string& tag, int channel)
 {
 #ifdef _WIN32
     return "Local\\neptune-chords-" + tag + std::to_string (channel);
+#elif defined(__APPLE__)
+    // macOS limite le nom d'une zone partagée à 31 caractères : on garde une empreinte du nom complet (FNV-1a), la même pour l'écrivain et les lecteurs.
+    std::uint64_t h = 1469598103934665603ull;
+    for (char c : tag + "|" + std::to_string (channel))
+        h = (h ^ static_cast<unsigned char> (c)) * 1099511628211ull;
+    char buf[32];
+    std::snprintf (buf, sizeof buf, "/nc-%lx-%012llx", static_cast<long> (getuid()), static_cast<unsigned long long> (h & 0xFFFFFFFFFFFFull));
+    return buf;
 #else
     return "/neptune-chords-" + std::to_string (static_cast<long> (getuid())) + "-" + tag + std::to_string (channel);
 #endif

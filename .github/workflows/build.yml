@@ -40,7 +40,14 @@ jobs:
         run: cmake --build build --config Release --parallel --target neptune_core_tests
 
       - name: Tests du cœur
+        if: runner.os != 'Windows'
         run: ctest --test-dir build -C Release --output-on-failure
+
+      # Windows : ctest passe les noms de tests (accentués) au programme dans la page de code locale, et rien ne correspond. On lance le programme directement.
+      - name: Tests du cœur (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: build/tests/Release/neptune_core_tests.exe
 
       # Informatif : les runners sont partagés, les temps sont bruités. Jamais bloquant ; le JSON est archivé (voir docs/performance.md).
       - name: Mesure de performance du callback (informatif)
