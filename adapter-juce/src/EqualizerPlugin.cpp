@@ -33,22 +33,37 @@ juce::AudioProcessor::BusesProperties EqualizerProcessor::makeBuses()
                             .withOutput ("Output", juce::AudioChannelSet::stereo(), true);
 }
 
+namespace
+{
+constexpr int kReserveSlots = 128;
+}
+
 EqualizerProcessor::EqualizerProcessor()
-    : juce::AudioProcessor (makeBuses()), runner_ (std::make_unique<EqualizerModule>())
+    : juce::AudioProcessor (makeBuses()), runner_ (std::make_unique<EqualizerModule>()),
+      reserve_ (kReserveSlots,
+                [this] (std::uint32_t, std::uint32_t, ParamId id) -> ParamReserve::Ref
+                {
+                    const auto i = runner_.params().indexOf (id);
+                    return i == ParameterSet::npos ? ParamReserve::Ref {} : ParamReserve::Ref { &runner_.params(), i };
+                },
+                [this] (const ParamReserve::Target& t)
+                {
+                    const auto* spec = runner_.params().find (t.param);
+                    return spec != nullptr ? spec->name : std::string();
+                })
 {
     jassert (runner_.ok());
-    auto& set = runner_.params();
-    // Les réglages d'affichage (cachés) ne sont pas déclarés à l'hôte ; ils restent dans l'état du plugin (voir getStateInformation).
-    hostIndex_.assign (set.size(), -1);
-    for (std::size_t i = 0; i < set.size(); ++i)
-    {
-        if (set.spec (i).hidden) continue;
-        hostIndex_[i] = getParameters().size();
-        addParameter (new NeptuneParameter (set, i, probe_)); // l'AudioProcessor en prend la propriété
-    }
+    // L'hôte ne voit que les emplacements de la réserve : les ~360 réglages du module (et ses réglages d'affichage, cachés) restent dans l'état du plugin.
+    reserve_.addHostParameters (*this, probe_);
     std::vector<std::string> warnings;
     settings_ = settings::loadFile (configDirectory() / "settings.json", &warnings);
     for (auto& s : modal_) s = {};
+}
+
+bool EqualizerProcessor::reserveCanAssign (ParamId id) const
+{
+    const auto* spec = runner_.params().find (id);
+    return spec != nullptr && ! spec->hidden;
 }
 
 bool EqualizerProcessor::isBusesLayoutSupported (const BusesLayout& l) const
@@ -63,12 +78,13 @@ void EqualizerProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     runner_.prepare (sampleRate, samplesPerBlock);
     declaredLatency_ = runner_.latencySamples();
     setLatencySamples (declaredLatency_);
-    startTimerHz (5);
+    startTimerHz (20);
 }
 
 // La latence dépend du lookahead et du suréchantillonnage (réglages non automatisables) : on la redéclare à l'hôte quand elle change.
 void EqualizerProcessor::timerCallback()
 {
+    reserve_.notifyFollowed (*this);   // un réglage assigné a bougé sans l'interface (preset, A/B) : son emplacement le suit, l'hôte doit le savoir
     const int latency = runner_.latencySamples();
     if (latency == declaredLatency_) return;
     declaredLatency_ = latency;
@@ -88,6 +104,7 @@ void EqualizerProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         keyL = buffer.getReadPointer (2);
         keyR = buffer.getReadPointer (sc->getNumberOfChannels() >= 2 && buffer.getNumChannels() >= 4 ? 3 : 2);
     }
+    reserve_.sync();   // les emplacements que l'hôte a bougés règlent leurs réglages avant le traitement
     runner_.setKey (keyL, keyR);
     runner_.process (buffer.getWritePointer (0), buffer.getWritePointer (1), n); // en place ; le bypass est le paramètre du plugin
 }
@@ -103,6 +120,7 @@ void EqualizerProcessor::getStateInformation (juce::MemoryBlock& dest)
     const auto& set = runner_.params();
     for (std::size_t i = 0; i < set.size(); ++i) params[std::to_string (set.spec (i).id)] = set.getAt (i);
     doc["parameters"] = std::move (params);
+    doc["reserve"] = reserve_.toJson();
     const auto text = doc.dump (2);
     dest.append (text.data(), text.size());
 }
@@ -125,6 +143,7 @@ void EqualizerProcessor::setStateInformation (const void* data, int size)
     }
     undo_.clear();
     runner_.reset();
+    reserve_.fromJson (*this, doc.contains ("reserve") ? doc["reserve"] : nlohmann::json::array());
     updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
 }
 
@@ -133,7 +152,7 @@ void EqualizerProcessor::uiBeginEdit (ParamId id)
 {
     const auto index = runner_.params().indexOf (id);
     if (index == ParameterSet::npos) return;
-    if (hostIndex_[index] >= 0) getParameters()[hostIndex_[index]]->beginChangeGesture();
+    if (auto* hp = reserve_.hostParameterFor (*this, id)) hp->beginChangeGesture();
     undo_.beginGesture();
 }
 
@@ -143,7 +162,7 @@ void EqualizerProcessor::uiSetNormalised (ParamId id, double n)
     const auto index = set.indexOf (id);
     if (index == ParameterSet::npos) return;
     undo_.setParameter (set, id, set.spec (index).fromNormalized (n));
-    if (hostIndex_[index] >= 0) getParameters()[hostIndex_[index]]->setValueNotifyingHost (static_cast<float> (set.getNormalizedAt (index)));
+    if (auto* hp = reserve_.hostParameterFor (*this, id)) hp->setValueNotifyingHost (static_cast<float> (set.getNormalizedAt (index)));
 }
 
 void EqualizerProcessor::uiEndEdit (ParamId id)
@@ -151,7 +170,7 @@ void EqualizerProcessor::uiEndEdit (ParamId id)
     const auto index = runner_.params().indexOf (id);
     if (index == ParameterSet::npos) return;
     undo_.endGesture();
-    if (hostIndex_[index] >= 0) getParameters()[hostIndex_[index]]->endChangeGesture();
+    if (auto* hp = reserve_.hostParameterFor (*this, id)) hp->endChangeGesture();
 }
 
 void EqualizerProcessor::uiResetToDefault (ParamId id)
@@ -209,6 +228,7 @@ void EqualizerPluginEditor::buildContent()
     NovaEqualizerEditor::Options opt;
     opt.brand = true;
     opt.moduleName = "equalizer";
+    opt.reserveOverlay = true;   // pastille AUTOMATION dans l'en-tête
     opt.stretchAuto = true;   // fenêtre étirable en largeur
     opt.sampleRate = [&p] { return p.getSampleRate() > 0.0 ? p.getSampleRate() : 48000.0; };
     opt.getSettings = [&p] { return p.settings(); };

@@ -7,6 +7,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include <memory>
 #include "HostProbe.h"
 #include "ParamHost.h"
+#include "ReserveHost.h"
 #include "NovaEqualizerEditor.h"
 #include "neptune/core/I18n.h"
 #include "neptune/core/Settings.h"
@@ -52,6 +53,16 @@ public:
     void uiResetToDefault (neptune::core::ParamId) override;
     bool uiUndo() override;
     bool uiRedo() override;
+    // Réserve d'automation : l'hôte ne voit que 128 emplacements ; un réglage s'y relie par clic droit (ReserveMenu.h) ou depuis la fenêtre AUTOMATION.
+    int reserveCount() const override { return reserve_.count(); }
+    bool reserveCanAssign (neptune::core::ParamId) const override;
+    int reserveSlotOf (neptune::core::ParamId id) const override { return reserve_.slotOf (id); }
+    std::string reserveSlotName (int slot) const override { return reserve_.slotName (slot); }
+    bool reserveLocked (int slot) const override { return reserve_.locked (slot); }
+    int uiReserveAssign (neptune::core::ParamId id, int slot, bool replace) override { return reserve_.assign (*this, id, slot, replace); }
+    void uiReserveRelease (neptune::core::ParamId id) override { if (const int k = reserve_.slotOf (id); k >= 0) reserve_.release (*this, k); }
+    void uiReserveReleaseSlot (int slot) override { reserve_.release (*this, slot); }
+    void uiReserveSetLocked (int slot, bool locked) override { reserve_.setLocked (*this, slot, locked); }
     neptune::core::uistate::Size modalSize (neptune::core::uistate::Terminal t) const override { return modal_[t == neptune::core::uistate::Terminal::Touch ? 1 : 0]; }
     void setModalSize (neptune::core::uistate::Terminal t, neptune::core::uistate::Size s) override { modal_[t == neptune::core::uistate::Terminal::Touch ? 1 : 0] = s; }
 
@@ -66,7 +77,7 @@ private:
 
     neptune::core::ModuleRunner runner_;
     HostProbe probe_;
-    std::vector<int> hostIndex_;   // indice de chaque réglage dans la liste de l'hôte ; -1 : réglage caché (affichage), non déclaré à l'hôte
+    ReserveHost reserve_;          // les seuls paramètres vus par l'hôte : 128 emplacements reliés aux réglages du module
     neptune::core::UndoManager undo_;
     neptune::core::settings::GlobalSettings settings_;
     neptune::core::uistate::Size modal_[2] {};

@@ -25,6 +25,7 @@ public:
         bool embedded = false;      // éditeur intégré dans la fenêtre de Neptune, qui a déjà logo, nom et version : l'en-tête ne garde que le nom de l'instrument
         bool noPresets = false;     // pas de pastille de preset (le Sampler n'a pas de presets)
         bool noAB = false;          // pas de bouton A/B
+        bool reserveOverlay = false;   // plugin à réserve d'automation : pastille « AUTOMATION » dans l'en-tête et fenêtre de la liste des emplacements
         bool noBypass = false;      // pas de pastille de bypass (instrument : aucun paramètre `stock::bypass`)
         std::function<void (juce::Component* anchor)> presetMenu;   // remplace le menu de presets NOVA (presets d'usine + fichiers utilisateur), par exemple par une bibliothèque
         bool stretchWidth = false;  // fenêtre étirable en largeur : la zone de droite s'agrandit, la colonne de gauche et la hauteur ne changent pas ; l'éditeur place lui-même ses zones (Rs, Rr)
@@ -167,7 +168,8 @@ private:
     Panel* setPanel_ = nullptr;
     Pill *langPill_ = nullptr, *openPill_ = nullptr;
     // en-tête, à gauche du bouton de bypass : thème et contraste (plugin séparé)
-    Pill *hdrTheme_ = nullptr, *hdrMinus_ = nullptr, *hdrContrast_ = nullptr, *hdrPlus_ = nullptr;
+    Pill *hdrTheme_ = nullptr, *hdrMinus_ = nullptr, *hdrContrast_ = nullptr, *hdrPlus_ = nullptr, *hdrAuto_ = nullptr;
+    std::unique_ptr<juce::Component> reserveOverlay_;
     Text *setGeneral_ = nullptr, *setNote_ = nullptr, *setPresets_ = nullptr, *setFolder_ = nullptr, *setAbout_ = nullptr, *setAboutText_ = nullptr;
     int page_ = 0, presetIndex_ = 0;
     bool slotB_ = false;

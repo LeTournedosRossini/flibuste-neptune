@@ -1,4 +1,5 @@
 #include "NovaEditor.h"
+#include "ReserveOverlay.h"
 #include "neptune/core/Version.h"
 
 #include <cmath>
@@ -63,6 +64,15 @@ EditorBase::EditorBase (ParamHost& host, const theme::Palette& palette, theme::K
         hdrPlus_->setFontSize (16.0f);
         hdrPlus_->onClick = [this] { auto st = options_.getSettings(); if (st.contrast < 4) { ++st.contrast; options_.applySettings (st); } };
         refreshSettingsTexts();
+    }
+    if (options_.brand && options_.reserveOverlay && host_.reserveCount() > 0)
+    {
+        hdrAuto_ = add<Pill> (-1, skin_, Pill::Look::Small);
+        hdrAuto_->setFontSize (10.0f);
+        hdrAuto_->setText (juce::String::fromUTF8 ("AUTOMATION"));
+        hdrAuto_->onClick = [this] { if (reserveOverlay_ != nullptr) { reserveOverlay_->setVisible (true); reserveOverlay_->toFront (true); } };
+        reserveOverlay_ = std::make_unique<ReserveOverlay> (skin_, host_, [this] { reserveOverlay_->setVisible (false); });
+        addChildComponent (*reserveOverlay_);
     }
     startTimerHz (30);
 }
@@ -475,6 +485,13 @@ void EditorBase::refreshSettingsTexts()
 
 void EditorBase::layoutHeaderControls()
 {
+    if (reserveOverlay_ != nullptr) reserveOverlay_->setBounds (getLocalBounds());
+    if (hdrAuto_ != nullptr)
+    {
+        const float wd = options_.stretchAuto ? 1160.0f : 1160.0f + extraW_;
+        const float left = hdrTheme_ != nullptr ? wd - 14 - 36 - 10 - 64 - 10 - 28 - 36 - 28 - 12 : wd - 14 - 36 - 12;   // à gauche du sélecteur de contraste, ou du bypass
+        hdrAuto_->setBounds (R (left - 96, 15, 96, 28));
+    }
     if (hdrTheme_ == nullptr) return;
     // de droite à gauche : bypass (36 px à 14 px du bord), thème, puis le sélecteur de contraste « - valeur + »
     const float w = options_.stretchAuto ? 1160.0f : 1160.0f + extraW_;   // en stretchAuto, R() décale déjà l'en-tête
