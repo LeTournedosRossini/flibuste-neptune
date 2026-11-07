@@ -2243,7 +2243,6 @@ void NeptuneProcessor::reconcileInsertBindings()
     auto c = control_.config();
     int remaining = 0;
     const int dropped = dropMissingInsertTargets (c, [this] (const Target& t) { return insertInstanceFor (t) != nullptr; }, &remaining);
-    hasInsertBindings_ = remaining > 0;
     if (dropped > 0) { uiSetControlConfig (std::move (c)); return; }   // reconfigure et renomme
     if (remaining > 0) { control_.configure (c, params_, controlResolver()); refreshMacroNames(); }
 }
@@ -2337,13 +2336,12 @@ void NeptuneProcessor::refreshMacroNames()
     singleMacro_.clear();
     singleInsertMacro_.clear();
     const auto cfg = control_.config();
-    hasInsertBindings_ = false;
     std::unordered_map<neptune::core::ParamId, std::vector<const Binding*>> byTarget;
     for (const auto& b : cfg.bindings)
         if (b.source.kind == SourceKind::Macro && b.target.isParam()) byTarget[b.target.param].push_back (&b);
     std::unordered_map<std::string, std::vector<const Binding*>> byInsertTarget;
     for (const auto& b : cfg.bindings)
-        if (b.source.kind == SourceKind::Macro && b.target.isInsert()) { byInsertTarget[insertKey (b.target)].push_back (&b); hasInsertBindings_ = true; }
+        if (b.source.kind == SourceKind::Macro && b.target.isInsert()) { byInsertTarget[insertKey (b.target)].push_back (&b); }
     for (const auto& [key, list] : byInsertTarget)
     {
         const Binding& b = *list.front();
@@ -2560,8 +2558,9 @@ void NeptuneProcessor::controlTick()
     if (const auto epoch = insertEpoch_.load (std::memory_order_relaxed); epoch != seenInsertEpoch_)
     {
         seenInsertEpoch_ = epoch;
-        if (hasInsertBindings_) reconcileInsertBindings();   // un insert a changé : les assignations qui le visent suivent ou disparaissent
+        reconcileInsertBindings();   // un insert a changé : les assignations qui le visent suivent ou disparaissent
     }
+    if (namesRefreshTicks_ > 0 && --namesRefreshTicks_ == 0) refreshMacroNames();   // second passage après un chargement d'état (voir setStateInformation)
     glideTick();
     if (++latencyTicks_ >= 6)   // environ 5 fois par seconde : le plan de compensation suit les inserts, le routage et le profil
     {
@@ -3058,6 +3057,11 @@ void NeptuneProcessor::setStateInformation (const void* data, int sizeInBytes)
     adoptMixerFromState (result.mixer);
     notifyHostOnSeed_ = true;
     adoptStateIdentity (result.instanceId);
+    // Les inserts du projet sont posés : les assignations qui visent leurs réglages sont reliées au prochain tic (ou retirées si leur insert manque), et les macros
+    // reprennent leur nom. Un second passage plus tard : certains hôtes ignorent un renommage demandé pendant le chargement de l'état.
+    refreshMacroNames();
+    insertEpoch_.fetch_add (1, std::memory_order_relaxed);
+    namesRefreshTicks_ = 45;
 
     // Les valeurs ont changé hors des événements de paramètres : le wrapper en tire un `params.rescan(VALUES)`
     // vers l'hôte (exigé par le CLAP et vérifié par clap-validator, test state-reproducibility).

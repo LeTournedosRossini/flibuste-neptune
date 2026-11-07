@@ -550,7 +550,7 @@ private:
     void setEngineInsert (StripKind, int index, int slot, std::shared_ptr<const neptune::core::InsertInstance>);   // engine_.setInsert + signale le changement à la couche de contrôle
     std::atomic<std::uint32_t> insertEpoch_ { 0 };
     std::uint32_t seenInsertEpoch_ = 0;
-    bool hasInsertBindings_ = false;                                   // thread de message
+    int namesRefreshTicks_ = 0;                                        // thread de message : nombre de tics avant de renommer à nouveau les macros
     std::unordered_map<neptune::core::ParamId, int> singleMacro_;   // réglage -> macro, quand une seule macro le pilote en pleine course (thread de message)
     juce::AudioProcessorParameter* hostParam (std::size_t index) const
     {
