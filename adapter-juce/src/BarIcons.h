@@ -6,7 +6,7 @@
 class IconButton : public juce::TextButton
 {
 public:
-    enum class Icon { Cycle, LockOpen, LockClosed, Left, Right, Cross };
+    enum class Icon { Cycle, LockOpen, LockClosed, Left, Right, Cross, Undo, Redo };
 
     void setIcon (Icon i) { if (icon_ != i) { icon_ = i; repaint(); } }
     Icon icon() const noexcept { return icon_; }
@@ -57,6 +57,30 @@ private:
                 p.startNewSubPath (x + w * 0.35f, y + h * 0.15f); p.lineTo (x + w * 0.7f, y + h * 0.5f); p.lineTo (x + w * 0.35f, y + h * 0.85f);
                 g.strokePath (p, stroke);
                 break;
+            case Icon::Undo:
+            case Icon::Redo:
+            {
+                // arc de plus d'un demi-tour qui revient en arrière (annuler : vers la gauche, rétablir : vers la droite), terminé par une pointe de flèche
+                const bool undo = icon_ == Icon::Undo;
+                const auto c = r.getCentre().translated (0.0f, h * 0.06f);
+                const float rad = w * 0.36f;
+                const float a0 = undo ? 2.1f : -2.1f, a1 = undo ? -1.15f : 1.15f;
+                juce::Path arc;
+                arc.addCentredArc (c.x, c.y, rad, rad, 0.0f, std::min (a0, a1), std::max (a0, a1), true);
+                g.strokePath (arc, stroke);
+                const juce::Point<float> end (c.x + rad * std::sin (a1), c.y - rad * std::cos (a1));
+                const float sign = undo ? -1.0f : 1.0f;   // sens du déplacement le long de l'arc
+                const juce::Point<float> back (-sign * std::cos (a1), -sign * std::sin (a1));
+                juce::Path head;
+                for (const float turn : { 0.75f, -0.75f })
+                {
+                    const juce::Point<float> d (back.x * std::cos (turn) - back.y * std::sin (turn), back.x * std::sin (turn) + back.y * std::cos (turn));
+                    head.startNewSubPath (end);
+                    head.lineTo (end + d * 4.6f);
+                }
+                g.strokePath (head, stroke);
+                break;
+            }
             case Icon::Cycle:
             {
                 // deux arcs de 120 degrés dans le sens horaire, décalés d'un demi-tour, chacun terminé par une pointe de flèche

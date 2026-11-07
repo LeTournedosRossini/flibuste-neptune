@@ -199,8 +199,8 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     };
     addAndMakeVisible (trackBox_);
 
-    undoButton_.setIcon (IconButton::Icon::Left);
-    redoButton_.setIcon (IconButton::Icon::Right);
+    undoButton_.setIcon (IconButton::Icon::Undo);
+    redoButton_.setIcon (IconButton::Icon::Redo);
     undoButton_.setTooltip (text ("undo.undo"));
     redoButton_.setTooltip (text ("undo.redo"));
     undoButton_.onClick = [this] { processor_.uiUndo(); };
