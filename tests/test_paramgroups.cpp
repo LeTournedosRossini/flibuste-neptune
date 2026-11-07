@@ -68,7 +68,7 @@ TEST_CASE ("param groups: every real parameter lands in a family, except the mac
             CHECK (s.name.rfind ("Macro ", 0) == 0);
         }
     }
-    CHECK (others == 32);
+    CHECK (others == neptune::core::control::kMacros);
     CHECK (classify ("Router Switch 3").family == Family::Router);
     CHECK (classify ("Router Rule 12 Transpose").family == Family::Router);
     CHECK (classify ("Router Switch 3").scope == Scope::Global);

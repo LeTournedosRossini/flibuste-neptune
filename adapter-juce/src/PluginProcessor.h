@@ -1,4 +1,5 @@
 #pragma once
+#include <unordered_map>
 #include <juce_audio_processors/juce_audio_processors.h>
 JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wunused-parameter", "-Wextra-semi", "-Wnon-virtual-dtor")
 #include <clap-juce-extensions/clap-juce-extensions.h>
@@ -101,6 +102,16 @@ public:
     std::vector<int> macrosOf (neptune::core::ParamId) const override;
     void uiToggleMacro (neptune::core::ParamId, int macro) override;
     void uiClearMacros (neptune::core::ParamId) override;
+    // Réserve d'automation : en liste réduite, les macros sont les emplacements que voit l'hôte ; un réglage s'y relie par clic droit (ReserveMenu.h).
+    int reserveCount() const override { return settings_.reducedHostList ? neptune::core::control::kMacros : 0; }
+    bool reserveCanAssign (neptune::core::ParamId) const override;
+    bool reserveDirect (neptune::core::ParamId) const override;
+    int reserveSlotOf (neptune::core::ParamId) const override;
+    std::string reserveSlotName (int slot) const override;
+    int uiReserveAssign (neptune::core::ParamId, int slot, bool replace) override;
+    void uiReserveRelease (neptune::core::ParamId id) override { uiClearMacros (id); }
+    void uiReserveReleaseSlot (int slot) override;
+    void refreshMacroNames();   // le nom de chaque macro vu par l'hôte (« 3 · Volume piste 2 ») et la table réglage -> macro des gestes d'édition
     std::string uiText (std::string_view key) const override;
     int mixerZoomPercent() const { return settings_.mixerZoomPercent; }
     void uiSetMixerZoomPercent (int percent);   // mémorisé dans les réglages globaux
@@ -516,6 +527,14 @@ private:
     neptune::core::control::ControlEngine control_;
     std::vector<float> hostIn_[2];   // copie de l'entrée audio de l'hôte (pistes « Entrée audio »)
     std::vector<int> hostIndex_;   // indice du paramètre du cœur -> indice de l'hôte (-1 : non déclaré à l'hôte, liste réduite)
+    // Le paramètre d'hôte qui porte un réglage pendant un geste d'édition : le sien, sinon (liste réduite) celui de la macro qui le pilote seule, sans réglage de plage.
+    juce::AudioProcessorParameter* hostParamForEdit (neptune::core::ParamId id, std::size_t index) const
+    {
+        if (auto* hp = hostParam (index)) return hp;
+        const auto it = singleMacro_.find (id);
+        return it == singleMacro_.end() ? nullptr : hostParam (macroFirst_ + static_cast<std::size_t> (it->second));
+    }
+    std::unordered_map<neptune::core::ParamId, int> singleMacro_;   // réglage -> macro, quand une seule macro le pilote en pleine course (thread de message)
     juce::AudioProcessorParameter* hostParam (std::size_t index) const
     {
         return index < hostIndex_.size() && hostIndex_[index] >= 0 ? getParameters()[hostIndex_[index]] : nullptr;

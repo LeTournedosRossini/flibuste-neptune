@@ -126,18 +126,18 @@ TEST_CASE ("atomic write replaces an existing file")
     CHECK (text == "two");
 }
 
-TEST_CASE ("settings: the reduced host list is off by default and round trips", "[settings]")
+TEST_CASE ("settings: the reduced host list is on by default and round trips", "[settings]")
 {
     using namespace neptune::core::settings;
     GlobalSettings s;
-    CHECK_FALSE (s.reducedHostList);
-    CHECK_FALSE (fromJson ("{}").reducedHostList);
+    CHECK (s.reducedHostList);
+    CHECK (fromJson ("{}").reducedHostList);
     CHECK_FALSE (s.showDiagnostics);
     CHECK_FALSE (fromJson ("{}").showDiagnostics);
     s.showDiagnostics = true;
     CHECK (fromJson (toJson (s)).showDiagnostics);
-    s.reducedHostList = true;
-    CHECK (fromJson (toJson (s)).reducedHostList);
+    s.reducedHostList = false;
+    CHECK_FALSE (fromJson (toJson (s)).reducedHostList);
     // zoom du mixeur : 120 par défaut, borné à 60..160
     CHECK (fromJson ("{}").mixerZoomPercent == 120);
     s.mixerZoomPercent = 90;

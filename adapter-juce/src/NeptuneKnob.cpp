@@ -1,6 +1,7 @@
 #include <algorithm>
 #include "NeptuneKnob.h"
 #include "ReserveMenu.h"
+#include "neptune/core/Control.h"
 #include <cmath>
 
 using neptune::core::theme::Token;
@@ -141,8 +142,13 @@ void NeptuneKnob::showMacroMenu()
 {
     const auto assigned = processor_.macrosOf (id_);
     juce::PopupMenu sub;
-    for (int m = 0; m < 32; ++m)
-        sub.addItem (100 + m, "Macro " + juce::String (m + 1), true, std::find (assigned.begin(), assigned.end(), m) != assigned.end());
+    for (int g0 = 0; g0 < neptune::core::control::kMacros; g0 += 16)
+    {
+        juce::PopupMenu group;
+        for (int m = g0; m < g0 + 16; ++m)
+            group.addItem (100 + m, "Macro " + juce::String (m + 1), true, std::find (assigned.begin(), assigned.end(), m) != assigned.end());
+        sub.addSubMenu ("Macros " + juce::String (g0 + 1) + " - " + juce::String (g0 + 16), group);
+    }
     juce::PopupMenu menu;
     menu.addSubMenu (juce::String::fromUTF8 (processor_.uiText ("macro.assign").c_str()), sub);
     menu.addItem (1, juce::String::fromUTF8 (processor_.uiText ("macro.clear").c_str()), ! assigned.empty());

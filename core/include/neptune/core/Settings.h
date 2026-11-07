@@ -29,8 +29,8 @@ struct GlobalSettings
     int autosaveKeepDays = 30;        // les autosaves orphelins plus vieux sont supprimés ; 1..365
 
     // Neptune : ne déclare à l'hôte que les paramètres de bande et le pool de macros (voir control::isBandOrMacroParam). Lu à la création de
-    // l'instance (l'hôte lit la liste une fois) : un changement ne joue qu'au prochain chargement. Casse l'automation déjà enregistrée sur les autres.
-    bool reducedHostList = false;
+    // l'instance (l'hôte lit la liste une fois) : un changement ne joue qu'au prochain chargement. Casse l'automation déjà enregistrée sur les autres. Activée par défaut : les macros sont les emplacements d'automation (clic droit sur un réglage).
+    bool reducedHostList = true;
 
     // Neptune : ligne de diagnostic sous la version (zones, notes, voix de chaque piste Sampler). Masquée par défaut ; le chargement et les erreurs restent affichés.
     bool showDiagnostics = false;

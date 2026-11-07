@@ -232,7 +232,7 @@ TEST_CASE ("control: configuration round trips, is sanitised and everything is o
     b.lo = 0.1; b.hi = 0.9; b.curve = 2.0; b.invert = true; b.mode = Mode::Pickup;
     c.bindings.push_back (b);
     Binding m;
-    m.source.kind = SourceKind::Macro; m.source.number = 31; m.target.param = kVolume;
+    m.source.kind = SourceKind::Macro; m.source.number = 255; m.target.param = kVolume;
     c.bindings.push_back (m);
     Binding o;
     o.source.kind = SourceKind::Osc; o.source.address = "/a/b"; o.target.isAction = true; o.target.action = Action::TrackNext;
@@ -242,7 +242,7 @@ TEST_CASE ("control: configuration round trips, is sanitised and everything is o
     // assignations invalides ignorées, bornes appliquées
     const char* bad = R"({"bindings":[
         {"source":{"type":"cc","channel":0,"number":200},"target":{"param":10}},
-        {"source":{"type":"macro","index":99},"target":{"param":10}},
+        {"source":{"type":"macro","index":300},"target":{"param":10}},
         {"source":{"type":"osc","address":"sans-barre"},"target":{"param":10}},
         {"source":{"type":"cc","channel":0,"number":1},"target":{"action":"inconnue"}},
         {"source":{"type":"cc","channel":0,"number":1},"target":{"param":0}},
@@ -277,14 +277,14 @@ TEST_CASE ("control: reconfiguring while the audio side is running is safe and t
     CHECK (r.set.get (kCutoff) == Approx (20000.0));
 }
 
-TEST_CASE ("control: the macro pool declares 32 parameters and a macro moves its targets", "[control]")
+TEST_CASE ("control: the macro pool declares 256 parameters and a macro moves its targets", "[control]")
 {
     ParameterSet set;
     REQUIRE (addMacroParams (set));
     CHECK (set.size() == static_cast<std::size_t> (kMacros));
     CHECK (set.find (macroParamId (0)) != nullptr);
-    CHECK (set.find (macroParamId (31)) != nullptr);
-    CHECK (set.find (macroParamId (32)) == nullptr);
+    CHECK (set.find (macroParamId (255)) != nullptr);
+    CHECK (set.find (macroParamId (256)) == nullptr);
     CHECK (set.find (macroParamId (5))->name == "Macro 6");
     CHECK (set.get (macroParamId (3)) == Approx (0.0));
 
@@ -317,7 +317,7 @@ TEST_CASE ("control: the reduced host list keeps strips, master and macros only"
     CHECK_FALSE (isBandOrMacroParam (1040));         // synthé
     CHECK_FALSE (isBandOrMacroParam (9033));         // orgue
     CHECK_FALSE (isBandOrMacroParam (12000));        // emplacements
-    CHECK_FALSE (isBandOrMacroParam (13032));
+    CHECK_FALSE (isBandOrMacroParam (13256));
 }
 
 TEST_CASE ("control: source labels are short and language independent", "[control]")

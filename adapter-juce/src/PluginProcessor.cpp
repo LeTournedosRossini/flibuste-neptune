@@ -2029,6 +2029,7 @@ NeptuneProcessor::~NeptuneProcessor()
 void NeptuneProcessor::uiSetControlConfig (neptune::core::control::Config c)
 {
     control_.configure (c, params_);
+    refreshMacroNames();
     notifyStateChanged();
 }
 
@@ -2067,7 +2068,106 @@ void NeptuneProcessor::uiClearControllers()
 bool NeptuneProcessor::canAssignMacro (neptune::core::ParamId id) const
 {
     using namespace neptune::core;
+    if (settings_.reducedHostList && control::isBandOrMacroParam (id)) return false;   // déjà vu directement par l'hôte
     return params_.find (id) != nullptr && ! (id >= control::kMacroBase && id < control::kMacroBase + static_cast<ParamId> (control::kMacros));
+}
+
+bool NeptuneProcessor::reserveCanAssign (neptune::core::ParamId id) const { return settings_.reducedHostList && canAssignMacro (id); }
+
+bool NeptuneProcessor::reserveDirect (neptune::core::ParamId id) const { return settings_.reducedHostList && neptune::core::control::isBandOrMacroParam (id); }
+
+int NeptuneProcessor::reserveSlotOf (neptune::core::ParamId id) const
+{
+    const auto m = macrosOf (id);
+    return m.empty() ? -1 : m.front();
+}
+
+std::string NeptuneProcessor::reserveSlotName (int slot) const
+{
+    using namespace neptune::core::control;
+    std::string first;
+    int count = 0;
+    for (const auto& b : control_.config().bindings)
+    {
+        if (b.source.kind != SourceKind::Macro || b.source.number != slot) continue;
+        if (count++ > 0) continue;
+        const auto* spec = b.target.isAction ? nullptr : params_.find (b.target.param);
+        first = spec != nullptr ? spec->name : std::string ("action");
+    }
+    if (count == 0) return {};
+    return count > 1 ? first + " (+" + std::to_string (count - 1) + ")" : first;
+}
+
+int NeptuneProcessor::uiReserveAssign (neptune::core::ParamId id, int slot, bool replace)
+{
+    using namespace neptune::core::control;
+    if (! reserveCanAssign (id)) return -1;
+    auto c = control_.config();
+    auto used = [&c] (int m) { for (const auto& b : c.bindings) if (b.source.kind == SourceKind::Macro && b.source.number == m) return true; return false; };
+    if (slot < 0)
+    {
+        for (int m = 0; m < kMacros && slot < 0; ++m) if (! used (m)) slot = m;
+        if (slot < 0) return -1;
+    }
+    if (slot >= kMacros) return -1;
+    if (used (slot) && ! replace)
+    {
+        bool onlyThis = true;
+        for (const auto& b : c.bindings) if (b.source.kind == SourceKind::Macro && b.source.number == slot && (b.target.isAction || b.target.param != id)) onlyThis = false;
+        if (! onlyThis) return -1;
+    }
+    // un réglage n'a qu'une macro ; reprendre une macro occupée la vide de ses anciennes cibles
+    c.bindings.erase (std::remove_if (c.bindings.begin(), c.bindings.end(), [&] (const Binding& b)
+                      { return b.source.kind == SourceKind::Macro && ((b.source.number == slot) || (! b.target.isAction && b.target.param == id)); }), c.bindings.end());
+    Binding b;
+    b.source.kind = SourceKind::Macro;
+    b.source.number = slot;
+    b.target.param = id;
+    c.bindings.push_back (std::move (b));
+    // la macro prend la valeur du réglage (pas de saut) ; le prochain bloc la mémorise sans l'appliquer
+    const auto index = params_.indexOf (id);
+    const auto macroIndex = macroFirst_ + static_cast<std::size_t> (slot);
+    if (index != neptune::core::ParameterSet::npos)
+    {
+        const double n = params_.getNormalizedAt (index);
+        params_.setNormalizedAt (macroIndex, n);
+        macroResync_.store (true);
+        if (auto* hp = hostParam (macroIndex)) hp->setValueNotifyingHost (static_cast<float> (n));
+    }
+    uiSetControlConfig (std::move (c));
+    return slot;
+}
+
+void NeptuneProcessor::uiReserveReleaseSlot (int slot)
+{
+    using namespace neptune::core::control;
+    auto c = control_.config();
+    c.bindings.erase (std::remove_if (c.bindings.begin(), c.bindings.end(), [&] (const Binding& b)
+                      { return b.source.kind == SourceKind::Macro && b.source.number == slot; }), c.bindings.end());
+    uiSetControlConfig (std::move (c));
+}
+
+void NeptuneProcessor::refreshMacroNames()
+{
+    using namespace neptune::core::control;
+    singleMacro_.clear();
+    const auto cfg = control_.config();
+    std::unordered_map<neptune::core::ParamId, std::vector<const Binding*>> byTarget;
+    for (const auto& b : cfg.bindings)
+        if (b.source.kind == SourceKind::Macro && ! b.target.isAction) byTarget[b.target.param].push_back (&b);
+    for (const auto& [id, list] : byTarget)
+    {
+        const Binding& b = *list.front();
+        if (list.size() == 1 && b.lo == 0.0 && b.hi == 1.0 && b.curve == 1.0 && ! b.invert) singleMacro_[id] = b.source.number;
+    }
+    if (! settings_.reducedHostList) return;
+    for (int k = 0; k < kMacros; ++k)
+        if (auto* np = dynamic_cast<NeptuneParameter*> (hostParam (macroFirst_ + static_cast<std::size_t> (k))))
+        {
+            const auto name = reserveSlotName (k);
+            np->setDisplayName (name.empty() ? juce::String() : juce::String (k + 1) + juce::String::fromUTF8 (" \xc2\xb7 ") + juce::String::fromUTF8 (name.c_str()));
+        }
+    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withParameterInfoChanged (true));
 }
 
 std::vector<int> NeptuneProcessor::macrosOf (neptune::core::ParamId id) const
@@ -2326,7 +2426,7 @@ void NeptuneProcessor::uiBeginEdit (neptune::core::ParamId id)
 {
     const auto index = params_.indexOf (id);
     if (index == neptune::core::ParameterSet::npos) return;
-    if (auto* hp = hostParam (index)) hp->beginChangeGesture();
+    if (auto* hp = hostParamForEdit (id, index)) hp->beginChangeGesture();
     undo_.beginGesture();
 }
 
@@ -2336,7 +2436,7 @@ void NeptuneProcessor::uiSetNormalised (neptune::core::ParamId id, double normal
     if (index == neptune::core::ParameterSet::npos) return;
     // D'abord le cœur par la pile d'annulation (elle lit l'ancienne valeur), puis l'hôte est prévenu.
     undo_.setParameter (params_, id, params_.spec (index).fromNormalized (normalised));
-    if (auto* hp = hostParam (index)) hp->setValueNotifyingHost (static_cast<float> (params_.getNormalizedAt (index)));
+    if (auto* hp = hostParamForEdit (id, index)) hp->setValueNotifyingHost (static_cast<float> (params_.getNormalizedAt (index)));
 }
 
 void NeptuneProcessor::uiEndEdit (neptune::core::ParamId id)
@@ -2344,7 +2444,7 @@ void NeptuneProcessor::uiEndEdit (neptune::core::ParamId id)
     const auto index = params_.indexOf (id);
     if (index == neptune::core::ParameterSet::npos) return;
     undo_.endGesture();
-    if (auto* hp = hostParam (index)) hp->endChangeGesture();
+    if (auto* hp = hostParamForEdit (id, index)) hp->endChangeGesture();
 }
 
 void NeptuneProcessor::uiResetToDefault (neptune::core::ParamId id)
@@ -2454,6 +2554,7 @@ void NeptuneProcessor::restoreRecovered()
         profile_.setLocked (result.profileLock);
         macroResync_.store (true);
         control_.configure (result.controlJson.empty() ? neptune::core::control::Config {} : neptune::core::control::configFromJson (result.controlJson), params_);
+    refreshMacroNames();
         adoptMixerFromState (result.mixer);
     }
     autosave_->resolveRecovered();

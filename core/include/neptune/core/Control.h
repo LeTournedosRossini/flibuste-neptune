@@ -20,10 +20,10 @@
 namespace neptune::core::control
 {
 constexpr int kMaxBindings = 512;
-constexpr int kMacros = 32;           // taille du pool de macros assignables
+constexpr int kMacros = 256;          // taille du pool de macros assignables (les emplacements d'automation que voit l'hôte en liste réduite)
 constexpr int kMaxAddressLength = 128;
 
-// Pool de macros : kMacros paramètres visibles de l'hôte (« Macro 1 » à « Macro 32 », 0..100 %), identifiants 13000 + indice. Quand une macro
+// Pool de macros : kMacros paramètres visibles de l'hôte (« Macro 1 » à « Macro 256 », 0..100 %), identifiants 13000 + indice. Quand une macro
 // change (automation de l'hôte, interface, OSC), les assignations dont elle est la source écrivent leurs cibles (ControlEngine::macroChanged).
 constexpr ParamId kMacroBase = 13000;
 constexpr ParamId macroParamId (int index) noexcept { return kMacroBase + static_cast<ParamId> (index); }

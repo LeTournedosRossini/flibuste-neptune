@@ -293,7 +293,12 @@ void ControlPanel::showSourceMenu (std::size_t index, juce::Component& anchor)
     juce::PopupMenu menu;
     menu.addItem (kSourceLearn, text ("cpanel.learn_cc"));
     juce::PopupMenu macros;
-    for (int m = 0; m < ctl::kMacros; ++m) macros.addItem (kSourceMacroBase + m, "Macro " + juce::String (m + 1));
+    for (int g0 = 0; g0 < ctl::kMacros; g0 += 16)
+    {
+        juce::PopupMenu group;
+        for (int m = g0; m < g0 + 16; ++m) group.addItem (kSourceMacroBase + m, "Macro " + juce::String (m + 1));
+        macros.addSubMenu ("Macros " + juce::String (g0 + 1) + " - " + juce::String (g0 + 16), group);
+    }
     menu.addSubMenu (text ("cpanel.macro"), macros);
     menu.addItem (kSourceOsc, text ("cpanel.osc_address"));
     juce::Component::SafePointer<ControlPanel> safe (this);
