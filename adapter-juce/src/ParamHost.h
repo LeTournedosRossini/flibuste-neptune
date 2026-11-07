@@ -28,6 +28,7 @@ public:
     // Réserve d'automation : l'hôte du plugin ne voit que des emplacements ; un réglage s'y relie en un clic droit (voir ReserveMenu.h).
     virtual int reserveCount() const { return 0; }                                        // 0 : pas de réserve dans ce plugin
     virtual bool reserveCanAssign (neptune::core::ParamId) const { return false; }
+    virtual bool reserveDirect (neptune::core::ParamId) const { return false; }           // réglage déjà vu directement par l'hôte (pas besoin d'emplacement)
     virtual int reserveSlotOf (neptune::core::ParamId) const { return -1; }               // emplacement du réglage, ou -1
     virtual std::string reserveSlotName (int /*slot*/) const { return {}; }               // nom du réglage visé, vide si libre
     virtual bool reserveLocked (int /*slot*/) const { return false; }

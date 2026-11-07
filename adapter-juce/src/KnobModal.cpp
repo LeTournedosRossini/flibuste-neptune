@@ -1,4 +1,5 @@
 #include "KnobModal.h"
+#include "ReserveMenu.h"
 
 using neptune::core::theme::Token;
 
@@ -50,6 +51,16 @@ KnobModal::KnobModal (ParamHost& p, neptune::core::ParamId id, neptune::core::ui
     closeButton_.setButtonText (juce::String::fromUTF8 (std::string (tr.tr ("modal.close")).c_str()));
     closeButton_.onClick = [this] { if (onClose_) onClose_(); };
     panel_.addAndMakeVisible (closeButton_);
+    // Réserve d'automation : le même choix que le clic droit, accessible au doigt (appui long sur le potard ouvre cette modale)
+    if (processor_.reserveCount() > 0 && (processor_.reserveCanAssign (id_) || processor_.reserveDirect (id_)))
+    {
+        autoButton_.onClick = [this]
+        {
+            if (processor_.reserveCanAssign (id_)) reservemenu::show (processor_, id_, autoButton_, [this] { refreshAutoButton(); });
+        };
+        panel_.addAndMakeVisible (autoButton_);
+        refreshAutoButton();
+    }
     tr_ = &tr;
 
     auto size = processor_.modalSize (terminal_);
@@ -138,6 +149,11 @@ void KnobModal::layoutPanel()
     closeButton_.setBounds (buttons.removeFromRight (120));
     buttons.removeFromRight (8);
     resetButton_.setBounds (buttons.removeFromRight (180));
+    if (autoButton_.isVisible())
+    {
+        buttons.removeFromRight (8);
+        autoButton_.setBounds (buttons.removeFromRight (std::min (buttons.getWidth(), 260)));
+    }
     resizer_.setBounds (panel_.getWidth() - 20, panel_.getHeight() - 20, 20, 20);
 }
 
@@ -182,4 +198,21 @@ void KnobModal::refreshFromParameter (bool force)
         text_.setText (juce::String::fromUTF8 (set.toText (id_).c_str()), false);
 }
 
-void KnobModal::timerCallback() { refreshFromParameter (false); }
+void KnobModal::refreshAutoButton()
+{
+    if (! autoButton_.isVisible() && autoButton_.getParentComponent() == nullptr) return;
+    if (! processor_.reserveCanAssign (id_))
+    {
+        autoButton_.setButtonText (reservemenu::U ("Automatisable directement dans l'hôte"));
+        autoButton_.setEnabled (false);
+        return;
+    }
+    const int k = processor_.reserveSlotOf (id_);
+    autoButton_.setButtonText (k >= 0 ? reservemenu::U ("Automatisé : emplacement ") + juce::String (k + 1) : reservemenu::U ("Automatiser..."));
+}
+
+void KnobModal::timerCallback()
+{
+    refreshFromParameter (false);
+    refreshAutoButton();
+}

@@ -230,6 +230,14 @@ void TridentProcessor::uiReserveSetLocked (int slot, bool locked)
     notifyStateChanged();
 }
 
+juce::AudioProcessorParameter* TridentProcessor::hostParameterForTarget (int path, int slot, ParamId id)
+{
+    const int k = trident_.reserve().slotOf (static_cast<std::uint32_t> (path + 1), static_cast<std::uint32_t> (slot), id);
+    if (k < 0) return nullptr;
+    const auto i = trident_.params().indexOf (pid::assign (k));
+    return i != neptune::core::ParameterSet::npos && hostIndex_[i] >= 0 ? getParameters()[hostIndex_[i]] : nullptr;
+}
+
 void TridentProcessor::refreshReserveNames()
 {
     for (int k = 0; k < kAssignables; ++k)
@@ -266,16 +274,26 @@ public:
         : owner_ (owner), path_ (path), slot_ (slot), inst_ (std::move (inst)), tr_ (tr) {}
 
     ParameterSet& parameters() override { return inst_->runner.params(); }
-    void uiBeginEdit (ParamId) override { owner_.undo().beginGesture(); }
+    // le geste passe aussi par l'emplacement de la réserve qui porte ce réglage : l'hôte enregistre l'automation (Write, Touch, Latch) comme pour tout paramètre
+    void uiBeginEdit (ParamId id) override
+    {
+        if (auto* hp = owner_.hostParameterForTarget (path_, slot_, id)) hp->beginChangeGesture();
+        owner_.undo().beginGesture();
+    }
     void uiSetNormalised (ParamId id, double n) override
     {
         auto& ps = parameters();
         const auto index = ps.indexOf (id);
         if (index == ParameterSet::npos) return;
         owner_.undo().setParameter (ps, id, ps.spec (index).fromNormalized (n));
+        if (auto* hp = owner_.hostParameterForTarget (path_, slot_, id)) hp->setValueNotifyingHost (static_cast<float> (ps.getNormalizedAt (index)));
         owner_.notifyStateChanged();
     }
-    void uiEndEdit (ParamId) override { owner_.undo().endGesture(); }
+    void uiEndEdit (ParamId id) override
+    {
+        owner_.undo().endGesture();
+        if (auto* hp = owner_.hostParameterForTarget (path_, slot_, id)) hp->endChangeGesture();
+    }
     void uiResetToDefault (ParamId id) override
     {
         auto& ps = parameters();

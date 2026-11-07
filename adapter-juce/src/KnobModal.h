@@ -46,6 +46,7 @@ private:
     void timerCallback() override;
     void commitText();
     void refreshFromParameter (bool force);
+    void refreshAutoButton();
     juce::Colour colour (neptune::core::theme::Token t) const;
     void centrePanel();
 
@@ -60,7 +61,7 @@ private:
     juce::Label title_;
     juce::TextEditor text_;
     juce::Slider slider_ { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
-    juce::TextButton resetButton_, closeButton_, facadeButton_;
+    juce::TextButton resetButton_, closeButton_, facadeButton_, autoButton_;   // autoButton_ : réserve d'automation (plugins qui en ont une)
     std::function<void (int)> onFacadeAdd_;
     const neptune::core::i18n::Translator* tr_ = nullptr;
     juce::ComponentBoundsConstrainer constrainer_;
