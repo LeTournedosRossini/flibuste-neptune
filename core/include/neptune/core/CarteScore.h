@@ -18,6 +18,7 @@ struct ScaleMode
     const char* nameFr;
     const char* nameEn;
     std::uint16_t rel;     // notes relatives à la fondamentale, bit n = n demi-tons
+    const char* scorsaireId;   // identifiant du catalogue de Scorsaire (vide : absente de ce catalogue)
 };
 int scaleModeCount();
 const ScaleMode& scaleMode (int index);   // index borné
@@ -51,6 +52,9 @@ struct Score
 int placeScale (std::vector<ScaleItem>& v, ScaleItem item);
 int placePattern (std::vector<PatternItem>& v, PatternItem item);
 int placeKey (std::vector<KeyItem>& v, KeyItem item);   // un marqueur au même début remplace l'ancien
+// Armure en nombre de quintes (−7..7, négatif = bémols), comme chez Scorsaire ; l'inverse prend le mode voulu.
+int keyFifths (const KeyItem& k);
+KeyItem keyFromFifths (int fifths, bool minor);
 // Noms
 std::string scaleName (const ScaleItem& s, chords::Naming naming = chords::Naming::Letters);
 std::string keyName (const KeyItem& k, chords::Naming naming = chords::Naming::Letters);

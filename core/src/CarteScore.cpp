@@ -11,31 +11,8 @@ using json = nlohmann::json;
 
 namespace
 {
-constexpr std::uint16_t m (std::initializer_list<int> v)
-{
-    std::uint16_t r = 0;
-    for (int x : v) r = static_cast<std::uint16_t> (r | (1u << x));
-    return r;
-}
 const ScaleMode kModes[] = {
-    { "major", "majeure", "major", m ({ 0, 2, 4, 5, 7, 9, 11 }) },
-    { "minor", "mineure naturelle", "natural minor", m ({ 0, 2, 3, 5, 7, 8, 10 }) },
-    { "harmonic-minor", "mineure harmonique", "harmonic minor", m ({ 0, 2, 3, 5, 7, 8, 11 }) },
-    { "melodic-minor", "mineure mélodique", "melodic minor", m ({ 0, 2, 3, 5, 7, 9, 11 }) },
-    { "dorian", "dorienne", "dorian", m ({ 0, 2, 3, 5, 7, 9, 10 }) },
-    { "phrygian", "phrygienne", "phrygian", m ({ 0, 1, 3, 5, 7, 8, 10 }) },
-    { "lydian", "lydienne", "lydian", m ({ 0, 2, 4, 6, 7, 9, 11 }) },
-    { "mixolydian", "mixolydienne", "mixolydian", m ({ 0, 2, 4, 5, 7, 9, 10 }) },
-    { "locrian", "locrienne", "locrian", m ({ 0, 1, 3, 5, 6, 8, 10 }) },
-    { "pentatonic-major", "pentatonique majeure", "major pentatonic", m ({ 0, 2, 4, 7, 9 }) },
-    { "pentatonic-minor", "pentatonique mineure", "minor pentatonic", m ({ 0, 3, 5, 7, 10 }) },
-    { "blues", "blues", "blues", m ({ 0, 3, 5, 6, 7, 10 }) },
-    { "whole-tone", "par tons", "whole tone", m ({ 0, 2, 4, 6, 8, 10 }) },
-    { "diminished-hw", "diminuée (demi-ton, ton)", "diminished (half-whole)", m ({ 0, 1, 3, 4, 6, 7, 9, 10 }) },
-    { "diminished-wh", "diminuée (ton, demi-ton)", "diminished (whole-half)", m ({ 0, 2, 3, 5, 6, 8, 9, 11 }) },
-    { "altered", "altérée", "altered", m ({ 0, 1, 3, 4, 6, 8, 10 }) },
-    { "lydian-dominant", "lydienne dominante", "lydian dominant", m ({ 0, 2, 4, 6, 7, 9, 10 }) },
-    { "chromatic", "chromatique", "chromatic", 0x0FFF },
+#include "ScaleCatalog.inc"
 };
 constexpr int kNumModes = static_cast<int> (sizeof (kModes) / sizeof (kModes[0]));
 
@@ -109,6 +86,25 @@ int placeKey (std::vector<KeyItem>& v, KeyItem item)
     for (std::size_t i = 0; i < v.size(); ++i)
         if (v[i].start == item.start) return static_cast<int> (i);
     return -1;
+}
+
+int keyFifths (const KeyItem& k)
+{
+    const int majorPc = pc (k.root + (k.minor ? 3 : 0));   // tonique du majeur relatif
+    const int f = (7 * majorPc) % 12;                     // quintes à monter, 0..11
+    const bool black = majorPc == 1 || majorPc == 3 || majorPc == 6 || majorPc == 8 || majorPc == 10;
+    if (! black) return f > 6 ? f - 12 : f;
+    return k.sharp && f <= 7 ? f : f - 12;
+}
+KeyItem keyFromFifths (int fifths, bool minor)
+{
+    fifths = std::clamp (fifths, -7, 7);
+    const int majorPc = pc (7 * fifths);   // 7 est son propre inverse modulo 12
+    KeyItem k;
+    k.root = pc (majorPc + (minor ? 9 : 0));
+    k.minor = minor;
+    k.sharp = fifths > 0;
+    return k;
 }
 
 std::string scaleName (const ScaleItem& s, chords::Naming naming)
@@ -409,14 +405,12 @@ std::string noteText (int pcv, bool sharp)
     return (sharp ? withSharps : withFlats)[pc (pcv)];
 }
 
-// Identifiants du catalogue de gammes de Scorsaire, dans l'ordre des modes de Carte.
-const char* const kScorsaireIds[] = { "major", "natural_minor", "harmonic_minor", "melodic_minor", "dorian", "phrygian", "lydian", "mixolydian", "locrian",
-                                      "major_pentatonic", "minor_pentatonic", "blues_minor", "whole_tone", "diminished_hw", "diminished_wh", "altered", "lydian_dominant", "chromatic" };
-static_assert (sizeof (kScorsaireIds) / sizeof (kScorsaireIds[0]) == static_cast<std::size_t> (kNumModes), "un identifiant Scorsaire par mode de Carte");
+// Identifiant du catalogue de gammes de Scorsaire d'un mode de Carte (le chromatique n'y est pas : il garde l'identifiant de Carte).
+const char* scorsaireIdOf (int mode) { return kModes[mode].scorsaireId[0] != '\0' ? kModes[mode].scorsaireId : kModes[mode].id; }
 
 int modeOfScorsaireId (const std::string& id)
 {
-    for (int i = 0; i < kNumModes; ++i) if (id == kScorsaireIds[i]) return i;
+    for (int i = 0; i < kNumModes; ++i) if (id == scorsaireIdOf (i)) return i;
     return -1;
 }
 
@@ -435,6 +429,28 @@ json intervalsOf (std::uint16_t rel)
     json a = json::array();
     for (int i = 0; i < 12; ++i) if ((rel >> i) & 1u) a.push_back (i);
     return a;
+}
+
+// Une tonalité : `fifths` (de −7 à 7) et/ou `root` + `mode`. Si les deux sont là et d'accord, l'écriture de `root` est gardée ; sinon `fifths` fait foi
+// (avec le mode du fichier s'il y en a un, majeur par défaut).
+bool readKey (const json& o, KeyItem& k)
+{
+    int rootPc = 0;
+    bool sharp = false;
+    const auto mode = o.contains ("mode") && o["mode"].is_string() ? o["mode"].get<std::string>() : std::string();
+    const bool hasMode = mode == "major" || mode == "minor";
+    const bool hasRoot = o.contains ("root") && o["root"].is_string() && readNote (o["root"].get<std::string>(), rootPc, sharp) && hasMode;
+    const bool hasFifths = o.contains ("fifths") && o["fifths"].is_number_integer() && o["fifths"].get<int>() >= -7 && o["fifths"].get<int>() <= 7;
+    if (hasRoot)
+    {
+        k.root = rootPc;
+        k.minor = mode == "minor";
+        k.sharp = sharp;
+        if (! hasFifths || keyFifths (k) == o["fifths"].get<int>()) return true;
+    }
+    if (! hasFifths) return false;
+    k = keyFromFifths (o["fifths"].get<int>(), mode == "minor");
+    return true;
 }
 
 // Les voies propres à `flibuste-carte` : gammes, tonalités, appels de motifs.
@@ -477,31 +493,19 @@ void readCarteLanes (const json& j, double startBeats, const std::vector<std::st
         for (const auto& o : *ks)
         {
             double at = 0.0;
-            int rootPc = 0;
-            bool sharp = false;
-            const auto mode = o.is_object() && o.contains ("mode") && o["mode"].is_string() ? o["mode"].get<std::string>() : std::string();
-            if (! o.is_object() || ! o.contains ("at") || ! readFrac (o["at"], at) || ! o.contains ("root") || ! o["root"].is_string()
-                || ! readNote (o["root"].get<std::string>(), rootPc, sharp) || (mode != "major" && mode != "minor")) { ++r.skipped; continue; }
             KeyItem k;
+            if (! o.is_object() || ! o.contains ("at") || ! readFrac (o["at"], at) || ! readKey (o, k)) { ++r.skipped; continue; }
             k.start = startBeats + at;
-            k.root = rootPc;
-            k.minor = mode == "minor";
-            k.sharp = sharp;
             if (placeKey (r.score.keys, k) < 0) ++r.skipped;
         }
     }
     if (j.contains ("globalKey") && j["globalKey"].is_object())
     {
-        const auto& g = j["globalKey"];
-        int rootPc = 0;
-        bool sharp = false;
-        const auto mode = g.contains ("mode") && g["mode"].is_string() ? g["mode"].get<std::string>() : std::string();
-        if (g.contains ("root") && g["root"].is_string() && readNote (g["root"].get<std::string>(), rootPc, sharp) && (mode == "major" || mode == "minor"))
+        KeyItem g;
+        if (readKey (j["globalKey"], g))
         {
             r.score.hasGlobalKey = true;
-            r.score.globalKey.root = rootPc;
-            r.score.globalKey.minor = mode == "minor";
-            r.score.globalKey.sharp = sharp;
+            r.score.globalKey = g;
         }
     }
     if (const auto* ps = arrayOf ("patterns"))
@@ -668,16 +672,16 @@ std::string exportCarteFile (const Score& s, const std::string& title, double st
     {
         const std::uint16_t notes = x.rel != 0 ? static_cast<std::uint16_t> (x.rel | 1u) : scaleMode (x.mode).rel;
         json o = { { "at", rel (x.start) }, { "dur", fractionOf (x.length) }, { "root", noteText (x.root, x.sharp) }, { "intervals", intervalsOf (notes) } };
-        if (x.rel == 0) { o["scale"] = kScorsaireIds[x.mode]; o["name"] = scaleMode (x.mode).nameFr; }
+        if (x.rel == 0) { o["scale"] = scorsaireIdOf (x.mode); o["name"] = scaleMode (x.mode).nameFr; }
         else if (! x.name.empty()) o["name"] = x.name;
         sc.push_back (std::move (o));
     }
     j["scales"] = sc;
     // tonalités
     json ks = json::array();
-    for (const auto& x : s.keys) ks.push_back ({ { "at", rel (x.start) }, { "root", noteText (x.root, x.sharp) }, { "mode", x.minor ? "minor" : "major" } });
+    for (const auto& x : s.keys) ks.push_back ({ { "at", rel (x.start) }, { "root", noteText (x.root, x.sharp) }, { "mode", x.minor ? "minor" : "major" }, { "fifths", keyFifths (x) } });
     j["keys"] = ks;
-    if (s.hasGlobalKey) j["globalKey"] = { { "root", noteText (s.globalKey.root, s.globalKey.sharp) }, { "mode", s.globalKey.minor ? "minor" : "major" } };
+    if (s.hasGlobalKey) j["globalKey"] = { { "root", noteText (s.globalKey.root, s.globalKey.sharp) }, { "mode", s.globalKey.minor ? "minor" : "major" }, { "fifths", keyFifths (s.globalKey) } };
     // appels de motifs
     json ps = json::array();
     for (const auto& x : s.patterns)

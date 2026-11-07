@@ -26,8 +26,8 @@ Les champs `timeSignatures`, `measures`, `qualities` et `chords` sont **exacteme
   "qualities": { "m7": [0, 3, 7, 10], "7": [0, 4, 7, 10], "maj7": [0, 4, 7, 11] },
   "chords": [ { "at": [0, 1], "dur": [1, 1], "root": "D", "quality": "m7", "bass": null } ],
   "scales": [ { "at": [0, 1], "dur": [2, 1], "root": "D", "scale": "dorian", "intervals": [0, 2, 3, 5, 7, 9, 10], "name": "Dorien" } ],
-  "keys": [ { "at": [0, 1], "root": "C", "mode": "major" } ],
-  "globalKey": { "root": "C", "mode": "major" },
+  "keys": [ { "at": [0, 1], "root": "C", "mode": "major", "fifths": 0 } ],
+  "globalKey": { "root": "C", "mode": "major", "fifths": 0 },
   "patterns": [ { "at": [0, 1], "dur": [2, 1], "slot": 12, "name": "Essai 1" } ],
   "x": { "carte": { } }
 }
@@ -54,10 +54,10 @@ C'est le parallèle avec les gammes de Scorsaire (« écrire une gamme à partir
 
 Règle de lecture : si `scale` désigne une gamme que Carte connaît **et** que `intervals` correspond, Carte la range comme gamme ordinaire ; sinon elle la garde comme **gamme libre** (ses intervalles, son nom). Une entrée sans `intervals` ni identifiant connu est ignorée et comptée.
 
-Table de correspondance (Carte ↔ identifiants de Scorsaire) : `major`, `natural_minor`, `harmonic_minor`, `melodic_minor`, `dorian`, `phrygian`, `lydian`, `mixolydian`, `locrian`, `major_pentatonic`, `minor_pentatonic`, `blues_minor`, `whole_tone`, `diminished_hw`, `diminished_wh`, `altered`, `lydian_dominant`, `chromatic`.
+**Catalogue** : Carte embarque les **72 gammes du catalogue de Scorsaire** (`src/scales/scales.json`, identifiants, noms français et anglais, intervalles) plus le chromatique de Carte : toute gamme de Scorsaire est reconnue par son identifiant. Le fichier `core/src/ScaleCatalog.inc` est généré par `tools/gen_scales.py <scales.json>`. Les positions de manche du catalogue (Berklee / CAGED, de Jens Larsen) ne sont pas reprises : Carte ne joue que des notes. En cas de désaccord, **Scorsaire fait foi pour le catalogue** ; les `intervals` écrits dans le fichier font foi pour le morceau. Une gamme que le catalogue ne connaît pas reste une gamme libre.
 
 ### `keys` et `globalKey` : les tonalités
-Un marqueur de tonalité dure jusqu'au marqueur suivant. `mode` : `"major"` ou `"minor"`. `globalKey` est la tonalité avant le premier marqueur (ou pour tout le morceau s'il n'y a pas de marqueur).
+Un marqueur de tonalité dure jusqu'au marqueur suivant. `fifths` : **nombre de quintes de −7 à 7** (négatif = bémols), comme l'armure de Scorsaire, qui n'a pas de mode ; c'est la valeur de référence. `root` et `mode` (`"major"` ou `"minor"`) précisent la tonique et l'écriture. Carte écrit les trois. À la lecture : si `root` + `mode` et `fifths` concordent, Carte garde l'écriture de `root` ; s'ils se contredisent, `fifths` l'emporte (avec le mode du fichier s'il y en a un, majeur sinon) ; `fifths` seul suffit ; `root` + `mode` sans `fifths` suffisent aussi. Sept bémols (do bémol) n'a pas d'écriture dans Carte : il devient son enharmonique (si, cinq dièses). `globalKey` est la tonalité avant le premier marqueur (ou pour tout le morceau s'il n'y a pas de marqueur).
 
 ### `patterns` : les appels de motifs
 `slot` : l'**emplacement** (1 à 16) d'un Arpège ou d'un instrument de la suite ; `name` : le nom du motif au moment de l'export, **à titre d'information** (le contenu du motif ne voyage pas dans ce fichier : il se règle dans l'Arpège de chacun, et s'échange avec le format `flibuste-motifs`). À l'import, seul `slot` compte ; si `name` diffère du motif présent dans l'emplacement, Carte le signale.

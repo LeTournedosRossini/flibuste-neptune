@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <fstream>
+#include <set>
 #include <sstream>
 
 #include <nlohmann/json.hpp>
@@ -379,8 +380,14 @@ TEST_CASE ("carte exchange: scales are read by Scorsaire identifier, by interval
     // identifiant inconnu avec intervalles : gamme libre, nommée par le fichier
     r = carte::importCarteFile (file (R"([{"at":[0,1],"dur":[1,1],"root":"E","scale":"hirajoshi","intervals":[0,2,3,7,8],"name":"Hirajoshi"}])"), 0.0);
     REQUIRE (r.score.scales.size() == 1);
-    CHECK (r.score.scales[0].name == "Hirajoshi");
-    CHECK (carte::scaleName (r.score.scales[0]) == "E Hirajoshi");
+    REQUIRE (r.score.scales.size() == 1);
+    CHECK (r.score.scales[0].rel == 0);   // le catalogue de Scorsaire est embarqué : hirajoshi est une gamme de la liste
+    CHECK (carte::scaleMode (r.score.scales[0].mode).id == std::string ("hirajoshi"));
+    // identifiant inconnu avec intervalles : gamme libre, nommée par le fichier
+    r = carte::importCarteFile (file (R"([{"at":[0,1],"dur":[1,1],"root":"E","scale":"inventee","intervals":[0,1,6],"name":"Inventée"}])"), 0.0);
+    REQUIRE (r.score.scales.size() == 1);
+    CHECK (r.score.scales[0].name == "Inventée");
+    CHECK (carte::scaleName (r.score.scales[0]) == "E Inventée");
     // ni intervalles ni identifiant connu : ignorée et comptée ; une entrée sans position : ignorée et comptée
     r = carte::importCarteFile (file (R"([{"at":[0,1],"dur":[1,1],"root":"E","scale":"inconnue"},{"dur":[1,1],"root":"E","scale":"major"}])"), 0.0);
     REQUIRE (r.ok);
@@ -471,4 +478,83 @@ TEST_CASE ("carte exchange: Scorsaire's own chord files are read the same way by
         REQUIRE (again.ok);
         expectSameScore (b.score, again.score);
     }
+}
+
+TEST_CASE ("carte catalog: Scorsaire's 72 scales are known by identifier, with unique ids and intervals", "[carte][exchange]")
+{
+    using namespace neptune::core;
+    CHECK (carte::scaleModeCount() == 73);   // 72 de Scorsaire + le chromatique de Carte
+    std::set<std::string> ids, masks;
+    for (int i = 0; i < carte::scaleModeCount(); ++i)
+    {
+        const auto& m = carte::scaleMode (i);
+        CHECK (ids.insert (m.id).second);
+        CHECK (masks.insert (std::to_string (m.rel)).second);
+        CHECK ((m.rel & 1u) != 0);
+    }
+    // une gamme du catalogue qui n'était pas dans les 18 d'origine
+    const auto file = std::string (R"({"format":"flibuste-carte","version":1,"scales":[{"at":[0,1],"dur":[1,1],"root":"C","scale":"bebop_dominant","intervals":[0,2,4,5,7,9,10,11]}]})");
+    const auto r = carte::importCarteFile (file, 0.0);
+    REQUIRE (r.score.scales.size() == 1);
+    CHECK (r.score.scales[0].rel == 0);
+    CHECK (carte::scaleMode (r.score.scales[0].mode).rel == 0xEB5);
+    const auto out = carte::exportCarteFile (r.score, "t");
+    CHECK (out.find ("\"bebop_dominant\"") != std::string::npos);
+}
+
+TEST_CASE ("carte exchange: keys carry fifths, and fifths alone is enough on import", "[carte][exchange]")
+{
+    using namespace neptune::core;
+    CHECK (carte::keyFifths ({ 0.0, 0, false, false }) == 0);     // do majeur
+    CHECK (carte::keyFifths ({ 0.0, 7, false, false }) == 1);     // sol majeur
+    CHECK (carte::keyFifths ({ 0.0, 5, false, false }) == -1);    // fa majeur
+    CHECK (carte::keyFifths ({ 0.0, 9, true, false }) == 0);      // la mineur
+    CHECK (carte::keyFifths ({ 0.0, 6, true, true }) == 3);       // fa# mineur
+    CHECK (carte::keyFifths ({ 0.0, 3, true, false }) == -6);     // mi bémol mineur
+    CHECK (carte::keyFifths ({ 0.0, 6, false, true }) == 6);      // fa# majeur
+    CHECK (carte::keyFifths ({ 0.0, 6, false, false }) == -6);    // sol bémol majeur
+    CHECK (carte::keyFifths ({ 0.0, 1, false, true }) == 7);      // do# majeur
+    CHECK (carte::keyFifths ({ 0.0, 11, false, false }) == 5);    // si majeur
+    CHECK (carte::keyFifths ({ 0.0, 10, false, false }) == -2);   // si bémol majeur
+    // tout nombre de quintes revient à lui-même par la tonalité ; sept bémols (do bémol) n'a pas d'écriture dans Carte et devient son enharmonique, cinq dièses (si)
+    CHECK (carte::keyFifths (carte::keyFromFifths (-7, false)) == 5);
+    for (int f = -6; f <= 7; ++f)
+    {
+        CHECK (carte::keyFifths (carte::keyFromFifths (f, false)) == f);
+        CHECK (carte::keyFifths (carte::keyFromFifths (f, true)) == f);
+    }
+    // export : fifths écrit pour chaque tonalité et pour la globale ; relecture identique
+    carte::Score s;
+    s.hasGlobalKey = true;
+    s.globalKey = { 0.0, 2, true, false };   // ré mineur : un bémol
+    carte::placeKey (s.keys, { 4.0, 11, false, false });
+    const auto text = carte::exportCarteFile (s, "t");
+    const auto j = nlohmann::json::parse (text);
+    CHECK (j["globalKey"]["fifths"] == -1);
+    CHECK (j["keys"][0]["fifths"] == 5);
+    const auto back = carte::importCarteFile (text, 0.0);
+    REQUIRE (back.score.keys.size() == 1);
+    CHECK (back.score.keys[0].root == 11);
+    CHECK (back.score.globalKey.root == 2);
+    CHECK (back.score.globalKey.minor);
+    // fifths seul : majeur par défaut ; avec mode, le relatif ; en désaccord avec root, fifths gagne
+    const auto file = [] (const char* keys, const char* g)
+    {
+        return std::string (R"({"format":"flibuste-carte","version":1,"keys":)") + keys + R"(,"globalKey":)" + g + "}";
+    };
+    auto r = carte::importCarteFile (file (R"([{"at":[1,1],"fifths":-3},{"at":[2,1],"fifths":2,"mode":"minor"},{"at":[3,1],"root":"C","mode":"major","fifths":2}])", R"({"fifths":4})"), 0.0);
+    REQUIRE (r.ok);
+    REQUIRE (r.score.keys.size() == 3);
+    CHECK (r.score.keys[0].root == 3);                            // mi bémol majeur
+    CHECK (! r.score.keys[0].minor);
+    CHECK (r.score.keys[1].root == 11);                           // si mineur
+    CHECK (r.score.keys[1].minor);
+    CHECK (r.score.keys[2].root == 2);                            // fifths = 2 l'emporte sur do : ré majeur
+    CHECK (r.score.hasGlobalKey);
+    CHECK (r.score.globalKey.root == 4);                          // mi majeur
+    // fifths hors limites et sans root : entrée ignorée
+    r = carte::importCarteFile (file (R"([{"at":[1,1],"fifths":9}])", R"({"root":"G","mode":"major"})"), 0.0);
+    CHECK (r.score.keys.empty());
+    CHECK (r.skipped == 1);
+    CHECK (r.score.globalKey.root == 7);
 }
