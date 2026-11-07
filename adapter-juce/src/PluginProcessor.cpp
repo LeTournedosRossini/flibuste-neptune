@@ -2360,6 +2360,7 @@ void NeptuneProcessor::refreshMacroNames()
             np->setDisplayName (name.empty() ? juce::String() : juce::String (k + 1) + juce::String::fromUTF8 (" \xc2\xb7 ") + juce::String::fromUTF8 (name.c_str()));
         }
     updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withParameterInfoChanged (true));
+    if (! refreshingNamesAgain_) namesRefreshTicks_ = 45;   // un second passage plus tard (voir controlTick)
 }
 
 std::vector<int> NeptuneProcessor::macrosOf (neptune::core::ParamId id) const
@@ -2560,7 +2561,13 @@ void NeptuneProcessor::controlTick()
         seenInsertEpoch_ = epoch;
         reconcileInsertBindings();   // un insert a changé : les assignations qui le visent suivent ou disparaissent
     }
-    if (namesRefreshTicks_ > 0 && --namesRefreshTicks_ == 0) refreshMacroNames();   // second passage après un chargement d'état (voir setStateInformation)
+    if (namesRefreshTicks_ > 0 && --namesRefreshTicks_ == 0)
+    {
+        // second passage, environ 1,5 s après un changement de noms : certains hôtes ignorent un renommage demandé au moment même (état chargé, insert retiré)
+        refreshingNamesAgain_ = true;
+        refreshMacroNames();
+        refreshingNamesAgain_ = false;
+    }
     glideTick();
     if (++latencyTicks_ >= 6)   // environ 5 fois par seconde : le plan de compensation suit les inserts, le routage et le profil
     {
