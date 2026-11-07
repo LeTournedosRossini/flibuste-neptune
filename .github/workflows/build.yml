@@ -145,6 +145,18 @@ jobs:
           FOU=$(find build/adapter-juce/Fournaise_artefacts -name 'Fournaise.clap' -print -quit)
           test -n "$FOU" || { echo "Fournaise.clap introuvable"; exit 1; }
           "$CV" validate "$FOU"
+          DIG=$(find build/adapter-juce/Digue_artefacts -name 'Digue.clap' -print -quit)
+          test -n "$DIG" || { echo "Digue.clap introuvable"; exit 1; }
+          "$CV" validate "$DIG"
+          TRI=$(find build/adapter-juce/Trident_artefacts -name 'Trident.clap' -print -quit)
+          test -n "$TRI" || { echo "Trident.clap introuvable"; exit 1; }
+          "$CV" validate "$TRI"
+          CAR=$(find build/adapter-juce/Carte_artefacts -name 'Carte.clap' -print -quit)
+          test -n "$CAR" || { echo "Carte.clap introuvable"; exit 1; }
+          "$CV" validate "$CAR"
+          ARP=$(find build/adapter-juce/Arpege_artefacts -name 'Arpege.clap' -print -quit)
+          test -n "$ARP" || { echo "Arpege.clap introuvable"; exit 1; }
+          "$CV" validate "$ARP"
 
       # Ne garder que le .clap (sur macOS c'est un bundle : on l'archive pour conserver les droits d'exécution).
       - name: Archive le .clap
