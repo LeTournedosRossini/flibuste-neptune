@@ -121,6 +121,7 @@ void EqualizerProcessor::getStateInformation (juce::MemoryBlock& dest)
     for (std::size_t i = 0; i < set.size(); ++i) params[std::to_string (set.spec (i).id)] = set.getAt (i);
     doc["parameters"] = std::move (params);
     doc["reserve"] = reserve_.toJson();
+    doc["reserve_values"] = reserve_.valuesToJson();
     const auto text = doc.dump (2);
     dest.append (text.data(), text.size());
 }
@@ -143,7 +144,7 @@ void EqualizerProcessor::setStateInformation (const void* data, int size)
     }
     undo_.clear();
     runner_.reset();
-    reserve_.fromJson (*this, doc.contains ("reserve") ? doc["reserve"] : nlohmann::json::array());
+    reserve_.fromJson (*this, doc.contains ("reserve") ? doc["reserve"] : nlohmann::json::array(), doc.contains ("reserve_values") ? doc["reserve_values"] : nlohmann::json::array());
     updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
 }
 

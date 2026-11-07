@@ -5,6 +5,7 @@
 //   - relier, libérer, verrouiller (les requêtes de ReserveMenu.h / ReserveOverlay.h passent par ici) ;
 //   - la synchro audio (sync), l'état (toJson / fromJson).
 // Le plugin fournit `resolve(scope, sub, param)` : où se trouve le réglage (jeu de paramètres + indice), et `describe(param)` : son nom pour l'affichage.
+#include <algorithm>
 #include <functional>
 #include <memory>
 #include <string>
@@ -101,7 +102,14 @@ public:
 
     // ---- état
     nlohmann::json toJson() const { return reserve_.toJson(); }
-    void fromJson (juce::AudioProcessor& p, const nlohmann::json& arr)
+    // Les valeurs des emplacements : ce sont des paramètres que l'hôte lit et écrit, ils doivent revenir tels quels avec l'état (clap-validator : state-reproducibility).
+    nlohmann::json valuesToJson() const
+    {
+        auto arr = nlohmann::json::array();
+        for (int k = 0; k < reserve_.count(); ++k) arr.push_back (slots_.getNormalizedAt (static_cast<std::size_t> (k)));
+        return arr;
+    }
+    void fromJson (juce::AudioProcessor& p, const nlohmann::json& arr, const nlohmann::json& values = nlohmann::json::array())
     {
         reserve_.fromJson (arr,
                            [this] (const neptune::core::ParamReserve::Target& t) { return resolve_ (t.scope, t.sub, t.param).set != nullptr; },
@@ -112,6 +120,11 @@ public:
                 const auto r = resolve_ (t.scope, t.sub, t.param);
                 slots_.setNormalizedAt (static_cast<std::size_t> (k), r.set->getNormalizedAt (r.index));
             }
+        // un emplacement libre garde la valeur enregistrée ; un emplacement assigné prend celle de son réglage (au-dessus)
+        if (values.is_array())
+            for (int k = 0; k < reserve_.count() && static_cast<std::size_t> (k) < values.size(); ++k)
+                if (! reserve_.target (k).active && values[static_cast<std::size_t> (k)].is_number())
+                    slots_.setNormalizedAt (static_cast<std::size_t> (k), std::clamp (values[static_cast<std::size_t> (k)].get<double>(), 0.0, 1.0));
         reserve_.resync (slots_, 0, resolve_);
         refreshNames (p);
     }
