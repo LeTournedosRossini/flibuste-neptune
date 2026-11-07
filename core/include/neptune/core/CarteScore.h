@@ -11,6 +11,7 @@
 namespace neptune::core::carte
 {
 // ---- gammes
+struct ScaleItem;
 struct ScaleMode
 {
     const char* id;        // identifiant stable (enregistré)
@@ -22,13 +23,15 @@ int scaleModeCount();
 const ScaleMode& scaleMode (int index);   // index borné
 // Masque absolu (do = 0) de la gamme de fondamentale `root` (0..11).
 std::uint16_t scaleMask (int root, int mode);
+std::uint16_t scaleItemMask (const ScaleItem&);   // idem pour un élément posé (gamme de la liste ou gamme libre)
 constexpr int kModeMajor = 0, kModeMinor = 1;   // tonalités : majeur et mineur naturel
 
 // ---- éléments
 constexpr double kMinLength = 0.0625;
 constexpr double kForever = 1.0e7;   // longueur d'une tonalité qui dure jusqu'à la fin
 
-struct ScaleItem { double start = 0.0, length = 4.0; int root = 0; int mode = 0; bool sharp = false; };
+// `rel` non nul : gamme libre (venue d'un fichier d'échange, hors des modes de la liste) ; ses notes sont `rel` (bit n = n demi-tons depuis la fondamentale) et son nom `name`.
+struct ScaleItem { double start = 0.0, length = 4.0; int root = 0; int mode = 0; bool sharp = false; std::uint16_t rel = 0; std::string name; };
 struct KeyItem   { double start = 0.0; int root = 0; bool minor = false; bool sharp = false; };   // dure jusqu'au marqueur suivant
 struct PatternItem { double start = 0.0, length = 4.0; int slot = 1; };                           // emplacement d'Arpège 1..16
 struct MeasureItem { double start = 0.0, length = 4.0; int num = 4, den = 4; int source = 0; };
@@ -73,7 +76,18 @@ struct ImportResult
     Score score;             // accords et mesures
     int noChord = 0;         // entrées « pas d'accord » (des trous)
     int unknownQualities = 0;
+    // Fichier `flibuste-carte` : les voies présentes dans le fichier (les autres ne sont pas touchées), ce qui n'a pas pu être lu, et les différences à signaler.
+    bool hasChords = false, hasMeasures = false, hasScales = false, hasKeys = false, hasPatterns = false;
+    int unknownScales = 0, skipped = 0;
+    std::vector<std::string> notes;   // par exemple : « l'emplacement 12 s'appelle Essai 1 dans le fichier »
 };
 // `startBeats` : position dans le projet où commence le morceau (0 du fichier).
 ImportResult importChordFile (const std::string& json, double startBeats);
+
+// ---- échange `flibuste-carte` (docs/format-flibuste-carte.md) : accords, gammes, tonalités et appels de motifs, avec les mesures
+constexpr int kMaxImportScales = 4096, kMaxImportKeys = 1024, kMaxImportPatterns = 4096;
+// Écrit le fichier. `startBeats` : la position du début du morceau dans le projet (soustraite des positions). `patternNames` : nom des motifs 1..16 (facultatif, à titre d'information).
+std::string exportCarteFile (const Score&, const std::string& title, double startBeats = 0.0, const std::vector<std::string>& patternNames = {});
+// Lit un fichier `flibuste-carte`, ou un fichier `flibuste-accords` (qui ne porte que des accords et des mesures).
+ImportResult importCarteFile (const std::string& json, double startBeats, const std::vector<std::string>& patternNames = {});
 } // namespace neptune::core::carte

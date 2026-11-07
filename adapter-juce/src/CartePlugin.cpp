@@ -689,7 +689,7 @@ public:
         {
             g.setColour (skin_.colour (T::TextDim2));
             g.setFont (skin_.font (15.0f));
-            g.drawText (juce::String::fromUTF8 ("Double-clic dans une voie : ajouter (accord, gamme, tonalité, motif).  Importer : pistes d'accords de Scorsaire."),
+            g.drawText (juce::String::fromUTF8 ("Double-clic dans une voie : ajouter (accord, gamme, tonalité, motif).  Importer / Exporter : carte (flibuste-carte) ou pistes d'accords de Scorsaire."),
                         juce::Rectangle<float> (static_cast<float> (left()) + skin_.px (12.0f), skin_.px (kLaneY[LChord]), b.getWidth() - 2 * skin_.px (12.0f), skin_.px (kLaneH[LChord])).toNearestInt(), juce::Justification::centred, true);
         }
         // sélection au rectangle
@@ -1049,12 +1049,12 @@ CarteEditor::CarteEditor (CarteProcessor& p)
       zoomOut_ (skin_, nova::Pill::Look::Small), zoomIn_ (skin_, nova::Pill::Look::Small), followPill_ (skin_, nova::Pill::Look::Small),
       undoPill_ (skin_, nova::Pill::Look::Small), redoPill_ (skin_, nova::Pill::Look::Small),
       copyPill_ (skin_, nova::Pill::Look::Small), pastePill_ (skin_, nova::Pill::Look::Small), dupPill_ (skin_, nova::Pill::Look::Small),
-      importPill_ (skin_, nova::Pill::Look::Small), keyPill_ (skin_, nova::Pill::Look::Small), clearBarsPill_ (skin_, nova::Pill::Look::Small), demoPill_ (skin_, nova::Pill::Look::Small)
+      importPill_ (skin_, nova::Pill::Look::Small), exportPill_ (skin_, nova::Pill::Look::Small), keyPill_ (skin_, nova::Pill::Look::Small), clearBarsPill_ (skin_, nova::Pill::Look::Small), demoPill_ (skin_, nova::Pill::Look::Small)
 {
     view_ = std::make_unique<TimelineView> (p, skin_, *this);
     addAndMakeVisible (*view_);
     for (auto* c : std::initializer_list<nova::Pill*> { &channelPill_, &gridPill_, &namingPill_, &zoomOut_, &zoomIn_, &followPill_, &undoPill_, &redoPill_,
-                                                       &copyPill_, &pastePill_, &dupPill_, &importPill_, &keyPill_, &clearBarsPill_, &demoPill_ }) addAndMakeVisible (c);
+                                                       &copyPill_, &pastePill_, &dupPill_, &importPill_, &exportPill_, &keyPill_, &clearBarsPill_, &demoPill_ }) addAndMakeVisible (c);
 
     channelPill_.onClick = [this] { proc_.setChannel (proc_.channel() % chordmap::kChannels + 1); refreshPills(); repaint(); };
     gridPill_.onClick = [this] { view_->setGrid ((view_->grid() + 1) % 4); refreshPills(); };
@@ -1074,8 +1074,10 @@ CarteEditor::CarteEditor (CarteProcessor& p)
     pastePill_.onClick = [this] { view_->pastePoint(); };
     dupPill_.setText ("Dupliquer");
     dupPill_.onClick = [this] { view_->duplicateSelection(); };
-    importPill_.setText (juce::String::fromUTF8 ("Importer des accords..."));
+    importPill_.setText (juce::String::fromUTF8 ("Importer..."));
     importPill_.onClick = [this] { importFile(); };
+    exportPill_.setText (juce::String::fromUTF8 ("Exporter la carte..."));
+    exportPill_.onClick = [this] { exportFile(); };
     keyPill_.onClick = [this] { showGlobalKeyPicker(); };
     demoPill_.setText (juce::String::fromUTF8 ("Charger le morceau d'essai"));
     demoPill_.onClick = [this]
@@ -1149,10 +1151,11 @@ void CarteEditor::resized()
     rx -= px (8.0f) + px (96.0f); undoPill_.setBounds (rx, y, px (96.0f), h);
     y = px (88.0f);
     x = px (14.0f);
-    put (importPill_, 190.0f);
-    put (keyPill_, 290.0f);
-    put (clearBarsPill_, 230.0f);
-    put (demoPill_, 230.0f);
+    put (importPill_, 110.0f);
+    put (exportPill_, 170.0f);
+    put (keyPill_, 240.0f);
+    put (clearBarsPill_, 200.0f);
+    put (demoPill_, 200.0f);
     view_->setBounds (px (14.0f), px (126.0f), getWidth() - px (28.0f), getHeight() - px (126.0f) - px (40.0f));
     if (popup_) popup_->setBounds (getLocalBounds());
 }
@@ -1501,31 +1504,68 @@ void CarteEditor::showGlobalKeyPicker()
 
 void CarteEditor::importFile()
 {
-    chooser_ = std::make_unique<juce::FileChooser> (juce::String::fromUTF8 ("Importer une piste d'accords (Scorsaire)"), juce::File(), "*.json");
+    chooser_ = std::make_unique<juce::FileChooser> (juce::String::fromUTF8 ("Importer une carte (flibuste-carte) ou une piste d'accords (flibuste-accords, Scorsaire)"), juce::File(), "*.json");
     chooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this] (const juce::FileChooser& fc)
     {
         const auto f = fc.getResult();
         if (! f.existsAsFile()) return;
         const auto t = proc_.transport();
         const double startBeats = t.hasPosition ? t.beats : 0.0;   // le morceau commence à la tête de lecture (0 sans hôte)
-        const auto r = carte::importChordFile (f.loadFileAsString().toStdString(), startBeats);
+        const auto r = carte::importCarteFile (f.loadFileAsString().toStdString(), startBeats);
         if (! r.ok)
         {
             hint_ = juce::String::fromUTF8 (r.error.c_str());
             repaint();
             return;
         }
-        applyEdit (proc_, "Importer des accords", [&] (carte::Score& s)
+        // seules les voies présentes dans le fichier remplacent celles de la carte ; les autres restent
+        applyEdit (proc_, "Importer", [&] (carte::Score& s)
         {
-            s.chords = r.score.chords;      // les accords et les barres du fichier remplacent les anciens ; gammes, tonalités et motifs restent
-            s.measures = r.score.measures;
+            if (r.hasChords) s.chords = r.score.chords;
+            if (r.hasMeasures) s.measures = r.score.measures;
+            if (r.hasScales) s.scales = r.score.scales;
+            if (r.hasKeys) { s.keys = r.score.keys; s.hasGlobalKey = r.score.hasGlobalKey; s.globalKey = r.score.globalKey; }
+            else if (r.score.hasGlobalKey) { s.hasGlobalKey = true; s.globalKey = r.score.globalKey; }
+            if (r.hasPatterns) s.patterns = r.score.patterns;
         });
         view_->reload();
         refreshPills();
-        hint_ = juce::String::fromUTF8 ("Importé : ") + juce::String (static_cast<int> (r.score.chords.size())) + " accords, " + juce::String (static_cast<int> (r.score.measures.size())) + " mesures"
+        auto count = [] (const char* what, std::size_t n) { return juce::String (static_cast<int> (n)) + " " + juce::String::fromUTF8 (what); };
+        juce::StringArray parts;
+        if (r.hasChords) parts.add (count ("accords", r.score.chords.size()));
+        if (r.hasMeasures) parts.add (count ("mesures", r.score.measures.size()));
+        if (r.hasScales) parts.add (count ("gammes", r.score.scales.size()));
+        if (r.hasKeys) parts.add (count ("tonalités", r.score.keys.size()));
+        if (r.hasPatterns) parts.add (count ("appels de motifs", r.score.patterns.size()));
+        hint_ = juce::String::fromUTF8 ("Importé : ") + parts.joinIntoString (", ")
                 + (r.noChord > 0 ? juce::String::fromUTF8 (", ") + juce::String (r.noChord) + juce::String::fromUTF8 (" « pas d'accord » (trous)") : juce::String())
                 + (r.unknownQualities > 0 ? juce::String::fromUTF8 (", ") + juce::String (r.unknownQualities) + juce::String::fromUTF8 (" qualité(s) inconnue(s) (fondamentale seule)") : juce::String())
+                + (r.unknownScales > 0 ? juce::String::fromUTF8 (", ") + juce::String (r.unknownScales) + juce::String::fromUTF8 (" gamme(s) illisible(s) ignorée(s)") : juce::String())
+                + (r.skipped > 0 ? juce::String::fromUTF8 (", ") + juce::String (r.skipped) + juce::String::fromUTF8 (" entrée(s) ignorée(s)") : juce::String())
                 + juce::String::fromUTF8 (" à partir de ") + juce::String (startBeats, 2) + " temps";
+        for (const auto& n : r.notes) hint_ += juce::String::fromUTF8 ("  ") + juce::String::fromUTF8 (n.c_str());
+        repaint();
+    });
+}
+
+// Écrit la carte au format d'échange `flibuste-carte` (docs/format-flibuste-carte.md) : le début du morceau est la première mesure (à défaut, le premier accord).
+void CarteEditor::exportFile()
+{
+    chooser_ = std::make_unique<juce::FileChooser> (juce::String::fromUTF8 ("Exporter la carte"), juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("carte.json"), "*.json");
+    chooser_->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::warnAboutOverwriting, [this] (const juce::FileChooser& fc)
+    {
+        auto f = fc.getResult();
+        if (f == juce::File()) return;
+        if (f.getFileExtension().isEmpty()) f = f.withFileExtension ("json");
+        const auto score = proc_.score();
+        double start = 0.0;
+        if (! score.measures.empty()) start = score.measures.front().start;
+        else if (! score.chords.empty()) start = score.chords.front().start;
+        const auto text = carte::exportCarteFile (score, f.getFileNameWithoutExtension().toStdString(), start);
+        if (f.replaceWithText (juce::String::fromUTF8 (text.c_str()), false, false, "\n"))
+            hint_ = juce::String::fromUTF8 ("Exporté : ") + f.getFullPathName();
+        else
+            hint_ = juce::String::fromUTF8 ("Impossible d'écrire le fichier : ") + f.getFullPathName();
         repaint();
     });
 }

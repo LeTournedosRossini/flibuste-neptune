@@ -113,13 +113,14 @@ private:
     void showPatternPicker (double start, double length, int index);
     void showGlobalKeyPicker();
     void importFile();
+    void exportFile();
     void closePopup();
 
     CarteProcessor& proc_;
     nova::Skin skin_;
     juce::ComponentBoundsConstrainer constrainer_;
     nova::Pill channelPill_, gridPill_, namingPill_, zoomOut_, zoomIn_, followPill_, undoPill_, redoPill_;
-    nova::Pill copyPill_, pastePill_, dupPill_, importPill_, keyPill_, clearBarsPill_, demoPill_;
+    nova::Pill copyPill_, pastePill_, dupPill_, importPill_, exportPill_, keyPill_, clearBarsPill_, demoPill_;
     std::unique_ptr<TimelineView> view_;
     std::unique_ptr<Popup> popup_;
     std::unique_ptr<juce::FileChooser> chooser_;

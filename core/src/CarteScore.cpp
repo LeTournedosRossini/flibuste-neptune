@@ -85,9 +85,12 @@ int placeSpan (std::vector<T>& v, T item, double minLength)
 int scaleModeCount() { return kNumModes; }
 const ScaleMode& scaleMode (int index) { return kModes[std::clamp (index, 0, kNumModes - 1)]; }
 std::uint16_t scaleMask (int root, int mode) { return rotate (scaleMode (mode).rel, root); }
+std::uint16_t scaleItemMask (const ScaleItem& s) { return s.rel != 0 ? rotate (static_cast<std::uint16_t> (s.rel | 1u), s.root) : scaleMask (s.root, s.mode); }
 
 int placeScale (std::vector<ScaleItem>& v, ScaleItem item)
 {
+    if (item.rel != 0) { item.rel = static_cast<std::uint16_t> ((item.rel | 1u) & 0x0FFFu); item.mode = std::clamp (item.mode, 0, kNumModes - 1); if (item.name.size() > 40) item.name.resize (40); }
+    else item.name.clear();
     if (item.root < 0 || item.root > 11 || item.mode < 0 || item.mode >= kNumModes) return -1;
     return placeSpan (v, item, kMinLength);
 }
@@ -115,6 +118,7 @@ std::string scaleName (const ScaleItem& s, chords::Naming naming)
     c.sharp = s.sharp;
     c.rel = 0x091;   // majeur : le nom s'écrit sans suffixe
     const auto root = chords::formatChord (c, naming);
+    if (s.rel != 0) return root + " " + (s.name.empty() ? std::string ("?") : s.name);   // gamme libre : le nom du fichier d'échange
     const auto& md = scaleMode (s.mode);
     return root + " " + (naming == chords::Naming::French ? md.nameFr : md.nameEn);
 }
@@ -141,7 +145,7 @@ std::vector<chordmap::Container> toContainers (const Score& score)
         c.startBeats = s.start;
         c.lengthBeats = s.length;
         c.root = static_cast<std::uint8_t> (s.root);
-        c.pitchMask = scaleMask (s.root, s.mode);
+        c.pitchMask = scaleItemMask (s);
         v.push_back (c);
     }
     for (const auto& p : score.patterns)
@@ -197,7 +201,12 @@ std::string toJson (const Score& s)
     for (const auto& it : s.chords) ch.push_back ({ { "s", it.start }, { "l", it.length }, { "c", chords::formatChord (it.chord, chords::Naming::Letters) } });
     j["chords"] = ch;
     json sc = json::array();
-    for (const auto& x : s.scales) sc.push_back ({ { "s", x.start }, { "l", x.length }, { "root", x.root }, { "mode", scaleMode (x.mode).id }, { "sharp", x.sharp } });
+    for (const auto& x : s.scales)
+    {
+        json o = { { "s", x.start }, { "l", x.length }, { "root", x.root }, { "mode", scaleMode (x.mode).id }, { "sharp", x.sharp } };
+        if (x.rel != 0) { o["rel"] = x.rel; o["name"] = x.name; }   // gamme libre
+        sc.push_back (std::move (o));
+    }
     j["scales"] = sc;
     json ks = json::array();
     for (const auto& x : s.keys) ks.push_back ({ { "s", x.start }, { "root", x.root }, { "minor", x.minor }, { "sharp", x.sharp } });
@@ -264,6 +273,12 @@ Score fromJson (const std::string& text)
             x.root = static_cast<int> (num (o, "root", 0));
             x.sharp = o.value ("sharp", false);
             x.mode = o.contains ("mode") && o["mode"].is_string() ? modeIndexOf (o["mode"].get<std::string>()) : -1;
+            if (o.contains ("rel") && o["rel"].is_number_integer())
+            {
+                x.rel = static_cast<std::uint16_t> (std::clamp (o["rel"].get<int>(), 0, 0x0FFF));
+                if (o.contains ("name") && o["name"].is_string()) x.name = o["name"].get<std::string>();
+                if (x.mode < 0) x.mode = 0;
+            }
             placeScale (s.scales, x);
         }
     if (j.contains ("keys") && j["keys"].is_array())
@@ -384,16 +399,155 @@ std::uint16_t relFromIntervals (const json& arr)
 }
 }
 
-ImportResult importChordFile (const std::string& text, double startBeats)
+namespace
+{
+// Le nom d'une note : « C », « F# », « Bb » selon l'écriture (dièse ou bémol).
+std::string noteText (int pcv, bool sharp)
+{
+    static const char* const withSharps[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    static const char* const withFlats[12] = { "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B" };
+    return (sharp ? withSharps : withFlats)[pc (pcv)];
+}
+
+// Identifiants du catalogue de gammes de Scorsaire, dans l'ordre des modes de Carte.
+const char* const kScorsaireIds[] = { "major", "natural_minor", "harmonic_minor", "melodic_minor", "dorian", "phrygian", "lydian", "mixolydian", "locrian",
+                                      "major_pentatonic", "minor_pentatonic", "blues_minor", "whole_tone", "diminished_hw", "diminished_wh", "altered", "lydian_dominant", "chromatic" };
+static_assert (sizeof (kScorsaireIds) / sizeof (kScorsaireIds[0]) == static_cast<std::size_t> (kNumModes), "un identifiant Scorsaire par mode de Carte");
+
+int modeOfScorsaireId (const std::string& id)
+{
+    for (int i = 0; i < kNumModes; ++i) if (id == kScorsaireIds[i]) return i;
+    return -1;
+}
+
+json fractionOf (double beats)
+{
+    // 960 pulsations par noire : 3840 par ronde
+    long long n = std::llround (std::max (0.0, beats) / 4.0 * 3840.0), d = 3840;
+    long long a = n, b = d;
+    while (b != 0) { const long long t = a % b; a = b; b = t; }
+    if (a > 1) { n /= a; d /= a; }
+    return json::array ({ n, d });
+}
+
+json intervalsOf (std::uint16_t rel)
+{
+    json a = json::array();
+    for (int i = 0; i < 12; ++i) if ((rel >> i) & 1u) a.push_back (i);
+    return a;
+}
+
+// Les voies propres à `flibuste-carte` : gammes, tonalités, appels de motifs.
+void readCarteLanes (const json& j, double startBeats, const std::vector<std::string>& patternNames, ImportResult& r)
+{
+    auto arrayOf = [&j] (const char* key) -> const json* { return j.contains (key) && j[key].is_array() ? &j[key] : nullptr; };
+    if (const auto* sc = arrayOf ("scales"))
+    {
+        r.hasScales = true;
+        if (static_cast<int> (sc->size()) > kMaxImportScales) { r.error = "Le fichier a " + std::to_string (sc->size()) + " gammes : Carte en accepte au plus " + std::to_string (kMaxImportScales) + ". Rien n'a été importé."; return; }
+        for (const auto& o : *sc)
+        {
+            double at = 0.0, dur = 0.0;
+            int rootPc = 0;
+            bool sharp = false;
+            if (! o.is_object() || ! o.contains ("at") || ! o.contains ("dur") || ! readFrac (o["at"], at) || ! readFrac (o["dur"], dur) || dur <= 0.0
+                || ! o.contains ("root") || ! o["root"].is_string() || ! readNote (o["root"].get<std::string>(), rootPc, sharp)) { ++r.skipped; continue; }
+            ScaleItem x;
+            x.start = startBeats + at;
+            x.length = dur;
+            x.root = rootPc;
+            x.sharp = sharp;
+            const std::string id = o.contains ("scale") && o["scale"].is_string() ? o["scale"].get<std::string>() : std::string();
+            const int known = modeOfScorsaireId (id);
+            const std::uint16_t mask = o.contains ("intervals") ? relFromIntervals (o["intervals"]) : std::uint16_t (0);
+            if (known >= 0 && (mask == 0 || mask == kModes[known].rel)) x.mode = known;                  // une gamme de la liste, identique à celle du fichier
+            else if (mask != 0)                                                                            // gamme libre : les intervalles du fichier font foi
+            {
+                x.rel = static_cast<std::uint16_t> (mask | 1u);
+                x.name = o.contains ("name") && o["name"].is_string() ? o["name"].get<std::string>() : id;
+            }
+            else { ++r.unknownScales; continue; }                                                          // ni intervalles, ni identifiant connu
+            if (placeScale (r.score.scales, x) < 0) ++r.skipped;
+        }
+    }
+    if (const auto* ks = arrayOf ("keys"))
+    {
+        r.hasKeys = true;
+        if (static_cast<int> (ks->size()) > kMaxImportKeys) { r.error = "Le fichier a " + std::to_string (ks->size()) + " tonalités : Carte en accepte au plus " + std::to_string (kMaxImportKeys) + ". Rien n'a été importé."; return; }
+        for (const auto& o : *ks)
+        {
+            double at = 0.0;
+            int rootPc = 0;
+            bool sharp = false;
+            const auto mode = o.is_object() && o.contains ("mode") && o["mode"].is_string() ? o["mode"].get<std::string>() : std::string();
+            if (! o.is_object() || ! o.contains ("at") || ! readFrac (o["at"], at) || ! o.contains ("root") || ! o["root"].is_string()
+                || ! readNote (o["root"].get<std::string>(), rootPc, sharp) || (mode != "major" && mode != "minor")) { ++r.skipped; continue; }
+            KeyItem k;
+            k.start = startBeats + at;
+            k.root = rootPc;
+            k.minor = mode == "minor";
+            k.sharp = sharp;
+            if (placeKey (r.score.keys, k) < 0) ++r.skipped;
+        }
+    }
+    if (j.contains ("globalKey") && j["globalKey"].is_object())
+    {
+        const auto& g = j["globalKey"];
+        int rootPc = 0;
+        bool sharp = false;
+        const auto mode = g.contains ("mode") && g["mode"].is_string() ? g["mode"].get<std::string>() : std::string();
+        if (g.contains ("root") && g["root"].is_string() && readNote (g["root"].get<std::string>(), rootPc, sharp) && (mode == "major" || mode == "minor"))
+        {
+            r.score.hasGlobalKey = true;
+            r.score.globalKey.root = rootPc;
+            r.score.globalKey.minor = mode == "minor";
+            r.score.globalKey.sharp = sharp;
+        }
+    }
+    if (const auto* ps = arrayOf ("patterns"))
+    {
+        r.hasPatterns = true;
+        if (static_cast<int> (ps->size()) > kMaxImportPatterns) { r.error = "Le fichier a " + std::to_string (ps->size()) + " appels de motifs : Carte en accepte au plus " + std::to_string (kMaxImportPatterns) + ". Rien n'a été importé."; return; }
+        for (const auto& o : *ps)
+        {
+            double at = 0.0, dur = 0.0;
+            if (! o.is_object() || ! o.contains ("at") || ! o.contains ("dur") || ! readFrac (o["at"], at) || ! readFrac (o["dur"], dur) || dur <= 0.0
+                || ! o.contains ("slot") || ! o["slot"].is_number_integer()) { ++r.skipped; continue; }
+            PatternItem x;
+            x.start = startBeats + at;
+            x.length = dur;
+            x.slot = o["slot"].get<int>();
+            if (placePattern (r.score.patterns, x) < 0) { ++r.skipped; continue; }
+            const std::string name = o.contains ("name") && o["name"].is_string() ? o["name"].get<std::string>() : std::string();
+            const std::string mine = x.slot >= 1 && static_cast<std::size_t> (x.slot) <= patternNames.size() ? patternNames[static_cast<std::size_t> (x.slot) - 1] : std::string();
+            if (! name.empty() && ! mine.empty() && name != mine)
+            {
+                const std::string note = "L'emplacement " + std::to_string (x.slot) + " s'appelle « " + name + " » dans le fichier et « " + mine + " » ici.";
+                if (std::find (r.notes.begin(), r.notes.end(), note) == r.notes.end()) r.notes.push_back (note);
+            }
+        }
+    }
+}
+
+ImportResult importCommon (const std::string& text, double startBeats, bool carteFormat, const std::vector<std::string>& patternNames)
 {
     ImportResult r;
     const auto j = json::parse (text, nullptr, false);
     if (j.is_discarded() || ! j.is_object()) { r.error = "Fichier illisible (ce n'est pas du JSON)."; return r; }
     const auto fmt = j.contains ("format") && j["format"].is_string() ? j["format"].get<std::string>() : std::string();
-    if (fmt != "flibuste-accords") { r.error = "Ce fichier n'est pas une piste d'accords de Scorsaire (format « " + fmt + " »)."; return r; }
+    const bool isCarte = fmt == "flibuste-carte";
+    if (fmt != "flibuste-accords" && ! (carteFormat && isCarte))
+    {
+        r.error = carteFormat ? "Ce fichier n'est ni une carte (flibuste-carte) ni une piste d'accords (flibuste-accords) : format « " + fmt + " »."
+                              : "Ce fichier n'est pas une piste d'accords de Scorsaire (format « " + fmt + " »).";
+        return r;
+    }
     const auto version = j.value ("version", 0);
     if (version < 1 || version > 1) { r.error = "Version " + std::to_string (version) + " du format non prise en charge : mettez à jour la suite."; return r; }
     r.title = j.value ("title", std::string());
+    // un fichier d'accords ne porte que les accords et les mesures, qu'il remplace toujours ; une carte ne remplace que les voies qu'elle contient
+    r.hasChords = ! isCarte || (j.contains ("chords") && j["chords"].is_array());
+    r.hasMeasures = ! isCarte || (j.contains ("measures") && j["measures"].is_array());
     const json empty = json::array();
     const auto& ms = j.contains ("measures") && j["measures"].is_array() ? j["measures"] : empty;
     const auto& cs = j.contains ("chords") && j["chords"].is_array() ? j["chords"] : empty;
@@ -460,7 +614,79 @@ ImportResult importChordFile (const std::string& text, double startBeats)
     }
     std::stable_sort (r.score.chords.begin(), r.score.chords.end(), [] (const chords::Item& a, const chords::Item& b) { return a.start < b.start; });
     std::stable_sort (r.score.measures.begin(), r.score.measures.end(), [] (const MeasureItem& a, const MeasureItem& b) { return a.start < b.start; });
-    r.ok = true;
+    if (isCarte) readCarteLanes (j, startBeats, patternNames, r);
+    r.ok = ! r.error.empty() ? false : true;
     return r;
+}
+
+} // namespace
+
+ImportResult importChordFile (const std::string& text, double startBeats) { return importCommon (text, startBeats, false, {}); }
+ImportResult importCarteFile (const std::string& text, double startBeats, const std::vector<std::string>& patternNames) { return importCommon (text, startBeats, true, patternNames); }
+
+std::string exportCarteFile (const Score& s, const std::string& title, double startBeats, const std::vector<std::string>& patternNames)
+{
+    json j;
+    j["format"] = "flibuste-carte";
+    j["version"] = 1;
+    j["from"] = "Neptune Carte";
+    j["unrolled"] = true;
+    j["title"] = title;
+    auto rel = [startBeats] (double beats) { return fractionOf (beats - startBeats); };
+    // mesures et chiffrages
+    json ms = json::array(), ts = json::array();
+    int lastNum = 0, lastDen = 0, index = 0;
+    for (const auto& m : s.measures)
+    {
+        ms.push_back ({ { "at", rel (m.start) }, { "dur", fractionOf (m.length) }, { "ts", json::array ({ m.num, m.den }) }, { "source", m.source } });
+        if (m.num != lastNum || m.den != lastDen) ts.push_back ({ { "fromMeasure", index }, { "ts", json::array ({ m.num, m.den }) } });
+        lastNum = m.num;
+        lastDen = m.den;
+        ++index;
+    }
+    j["timeSignatures"] = ts;
+    j["measures"] = ms;
+    // accords : l'identifiant de qualité est l'écriture affichée (« m7 »), son dictionnaire est dans le fichier ; le majeur est « »
+    json qualities = json::object(), cs = json::array();
+    for (const auto& it : s.chords)
+    {
+        auto bare = it.chord;
+        bare.bass = -1;
+        const auto root = noteText (it.chord.root, it.chord.sharp);
+        const auto full = chords::formatChord (bare, chords::Naming::Letters);
+        const auto suffix = full.compare (0, root.size(), root) == 0 ? full.substr (root.size()) : std::string();
+        if (! qualities.contains (suffix)) qualities[suffix] = intervalsOf (it.chord.rel);
+        json o = { { "at", rel (it.start) }, { "dur", fractionOf (it.length) }, { "root", root }, { "quality", suffix } };
+        o["bass"] = it.chord.bass >= 0 ? json (noteText (it.chord.bass, it.chord.sharp)) : json (nullptr);
+        cs.push_back (std::move (o));
+    }
+    j["qualities"] = qualities;
+    j["chords"] = cs;
+    // gammes
+    json sc = json::array();
+    for (const auto& x : s.scales)
+    {
+        const std::uint16_t notes = x.rel != 0 ? static_cast<std::uint16_t> (x.rel | 1u) : scaleMode (x.mode).rel;
+        json o = { { "at", rel (x.start) }, { "dur", fractionOf (x.length) }, { "root", noteText (x.root, x.sharp) }, { "intervals", intervalsOf (notes) } };
+        if (x.rel == 0) { o["scale"] = kScorsaireIds[x.mode]; o["name"] = scaleMode (x.mode).nameFr; }
+        else if (! x.name.empty()) o["name"] = x.name;
+        sc.push_back (std::move (o));
+    }
+    j["scales"] = sc;
+    // tonalités
+    json ks = json::array();
+    for (const auto& x : s.keys) ks.push_back ({ { "at", rel (x.start) }, { "root", noteText (x.root, x.sharp) }, { "mode", x.minor ? "minor" : "major" } });
+    j["keys"] = ks;
+    if (s.hasGlobalKey) j["globalKey"] = { { "root", noteText (s.globalKey.root, s.globalKey.sharp) }, { "mode", s.globalKey.minor ? "minor" : "major" } };
+    // appels de motifs
+    json ps = json::array();
+    for (const auto& x : s.patterns)
+    {
+        json o = { { "at", rel (x.start) }, { "dur", fractionOf (x.length) }, { "slot", x.slot } };
+        if (x.slot >= 1 && static_cast<std::size_t> (x.slot) <= patternNames.size() && ! patternNames[static_cast<std::size_t> (x.slot) - 1].empty()) o["name"] = patternNames[static_cast<std::size_t> (x.slot) - 1];
+        ps.push_back (std::move (o));
+    }
+    j["patterns"] = ps;
+    return j.dump (2);
 }
 } // namespace neptune::core::carte

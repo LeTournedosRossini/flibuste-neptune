@@ -1,14 +1,18 @@
 // Carte v2 : gammes, tonalités, motifs, mesures, enregistrement, publication dans la carte partagée, import des fichiers de Scorsaire.
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
 #include <fstream>
 #include <sstream>
 
+#include <nlohmann/json.hpp>
+
 #include "neptune/core/CarteScore.h"
 
 using namespace neptune::core;
 using namespace neptune::core::carte;
+using Catch::Approx;
 
 namespace
 {
@@ -258,5 +262,213 @@ TEST_CASE ("exemples d'essai : les fichiers de docs/exemples-arpege se lisent", 
         CHECK (r.score.chords[i].length == demo.chords[i].length);
         CHECK (r.score.chords[i].chord.root == demo.chords[i].chord.root);
         CHECK ((r.score.chords[i].chord.rel & 0x0FFF) == (demo.chords[i].chord.rel & 0x0FFF));
+    }
+}
+
+// ---- échange `flibuste-carte` ----
+namespace
+{
+void expectSameScore (const carte::Score& a, const carte::Score& b)
+{
+    REQUIRE (a.chords.size() == b.chords.size());
+    for (std::size_t i = 0; i < a.chords.size(); ++i)
+    {
+        CHECK (a.chords[i].start == Approx (b.chords[i].start));
+        CHECK (a.chords[i].length == Approx (b.chords[i].length));
+        CHECK (a.chords[i].chord == b.chords[i].chord);
+    }
+    REQUIRE (a.scales.size() == b.scales.size());
+    for (std::size_t i = 0; i < a.scales.size(); ++i)
+    {
+        CHECK (a.scales[i].start == Approx (b.scales[i].start));
+        CHECK (a.scales[i].length == Approx (b.scales[i].length));
+        CHECK (a.scales[i].root == b.scales[i].root);
+        CHECK (a.scales[i].sharp == b.scales[i].sharp);
+        CHECK (carte::scaleItemMask (a.scales[i]) == carte::scaleItemMask (b.scales[i]));
+        CHECK (a.scales[i].rel == b.scales[i].rel);
+        CHECK (a.scales[i].name == b.scales[i].name);
+        if (a.scales[i].rel == 0) CHECK (a.scales[i].mode == b.scales[i].mode);
+    }
+    REQUIRE (a.keys.size() == b.keys.size());
+    for (std::size_t i = 0; i < a.keys.size(); ++i)
+    {
+        CHECK (a.keys[i].start == Approx (b.keys[i].start));
+        CHECK (a.keys[i].root == b.keys[i].root);
+        CHECK (a.keys[i].minor == b.keys[i].minor);
+        CHECK (a.keys[i].sharp == b.keys[i].sharp);
+    }
+    CHECK (a.hasGlobalKey == b.hasGlobalKey);
+    if (a.hasGlobalKey) { CHECK (a.globalKey.root == b.globalKey.root); CHECK (a.globalKey.minor == b.globalKey.minor); CHECK (a.globalKey.sharp == b.globalKey.sharp); }
+    REQUIRE (a.patterns.size() == b.patterns.size());
+    for (std::size_t i = 0; i < a.patterns.size(); ++i)
+    {
+        CHECK (a.patterns[i].start == Approx (b.patterns[i].start));
+        CHECK (a.patterns[i].length == Approx (b.patterns[i].length));
+        CHECK (a.patterns[i].slot == b.patterns[i].slot);
+    }
+    REQUIRE (a.measures.size() == b.measures.size());
+    for (std::size_t i = 0; i < a.measures.size(); ++i)
+    {
+        CHECK (a.measures[i].start == Approx (b.measures[i].start));
+        CHECK (a.measures[i].length == Approx (b.measures[i].length));
+        CHECK (a.measures[i].num == b.measures[i].num);
+        CHECK (a.measures[i].den == b.measures[i].den);
+    }
+}
+} // namespace
+
+TEST_CASE ("carte exchange: a full score survives export and import, free scales and spellings included", "[carte][exchange]")
+{
+    auto score = carte::demoScore (0.0);
+    // une gamme libre (hors de la liste), une tonalité en bémols, une en dièses, des triolets
+    carte::ScaleItem free;
+    free.start = 33.0; free.length = 5.0 + 1.0 / 3.0; free.root = 3; free.sharp = false; free.rel = 0x00AD; free.name = "Ma gamme";   // 0 2 3 5 7
+    carte::placeScale (score.scales, free);
+    carte::placeKey (score.keys, { 40.0, 10, true, false });    // si bémol mineur
+    carte::placeKey (score.keys, { 48.0, 6, false, true });     // fa dièse majeur
+    carte::placePattern (score.patterns, { 40.0, 4.0 / 3.0, 7 });
+    const auto text = carte::exportCarteFile (score, "Essai");
+    const auto back = carte::importCarteFile (text, 0.0);
+    REQUIRE (back.ok);
+    CHECK (back.hasChords); CHECK (back.hasMeasures); CHECK (back.hasScales); CHECK (back.hasKeys); CHECK (back.hasPatterns);
+    CHECK (back.title == "Essai");
+    CHECK (back.unknownScales == 0);
+    CHECK (back.skipped == 0);
+    expectSameScore (score, back.score);
+    // l'écriture bémol / dièse est gardée
+    CHECK (text.find ("\"Bb\"") != std::string::npos);
+    CHECK (text.find ("\"F#\"") != std::string::npos);
+}
+
+TEST_CASE ("carte exchange: the song start is subtracted on export and added back on import", "[carte][exchange]")
+{
+    const auto score = carte::demoScore (16.0);   // le morceau commence à la mesure 5 du projet
+    const auto text = carte::exportCarteFile (score, "", 16.0);
+    const auto j = nlohmann::json::parse (text);
+    CHECK (j["chords"][0]["at"] == nlohmann::json::array ({ 0, 1 }));       // le fichier commence à zéro
+    const auto back = carte::importCarteFile (text, 16.0);
+    REQUIRE (back.ok);
+    expectSameScore (score, back.score);
+    const auto elsewhere = carte::importCarteFile (text, 100.0);             // un autre endroit du projet
+    REQUIRE (elsewhere.ok);
+    CHECK (elsewhere.score.chords[0].start == Approx (100.0));
+}
+
+TEST_CASE ("carte exchange: scales are read by Scorsaire identifier, by intervals, or kept as free scales", "[carte][exchange]")
+{
+    const auto file = [] (const char* scales)
+    {
+        return std::string (R"({"format":"flibuste-carte","version":1,"scales":)") + scales + "}";
+    };
+    // identifiant connu et intervalles concordants : une gamme de la liste
+    auto r = carte::importCarteFile (file (R"([{"at":[0,1],"dur":[1,1],"root":"D","scale":"dorian","intervals":[0,2,3,5,7,9,10]}])"), 0.0);
+    REQUIRE (r.ok);
+    REQUIRE (r.score.scales.size() == 1);
+    CHECK (r.score.scales[0].rel == 0);
+    CHECK (carte::scaleMode (r.score.scales[0].mode).id == std::string ("dorian"));
+    CHECK (r.score.scales[0].root == 2);
+    // identifiant seul, connu : la gamme de la liste
+    r = carte::importCarteFile (file (R"([{"at":[0,1],"dur":[1,1],"root":"A","scale":"natural_minor"}])"), 0.0);
+    REQUIRE (r.score.scales.size() == 1);
+    CHECK (carte::scaleMode (r.score.scales[0].mode).id == std::string ("minor"));
+    // identifiant connu mais intervalles différents : le fichier fait foi, gamme libre
+    r = carte::importCarteFile (file (R"([{"at":[0,1],"dur":[1,1],"root":"C","scale":"major","intervals":[0,2,4,7,9]}])"), 0.0);
+    REQUIRE (r.score.scales.size() == 1);
+    CHECK (r.score.scales[0].rel != 0);
+    CHECK (carte::scaleItemMask (r.score.scales[0]) == 0x295);   // pentatonique de do
+    // identifiant inconnu avec intervalles : gamme libre, nommée par le fichier
+    r = carte::importCarteFile (file (R"([{"at":[0,1],"dur":[1,1],"root":"E","scale":"hirajoshi","intervals":[0,2,3,7,8],"name":"Hirajoshi"}])"), 0.0);
+    REQUIRE (r.score.scales.size() == 1);
+    CHECK (r.score.scales[0].name == "Hirajoshi");
+    CHECK (carte::scaleName (r.score.scales[0]) == "E Hirajoshi");
+    // ni intervalles ni identifiant connu : ignorée et comptée ; une entrée sans position : ignorée et comptée
+    r = carte::importCarteFile (file (R"([{"at":[0,1],"dur":[1,1],"root":"E","scale":"inconnue"},{"dur":[1,1],"root":"E","scale":"major"}])"), 0.0);
+    REQUIRE (r.ok);
+    CHECK (r.score.scales.empty());
+    CHECK (r.unknownScales == 1);
+    CHECK (r.skipped == 1);
+}
+
+TEST_CASE ("carte exchange: only the lanes present in the file are flagged, and a chord file is accepted", "[carte][exchange]")
+{
+    auto r = carte::importCarteFile (R"({"format":"flibuste-carte","version":1,"keys":[{"at":[0,1],"root":"G","mode":"major"}],"globalKey":{"root":"C","mode":"minor"}})", 0.0);
+    REQUIRE (r.ok);
+    CHECK_FALSE (r.hasChords); CHECK_FALSE (r.hasMeasures); CHECK_FALSE (r.hasScales); CHECK_FALSE (r.hasPatterns);
+    CHECK (r.hasKeys);
+    REQUIRE (r.score.keys.size() == 1);
+    CHECK (r.score.keys[0].root == 7);
+    CHECK (r.score.hasGlobalKey);
+    CHECK (r.score.globalKey.minor);
+    // un fichier d'accords (Scorsaire) : les accords et les mesures, rien d'autre
+    r = carte::importCarteFile (R"({"format":"flibuste-accords","version":1,"measures":[{"at":[0,1],"dur":[1,1],"ts":[4,4]}],"chords":[{"at":[0,1],"dur":[1,1],"root":"D","quality":"m7","bass":null}],"qualities":{"m7":[0,3,7,10]}})", 0.0);
+    REQUIRE (r.ok);
+    CHECK (r.hasChords); CHECK (r.hasMeasures); CHECK_FALSE (r.hasScales); CHECK_FALSE (r.hasKeys); CHECK_FALSE (r.hasPatterns);
+    CHECK (r.score.chords.size() == 1);
+}
+
+TEST_CASE ("carte exchange: refusals are clear and import nothing", "[carte][exchange]")
+{
+    CHECK_FALSE (carte::importCarteFile ("pas du json", 0.0).ok);
+    auto r = carte::importCarteFile (R"({"format":"autre","version":1})", 0.0);
+    CHECK_FALSE (r.ok);
+    CHECK (r.error.find ("autre") != std::string::npos);
+    r = carte::importCarteFile (R"({"format":"flibuste-carte","version":2})", 0.0);
+    CHECK_FALSE (r.ok);
+    CHECK (r.error.find ("Version 2") != std::string::npos);
+    // trop de gammes : refus net
+    std::string many = R"({"format":"flibuste-carte","version":1,"scales":[)";
+    for (int i = 0; i < carte::kMaxImportScales + 1; ++i) many += std::string (i ? "," : "") + R"({"at":[0,1],"dur":[1,1],"root":"C","scale":"major"})";
+    many += "]}";
+    r = carte::importCarteFile (many, 0.0);
+    CHECK_FALSE (r.ok);
+    CHECK (r.error.find ("gammes") != std::string::npos);
+    // le fichier d'accords seul reste refusé par l'ancienne fonction quand c'est une carte
+    CHECK_FALSE (carte::importChordFile (R"({"format":"flibuste-carte","version":1})", 0.0).ok);
+}
+
+TEST_CASE ("carte exchange: a pattern whose name differs from ours is reported, and the slot is kept", "[carte][exchange]")
+{
+    const std::vector<std::string> mine { "", "", "", "", "", "", "", "", "", "", "", "Essai 1" };
+    const auto r = carte::importCarteFile (R"({"format":"flibuste-carte","version":1,"patterns":[{"at":[0,1],"dur":[2,1],"slot":12,"name":"Ballade"},{"at":[2,1],"dur":[1,1],"slot":17}]})", 0.0, mine);
+    REQUIRE (r.ok);
+    REQUIRE (r.score.patterns.size() == 1);   // l'emplacement 17 n'existe pas : ignoré
+    CHECK (r.score.patterns[0].slot == 12);
+    CHECK (r.skipped == 1);
+    REQUIRE (r.notes.size() == 1);
+    CHECK (r.notes[0].find ("Ballade") != std::string::npos);
+}
+
+TEST_CASE ("carte exchange: the saved state keeps free scales", "[carte][exchange]")
+{
+    carte::Score s;
+    carte::ScaleItem free;
+    free.start = 4.0; free.length = 4.0; free.root = 9; free.rel = 0x00AD; free.name = "Ma gamme";
+    carte::placeScale (s.scales, free);
+    const auto back = carte::fromJson (carte::toJson (s));
+    REQUIRE (back.scales.size() == 1);
+    CHECK (back.scales[0].rel == 0x00AD);
+    CHECK (back.scales[0].name == "Ma gamme");
+    CHECK (carte::scaleItemMask (back.scales[0]) == carte::scaleItemMask (free));
+    CHECK (carte::toContainers (back).back().pitchMask == carte::scaleItemMask (free));   // la carte partagée reçoit les notes de la gamme libre
+}
+
+TEST_CASE ("carte exchange: Scorsaire's own chord files are read the same way by the carte importer", "[carte][exchange]")
+{
+    for (const char* name : { "accords-anacrouse-chiffrage.json", "accords-ds-al-coda.json", "accords-reprise-volta.json" })
+    {
+        const auto text = example (name);
+        REQUIRE_FALSE (text.empty());
+        const auto a = carte::importChordFile (text, 0.0);
+        const auto b = carte::importCarteFile (text, 0.0);
+        REQUIRE (a.ok);
+        REQUIRE (b.ok);
+        CHECK (b.score.chords.size() == a.score.chords.size());
+        CHECK (b.score.measures.size() == a.score.measures.size());
+        CHECK (b.hasChords);
+        CHECK_FALSE (b.hasScales);
+        // et notre export de ces accords se relit à l'identique
+        const auto again = carte::importCarteFile (carte::exportCarteFile (b.score, "x"), 0.0);
+        REQUIRE (again.ok);
+        expectSameScore (b.score, again.score);
     }
 }
