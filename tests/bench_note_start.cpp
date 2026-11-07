@@ -88,7 +88,7 @@ void run (Kind kind, const char* name, int block, int notesAtOnce, bool cold)
     engine.process (chans.data(), kChannels, block);   // adopte l'instrument ou le patch
     for (int i = 0; i < 300; ++i) engine.process (chans.data(), kChannels, block);
 
-    std::vector<double> steady, start;
+    std::vector<double> steady, start, onCall;
     const int period = static_cast<int> (0.125 * kSampleRate / block);   // une note toutes les 125 ms, comme le projet du banc
     int key = 48;
     for (int i = 0; i < 4000; ++i)
@@ -97,7 +97,9 @@ void run (Kind kind, const char* name, int block, int notesAtOnce, bool cold)
         if (noteBlock)
         {
             engine.panic();
+            const auto n0 = Clock::now();
             for (int n = 0; n < notesAtOnce; ++n) engine.noteOn (0, key + 3 * n, 0.8f);
+            onCall.push_back (std::chrono::duration<double, std::micro> (Clock::now() - n0).count());
             key = key >= 72 ? 48 : key + 1;
         }
         if (cold) { for (std::size_t k = 0; k < g_thrash.size(); k += 64) g_thrash[k] = static_cast<char> (k + static_cast<std::size_t> (i)); g_sink = g_thrash[static_cast<std::size_t> (i) % g_thrash.size()]; }
@@ -107,6 +109,8 @@ void run (Kind kind, const char* name, int block, int notesAtOnce, bool cold)
         (noteBlock ? start : steady).push_back (us);
     }
     report (name, block, steady, start);
+    const auto c = stats (onCall);
+    std::printf ("%-26s            appel noteOn seul : méd %7.1f µs  p99 %7.1f  max %7.1f\n", "", c.median, c.p99, c.max);
 }
 } // namespace
 

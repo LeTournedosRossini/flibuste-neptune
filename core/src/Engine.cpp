@@ -448,7 +448,19 @@ void Engine::enforceGlobalVoiceLimit() noexcept
     for (int guard = 0; guard < 32; ++guard)
     {
         int total = 0;
-        for (const auto& t : tracks_) total += t.voices.soundingVoices() + t.synth.soundingVoices() + t.fm.soundingVoices();
+        // seules les pistes actives comptent, et pour chacune le moteur de son type : parcourir les voix de toutes les pistes et des trois moteurs coûtait environ
+        // 10 µs à chaque note (mesuré par neptune_bench_note_start), davantage quand la mémoire cache est froide
+        for (const auto& t : tracks_)
+        {
+            if (t.active.load (std::memory_order_relaxed) == 0) continue;
+            switch (static_cast<TrackType> (t.type.load (std::memory_order_relaxed)))
+            {
+                case TrackType::Synth: total += t.synth.soundingVoices(); break;
+                case TrackType::Fm: total += t.fm.soundingVoices(); break;
+                case TrackType::Sampler: total += t.voices.soundingVoices(); break;
+                default: break;
+            }
+        }
         if (total < limit) return;
 
         int bestTrack = -1;
