@@ -52,7 +52,7 @@ inline void show (ParamHost& host, neptune::core::ParamId id, juce::Component& a
         menu.addItem (999, U ("Automatisé par l'emplacement ") + slotLabel (host, cur), false);
         menu.addSeparator();
         menu.addItem (2, host.reserveLocked (cur) ? U ("Retirer l'automatisation (emplacement verrouillé)") : U ("Retirer l'automatisation"), ! host.reserveLocked (cur));
-        menu.addItem (3, host.reserveLocked (cur) ? U ("Déverrouiller l'emplacement") : U ("Verrouiller l'emplacement"));
+        if (host.reserveSupportsLock()) menu.addItem (3, host.reserveLocked (cur) ? U ("Déverrouiller l'emplacement") : U ("Verrouiller l'emplacement"));
     }
     else
     {

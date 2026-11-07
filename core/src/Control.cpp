@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include "neptune/core/Combinations.h"
+#include "neptune/core/Mixer.h"
 
 namespace neptune::core::control
 {
@@ -145,6 +146,20 @@ Config sanitised (Config c)
         {
             if (b.target.param == 0) continue;
             b.target.action = Action::None;
+            if (b.target.insertStrip >= 0)
+            {
+                namespace mx = neptune::core::mixer;
+                const int strip = b.target.insertStrip;
+                const int count = strip == 0 ? mx::numTracks : strip == 1 ? mx::numBuses : strip == 2 ? mx::numParallels : strip == 3 ? 1 : 0;
+                if (count == 0 || b.target.insertIndex < 0 || b.target.insertIndex >= count || b.target.insertSlot < 0 || b.target.insertSlot >= mx::numInserts) continue;
+                if (b.target.insertType.empty() || b.target.insertType.size() > 32) continue;
+            }
+            else
+            {
+                b.target.insertIndex = 0;
+                b.target.insertSlot = 0;
+                b.target.insertType.clear();
+            }
         }
         if (isRelative (b.mode) && (b.source.kind != SourceKind::CC || b.target.isAction)) b.mode = Mode::Absolute;   // relatif : CC vers un paramètre seulement
         b.lo = std::clamp (b.lo, 0.0, 1.0);
@@ -154,6 +169,20 @@ Config sanitised (Config c)
     }
     c.bindings = std::move (kept);
     return c;
+}
+
+int dropMissingInsertTargets (Config& c, const std::function<bool (const Target&)>& exists, int* remaining)
+{
+    int dropped = 0, kept = 0;
+    c.bindings.erase (std::remove_if (c.bindings.begin(), c.bindings.end(), [&] (const Binding& b)
+                      {
+                          if (! b.target.isInsert()) return false;
+                          if (exists && exists (b.target)) { ++kept; return false; }
+                          ++dropped;
+                          return true;
+                      }), c.bindings.end());
+    if (remaining != nullptr) *remaining = kept;
+    return dropped;
 }
 
 std::string toJson (const Config& c)
@@ -180,7 +209,15 @@ std::string toJson (const Config& c)
         }
         o["source"] = std::move(s);
         if (b.target.isAction) o["target"] = { { "action", toString (b.target.action) } };
-        else o["target"] = { { "param", b.target.param } };
+        else
+        {
+            o["target"] = { { "param", b.target.param } };
+            if (b.target.isInsert())
+            {
+                static const char* const strips[] = { "track", "bus", "parallel", "master" };
+                o["target"]["insert"] = { { "strip", strips[b.target.insertStrip & 3] }, { "index", b.target.insertIndex }, { "slot", b.target.insertSlot }, { "type", b.target.insertType } };
+            }
+        }
         if (b.lo != 0.0) o["min"] = b.lo;
         if (b.hi != 1.0) o["max"] = b.hi;
         if (b.curve != 1.0) o["curve"] = b.curve;
@@ -238,7 +275,22 @@ Config configFromJson (std::string_view text)
                 if (! actionFromString (a->get<std::string>(), b.target.action)) continue;
             }
             else if (const auto p = t->find ("param"); p != t->end() && p->is_number_integer() && p->get<long long>() > 0)
+            {
                 b.target.param = static_cast<ParamId> (p->get<long long>());
+                if (const auto ins = t->find ("insert"); ins != t->end())
+                {
+                    // une cible d'insert mal formée écarte l'assignation entière : jamais de repli sur un paramètre de Neptune qui aurait le même numéro
+                    if (! ins->is_object()) continue;
+                    const auto st = ins->find ("strip"), ty = ins->find ("type");
+                    if (st == ins->end() || ! st->is_string() || ty == ins->end() || ! ty->is_string()) continue;
+                    const auto name = st->get<std::string>();
+                    b.target.insertStrip = name == "track" ? 0 : name == "bus" ? 1 : name == "parallel" ? 2 : name == "master" ? 3 : -1;
+                    if (b.target.insertStrip < 0) continue;
+                    b.target.insertIndex = num (*ins, "index", -1);
+                    b.target.insertSlot = num (*ins, "slot", -1);
+                    b.target.insertType = ty->get<std::string>();
+                }
+            }
             else continue;
             auto real = [&o] (const char* key, double& out) { if (const auto i = o.find (key); i != o.end() && i->is_number() && std::isfinite (i->get<double>())) out = i->get<double>(); };
             real ("min", b.lo);
@@ -268,6 +320,8 @@ struct ControlEngine::Runtime
     {
         Binding binding;
         std::size_t paramIndex = ParameterSet::npos;   // npos : paramètre inconnu (l'assignation n'agit pas), ou action
+        ParameterSet* targetSet = nullptr;             // réglage d'insert : le jeu de paramètres du module (nul : celui de Neptune)
+        std::shared_ptr<const void> keepAlive;         // garde le module en vie tant que ces tables existent
     };
     std::vector<Item> items;
     std::unique_ptr<std::atomic<bool>[]> pickedUp;     // par assignation « reprise »
@@ -286,7 +340,7 @@ ControlEngine::ControlEngine() : dirty_ (new std::atomic<std::uint64_t>[kDirtyWo
 
 ControlEngine::~ControlEngine() = default;
 
-void ControlEngine::configure (const Config& config, const ParameterSet& set)
+void ControlEngine::configure (const Config& config, const ParameterSet& set, const TargetResolver& resolve)
 {
     auto rt = std::make_shared<Runtime>();
     const Config clean = sanitised (config);
@@ -294,7 +348,21 @@ void ControlEngine::configure (const Config& config, const ParameterSet& set)
     {
         Runtime::Item it;
         it.binding = b;
-        if (! b.target.isAction) it.paramIndex = set.indexOf (b.target.param);
+        if (b.target.isInsert())
+        {
+            if (resolve)
+                if (auto r = resolve (b.target); r.set != nullptr)
+                {
+                    const auto index = r.set->indexOf (b.target.param);
+                    if (index != ParameterSet::npos)
+                    {
+                        it.targetSet = r.set;
+                        it.keepAlive = std::move (r.keepAlive);
+                        it.paramIndex = index;
+                    }
+                }
+        }
+        else if (! b.target.isAction) it.paramIndex = set.indexOf (b.target.param);
         rt->items.push_back (std::move (it));
     }
     const auto n = rt->items.size();
@@ -421,9 +489,10 @@ std::size_t ControlEngine::drainChanges (std::vector<std::size_t>& out)
     return count;
 }
 
-void ControlEngine::apply (const Runtime& rt, int item, double s, ParameterSet& set) noexcept
+void ControlEngine::apply (const Runtime& rt, int item, double s, ParameterSet& neptuneSet) noexcept
 {
     const auto& it = rt.items[static_cast<std::size_t> (item)];
+    ParameterSet& set = it.targetSet != nullptr ? *it.targetSet : neptuneSet;   // un réglage d'insert vit dans le jeu de paramètres de son module
     const auto& b = it.binding;
     if (isRelative (b.mode) && ! b.target.isAction)
     {
@@ -432,7 +501,7 @@ void ControlEngine::apply (const Runtime& rt, int item, double s, ParameterSet& 
         const double lo = std::min (b.lo, b.hi), hi = std::max (b.lo, b.hi);
         const double step = (hi - lo) / 127.0 * (b.invert ? -1.0 : 1.0);
         const double next = std::clamp (set.getNormalizedAt (it.paramIndex) + delta * step, lo, hi);
-        if (set.setNormalizedAt (it.paramIndex, next)) markChanged (it.paramIndex);
+        if (set.setNormalizedAt (it.paramIndex, next)) { if (it.targetSet == nullptr) markChanged (it.paramIndex); }
         return;
     }
     if (b.target.isAction)
@@ -449,7 +518,7 @@ void ControlEngine::apply (const Runtime& rt, int item, double s, ParameterSet& 
         if (std::fabs (n - current) > 0.02) return;    // pas encore au niveau du paramètre : on n'y touche pas
         rt.pickedUp[static_cast<std::size_t> (item)].store (true, std::memory_order_relaxed);
     }
-    if (set.setNormalizedAt (it.paramIndex, n)) markChanged (it.paramIndex);
+    if (set.setNormalizedAt (it.paramIndex, n)) { if (it.targetSet == nullptr) markChanged (it.paramIndex); }
 }
 
 void ControlEngine::nrpnValue (int channel0, int number, int value14, ParameterSet& set) noexcept

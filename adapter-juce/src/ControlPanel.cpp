@@ -160,6 +160,7 @@ const ctl::Binding* ControlPanel::at (std::size_t i) const
 juce::String ControlPanel::targetLabel (const ctl::Binding& b) const
 {
     if (b.target.isAction) return text ("cpanel.action") + ": " + actionText (b.target.action);
+    if (b.target.isInsert()) return juce::String::fromUTF8 (processor_.describeTarget (b.target).c_str());   // le réglage d'un effet posé en insert
     const auto* spec = processor_.parameters().find (b.target.param);
     if (spec == nullptr) return text ("cpanel.choose_target");
     const auto& address = osc::addressFor (b.target.param);

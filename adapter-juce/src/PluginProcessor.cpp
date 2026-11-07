@@ -482,7 +482,7 @@ int NeptuneProcessor::uiAddTrack()
                 const juce::ScopedLock lock (instrumentLock_);
                 insertInstances_[static_cast<std::size_t> (track)][static_cast<std::size_t> (s)] = nullptr;
             }
-            engine_.setInsert (StripKind::Track, track, s, nullptr);
+            setEngineInsert (StripKind::Track, track, s, nullptr);
         }
     };
     clearTrackInserts (index);
@@ -907,7 +907,7 @@ int NeptuneProcessor::uiImportTrack (neptune::core::trackexport::Bundle b)
             const juce::ScopedLock lock (instrumentLock_);
             insertInstances_[static_cast<std::size_t> (index)][static_cast<std::size_t> (s)] = inst;
         }
-        engine_.setInsert (StripKind::Track, index, s, inst);
+        setEngineInsert (StripKind::Track, index, s, inst);
     }
     loader_->request (index, track.instrument, false);
     std::vector<std::pair<ParamId, double>> values (b.params.begin(), b.params.end());
@@ -940,7 +940,7 @@ void NeptuneProcessor::installSamplerTrack (int index, neptune::core::Instrument
     for (int s = 0; s < mx::numInserts; ++s)
     {
         { const juce::ScopedLock lock (instrumentLock_); insertInstances_[static_cast<std::size_t> (index)][static_cast<std::size_t> (s)] = nullptr; }
-        engine_.setInsert (StripKind::Track, index, s, nullptr);
+        setEngineInsert (StripKind::Track, index, s, nullptr);
     }
     resetTrackParameters (index, true);
     engine_.setTrackSettings (index, trackSettings (index));
@@ -1140,7 +1140,7 @@ bool NeptuneProcessor::uiRemoveTrack (int track)
                 const juce::ScopedLock lock (instrumentLock_);
                 insertInstances_[static_cast<std::size_t> (track)][static_cast<std::size_t> (s)] = nullptr;
             }
-            engine_.setInsert (StripKind::Track, track, s, nullptr);
+            setEngineInsert (StripKind::Track, track, s, nullptr);
         }
     };
     clearTrackInserts (track);
@@ -1195,7 +1195,7 @@ void NeptuneProcessor::dropParallel (int p)
             const juce::ScopedLock lock (instrumentLock_);
             insertInstances_[static_cast<std::size_t> (insertFlatIndex (StripKind::Parallel, p))][static_cast<std::size_t> (s)] = nullptr;
         }
-        engine_.setInsert (StripKind::Parallel, p, s, nullptr);
+        setEngineInsert (StripKind::Parallel, p, s, nullptr);
     }
     std::vector<neptune::core::ParamId> ids { mx::parallelParam (p, mx::kParVolume), mx::parallelParam (p, mx::kParPan),
                                               mx::parallelParam (p, mx::kParMute), mx::parallelParam (p, mx::kParSolo) };
@@ -1368,7 +1368,7 @@ void NeptuneProcessor::uiSetInsert (StripKind kind, int index, int slot, const s
         const juce::ScopedLock lock (instrumentLock_);
         insertInstances_[static_cast<std::size_t> (insertFlatIndex (kind, index))][static_cast<std::size_t> (slot)] = inst;
     }
-    engine_.setInsert (kind, index, slot, inst);
+    setEngineInsert (kind, index, slot, inst);
     uiResetToDefault (insertBypassParam (kind, index, slot)); // un nouvel insert n'est pas contourné
     undo_.clear(); // l'historique pouvait pointer vers les paramètres de l'ancien module
     ++revision_;
@@ -1379,20 +1379,45 @@ void NeptuneProcessor::uiSetInsert (StripKind kind, int index, int slot, const s
 class NeptuneProcessor::InsertHost : public ParamHost
 {
 public:
-    InsertHost (NeptuneProcessor& owner, std::shared_ptr<neptune::core::InsertInstance> inst) : owner_ (owner), inst_ (std::move (inst)) {}
+    InsertHost (NeptuneProcessor& owner, std::shared_ptr<neptune::core::InsertInstance> inst, StripKind kind, int index, int slot)
+        : owner_ (owner), inst_ (std::move (inst)), kind_ (kind), index_ (index), slot_ (slot) {}
 
     neptune::core::ParameterSet& parameters() override { return inst_->runner.params(); }
-    void uiBeginEdit (neptune::core::ParamId) override { owner_.undo_.beginGesture(); }
+    // Le geste passe aussi par la macro qui porte seule ce réglage : l'hôte enregistre l'automation (Write, Touch, Latch) comme pour tout paramètre.
+    void uiBeginEdit (neptune::core::ParamId id) override
+    {
+        if (auto* hp = owner_.hostParamForInsert (target (id))) hp->beginChangeGesture();
+        owner_.undo_.beginGesture();
+    }
     void uiSetNormalised (neptune::core::ParamId id, double n) override
     {
         auto& ps = parameters();
         const auto index = ps.indexOf (id);
         if (index == neptune::core::ParameterSet::npos) return;
         owner_.undo_.setParameter (ps, id, ps.spec (index).fromNormalized (n));
+        if (auto* hp = owner_.hostParamForInsert (target (id))) hp->setValueNotifyingHost (static_cast<float> (ps.getNormalizedAt (index)));
         ++owner_.revision_;
         owner_.notifyStateChanged();
     }
-    void uiEndEdit (neptune::core::ParamId) override { owner_.undo_.endGesture(); }
+    void uiEndEdit (neptune::core::ParamId id) override
+    {
+        owner_.undo_.endGesture();
+        if (auto* hp = owner_.hostParamForInsert (target (id))) hp->endChangeGesture();
+    }
+
+    // Réserve d'automation : les macros de Neptune sont les emplacements ; un réglage de cet effet s'y relie par clic droit (ReserveMenu.h).
+    int reserveCount() const override { return neptune::core::control::kMacros; }
+    bool reserveSupportsLock() const override { return false; }
+    bool reserveCanAssign (neptune::core::ParamId id) const override
+    {
+        const auto* spec = inst_->runner.params().find (id);
+        return spec != nullptr && ! spec->hidden && id != neptune::core::stock::bypass;   // le bypass d'un insert est celui de sa tranche (macro de la tranche)
+    }
+    int reserveSlotOf (neptune::core::ParamId id) const override { return owner_.insertParamMacro (target (id)); }
+    std::string reserveSlotName (int slot) const override { return owner_.reserveSlotName (slot); }
+    int uiReserveAssign (neptune::core::ParamId id, int slot, bool replace) override { return owner_.assignInsertParam (target (id), slot, replace); }
+    void uiReserveRelease (neptune::core::ParamId id) override { owner_.releaseInsertParam (target (id)); }
+    void uiReserveReleaseSlot (int slot) override { owner_.uiReserveReleaseSlot (slot); }
     void uiResetToDefault (neptune::core::ParamId id) override
     {
         auto& ps = parameters();
@@ -1415,8 +1440,11 @@ public:
     void setModalSize (neptune::core::uistate::Terminal t, neptune::core::uistate::Size s) override { owner_.setModalSize (t, s); }
 
 private:
+    neptune::core::control::Target target (neptune::core::ParamId id) const { return NeptuneProcessor::insertTarget (kind_, index_, slot_, inst_->type, id); }
     NeptuneProcessor& owner_;
     std::shared_ptr<neptune::core::InsertInstance> inst_;
+    StripKind kind_;
+    int index_, slot_;
 };
 
 NeptuneProcessor::InsertHandle NeptuneProcessor::openInsert (StripKind kind, int index, int slot)
@@ -1427,7 +1455,7 @@ NeptuneProcessor::InsertHandle NeptuneProcessor::openInsert (StripKind kind, int
         h.instance = insertInstances_[static_cast<std::size_t> (insertFlatIndex (kind, index))]
                                      [static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numInserts - 1, slot))];
     }
-    if (h.instance != nullptr) h.host = std::make_unique<InsertHost> (*this, h.instance);
+    if (h.instance != nullptr) h.host = std::make_unique<InsertHost> (*this, h.instance, kind, index, juce::jlimit (0, neptune::core::mixer::numInserts - 1, slot));
     return h;
 }
 
@@ -1908,7 +1936,7 @@ void NeptuneProcessor::adoptMixerFromState (const std::optional<neptune::core::M
                     const juce::ScopedLock lock (instrumentLock_);
                     insertInstances_[static_cast<std::size_t> (insertFlatIndex (kind, index))][static_cast<std::size_t> (s)] = inst;
                 }
-                engine_.setInsert (kind, index, s, inst);
+                setEngineInsert (kind, index, s, inst);
             }
         };
         for (int t = 0; t < mx::numTracks; ++t) build (StripKind::Track, t, m->tracks[static_cast<std::size_t> (t)].strip.inserts);
@@ -2013,7 +2041,7 @@ NeptuneProcessor::NeptuneProcessor()
         autosaveTimer_.startTimer (settings_.autosaveIntervalSeconds * 1000);
     }
 
-    control_.configure (neptune::core::control::Config {}, params_); // CC et OSC désactivés tant que l'utilisateur ne les active pas
+    control_.configure (neptune::core::control::Config {}, params_, controlResolver()); // CC et OSC désactivés tant que l'utilisateur ne les active pas
     controlTimer_.onTick = [this] { controlTick(); };
     controlTimer_.startTimer (33);
 }
@@ -2028,7 +2056,7 @@ NeptuneProcessor::~NeptuneProcessor()
 
 void NeptuneProcessor::uiSetControlConfig (neptune::core::control::Config c)
 {
-    control_.configure (c, params_);
+    control_.configure (c, params_, controlResolver());
     refreshMacroNames();
     notifyStateChanged();
 }
@@ -2049,7 +2077,7 @@ bool NeptuneProcessor::uiAssignOrganControllers()
     auto c = control_.config();
     // les assignations de cette piste d'orgue sont remplacées, celles des autres pistes et des autres cibles restent
     c.bindings.erase (std::remove_if (c.bindings.begin(), c.bindings.end(),
-                                      [track] (const control::Binding& b) { return ! b.target.isAction && organ::isOrganParam (b.target.param, track); }),
+                                      [track] (const control::Binding& b) { return b.target.isParam() && organ::isOrganParam (b.target.param, track); }),
                       c.bindings.end());
     for (auto& b : organ::organControlBindings (organDescription (track), track)) c.bindings.push_back (std::move (b));
     uiSetControlConfig (std::move (c));
@@ -2082,6 +2110,163 @@ int NeptuneProcessor::reserveSlotOf (neptune::core::ParamId id) const
     return m.empty() ? -1 : m.front();
 }
 
+void NeptuneProcessor::setEngineInsert (StripKind kind, int index, int slot, std::shared_ptr<const neptune::core::InsertInstance> inst)
+{
+    engine_.setInsert (kind, index, slot, std::move (inst));
+    insertEpoch_.fetch_add (1, std::memory_order_relaxed);   // la couche de contrôle relie à nouveau les réglages d'insert au prochain tic (controlTick), quand tout est en place
+}
+
+namespace
+{
+neptune::core::control::InsertStrip stripOf (neptune::core::StripKind kind) noexcept
+{
+    using neptune::core::StripKind;
+    switch (kind)
+    {
+        case StripKind::Track: return neptune::core::control::InsertStrip::Track;
+        case StripKind::Bus: return neptune::core::control::InsertStrip::Bus;
+        case StripKind::Parallel: return neptune::core::control::InsertStrip::Parallel;
+        default: return neptune::core::control::InsertStrip::Master;
+    }
+}
+neptune::core::StripKind kindOfStrip (int strip) noexcept
+{
+    using neptune::core::StripKind;
+    return strip == 0 ? StripKind::Track : strip == 1 ? StripKind::Bus : strip == 2 ? StripKind::Parallel : StripKind::Master;
+}
+} // namespace
+
+neptune::core::control::Target NeptuneProcessor::insertTarget (StripKind kind, int index, int slot, const std::string& type, neptune::core::ParamId param)
+{
+    neptune::core::control::Target t;
+    t.param = param;
+    t.insertStrip = static_cast<int> (stripOf (kind));
+    t.insertIndex = kind == StripKind::Master ? 0 : index;
+    t.insertSlot = slot;
+    t.insertType = type;
+    return t;
+}
+
+std::string NeptuneProcessor::insertKey (const neptune::core::control::Target& t)
+{
+    return std::to_string (t.insertStrip) + "/" + std::to_string (t.insertIndex) + "/" + std::to_string (t.insertSlot) + "/" + t.insertType + "/" + std::to_string (t.param);
+}
+
+std::shared_ptr<neptune::core::InsertInstance> NeptuneProcessor::insertInstanceFor (const neptune::core::control::Target& t) const
+{
+    if (! t.isInsert()) return nullptr;
+    namespace mx = neptune::core::mixer;
+    if (t.insertSlot < 0 || t.insertSlot >= mx::numInserts) return nullptr;
+    const juce::ScopedLock lock (instrumentLock_);
+    const auto& inst = insertInstances_[static_cast<std::size_t> (insertFlatIndex (kindOfStrip (t.insertStrip), t.insertIndex))][static_cast<std::size_t> (t.insertSlot)];
+    return inst != nullptr && inst->type == t.insertType ? inst : nullptr;   // un autre type de module sur cet emplacement : l'assignation n'agit pas
+}
+
+neptune::core::control::TargetResolver NeptuneProcessor::controlResolver()
+{
+    return [this] (const neptune::core::control::Target& t) -> neptune::core::control::ResolvedTarget
+    {
+        auto inst = insertInstanceFor (t);
+        if (inst == nullptr) return {};
+        auto* set = &inst->runner.params();
+        return { std::move (inst), set };
+    };
+}
+
+int NeptuneProcessor::insertParamMacro (const neptune::core::control::Target& t) const
+{
+    using namespace neptune::core::control;
+    for (const auto& b : control_.config().bindings)
+        if (b.source.kind == SourceKind::Macro && b.target == t) return b.source.number;
+    return -1;
+}
+
+int NeptuneProcessor::assignInsertParam (const neptune::core::control::Target& t, int macro, bool replace)
+{
+    using namespace neptune::core::control;
+    const auto inst = insertInstanceFor (t);
+    if (inst == nullptr) return -1;
+    const auto index = inst->runner.params().indexOf (t.param);
+    if (index == neptune::core::ParameterSet::npos || inst->runner.params().spec (index).hidden) return -1;
+    auto c = control_.config();
+    auto used = [&c] (int m) { for (const auto& b : c.bindings) if (b.source.kind == SourceKind::Macro && b.source.number == m) return true; return false; };
+    if (macro < 0)
+    {
+        for (int m = 0; m < kMacros && macro < 0; ++m) if (! used (m)) macro = m;
+        if (macro < 0) return -1;
+    }
+    if (macro >= kMacros) return -1;
+    if (used (macro) && ! replace)
+    {
+        bool onlyThis = true;
+        for (const auto& b : c.bindings) if (b.source.kind == SourceKind::Macro && b.source.number == macro && ! (b.target == t)) onlyThis = false;
+        if (! onlyThis) return -1;
+    }
+    // un réglage n'a qu'une macro ; reprendre une macro occupée la vide de ses anciennes cibles
+    c.bindings.erase (std::remove_if (c.bindings.begin(), c.bindings.end(), [&] (const Binding& b)
+                      { return b.source.kind == SourceKind::Macro && (b.source.number == macro || b.target == t); }), c.bindings.end());
+    Binding b;
+    b.source.kind = SourceKind::Macro;
+    b.source.number = macro;
+    b.target = t;
+    c.bindings.push_back (std::move (b));
+    // la macro prend la valeur du réglage (pas de saut) ; le prochain bloc la mémorise sans l'appliquer
+    const double n = inst->runner.params().getNormalizedAt (index);
+    const auto macroIndex = macroFirst_ + static_cast<std::size_t> (macro);
+    params_.setNormalizedAt (macroIndex, n);
+    macroResync_.store (true);
+    if (auto* hp = hostParam (macroIndex)) hp->setValueNotifyingHost (static_cast<float> (n));
+    uiSetControlConfig (std::move (c));
+    return macro;
+}
+
+void NeptuneProcessor::releaseInsertParam (const neptune::core::control::Target& t)
+{
+    using namespace neptune::core::control;
+    auto c = control_.config();
+    const auto before = c.bindings.size();
+    c.bindings.erase (std::remove_if (c.bindings.begin(), c.bindings.end(), [&] (const Binding& b) { return b.source.kind == SourceKind::Macro && b.target == t; }), c.bindings.end());
+    if (c.bindings.size() != before) uiSetControlConfig (std::move (c));
+}
+
+juce::AudioProcessorParameter* NeptuneProcessor::hostParamForInsert (const neptune::core::control::Target& t) const
+{
+    const auto it = singleInsertMacro_.find (insertKey (t));
+    return it == singleInsertMacro_.end() ? nullptr : hostParam (macroFirst_ + static_cast<std::size_t> (it->second));
+}
+
+// Après un changement d'insert (pose, retrait, remplacement, chargement) : les assignations dont l'insert a disparu ou a changé de type sont retirées, les autres sont
+// reliées au module actuel. Appelé par controlTick, une fois tout en place (jamais au milieu d'un chargement de projet).
+void NeptuneProcessor::reconcileInsertBindings()
+{
+    using namespace neptune::core::control;
+    auto c = control_.config();
+    int remaining = 0;
+    const int dropped = dropMissingInsertTargets (c, [this] (const Target& t) { return insertInstanceFor (t) != nullptr; }, &remaining);
+    hasInsertBindings_ = remaining > 0;
+    if (dropped > 0) { uiSetControlConfig (std::move (c)); return; }   // reconfigure et renomme
+    if (remaining > 0) { control_.configure (c, params_, controlResolver()); refreshMacroNames(); }
+}
+
+// Le nom d'une cible pour l'affichage : un réglage de Neptune, un réglage d'insert (« Piste 1 · insert 2 · Compresseur · Threshold ») ou une action.
+std::string NeptuneProcessor::describeTarget (const neptune::core::control::Target& t) const
+{
+    if (t.isAction) return "action";
+    if (! t.isInsert())
+    {
+        const auto* spec = params_.find (t.param);
+        return spec != nullptr ? spec->name : std::string ("?");
+    }
+    static const char* const strips[] = { "Piste ", "Bus ", "Parallèle ", "Master" };
+    const auto inst = insertInstanceFor (t);
+    const neptune::core::i18n::Translator tr (settings_.language);
+    std::string out = strips[t.insertStrip & 3];
+    if (t.insertStrip != 3) out += std::to_string (t.insertIndex + 1);
+    out += " - insert " + std::to_string (t.insertSlot + 1) + " " + (inst != nullptr ? std::string (tr.tr ("module." + t.insertType)) : t.insertType);
+    const auto* spec = inst != nullptr ? inst->runner.params().find (t.param) : nullptr;
+    return out + " - " + (spec != nullptr ? spec->name : std::string ("?"));
+}
+
 std::string NeptuneProcessor::reserveSlotName (int slot) const
 {
     using namespace neptune::core::control;
@@ -2091,8 +2276,7 @@ std::string NeptuneProcessor::reserveSlotName (int slot) const
     {
         if (b.source.kind != SourceKind::Macro || b.source.number != slot) continue;
         if (count++ > 0) continue;
-        const auto* spec = b.target.isAction ? nullptr : params_.find (b.target.param);
-        first = spec != nullptr ? spec->name : std::string ("action");
+        first = describeTarget (b.target);
     }
     if (count == 0) return {};
     return count > 1 ? first + " (+" + std::to_string (count - 1) + ")" : first;
@@ -2113,12 +2297,12 @@ int NeptuneProcessor::uiReserveAssign (neptune::core::ParamId id, int slot, bool
     if (used (slot) && ! replace)
     {
         bool onlyThis = true;
-        for (const auto& b : c.bindings) if (b.source.kind == SourceKind::Macro && b.source.number == slot && (b.target.isAction || b.target.param != id)) onlyThis = false;
+        for (const auto& b : c.bindings) if (b.source.kind == SourceKind::Macro && b.source.number == slot && ! (b.target.isParam() && b.target.param == id)) onlyThis = false;
         if (! onlyThis) return -1;
     }
     // un réglage n'a qu'une macro ; reprendre une macro occupée la vide de ses anciennes cibles
     c.bindings.erase (std::remove_if (c.bindings.begin(), c.bindings.end(), [&] (const Binding& b)
-                      { return b.source.kind == SourceKind::Macro && ((b.source.number == slot) || (! b.target.isAction && b.target.param == id)); }), c.bindings.end());
+                      { return b.source.kind == SourceKind::Macro && ((b.source.number == slot) || (b.target.isParam() && b.target.param == id)); }), c.bindings.end());
     Binding b;
     b.source.kind = SourceKind::Macro;
     b.source.number = slot;
@@ -2151,10 +2335,20 @@ void NeptuneProcessor::refreshMacroNames()
 {
     using namespace neptune::core::control;
     singleMacro_.clear();
+    singleInsertMacro_.clear();
     const auto cfg = control_.config();
+    hasInsertBindings_ = false;
     std::unordered_map<neptune::core::ParamId, std::vector<const Binding*>> byTarget;
     for (const auto& b : cfg.bindings)
-        if (b.source.kind == SourceKind::Macro && ! b.target.isAction) byTarget[b.target.param].push_back (&b);
+        if (b.source.kind == SourceKind::Macro && b.target.isParam()) byTarget[b.target.param].push_back (&b);
+    std::unordered_map<std::string, std::vector<const Binding*>> byInsertTarget;
+    for (const auto& b : cfg.bindings)
+        if (b.source.kind == SourceKind::Macro && b.target.isInsert()) { byInsertTarget[insertKey (b.target)].push_back (&b); hasInsertBindings_ = true; }
+    for (const auto& [key, list] : byInsertTarget)
+    {
+        const Binding& b = *list.front();
+        if (list.size() == 1 && b.lo == 0.0 && b.hi == 1.0 && b.curve == 1.0 && ! b.invert) singleInsertMacro_[key] = b.source.number;
+    }
     for (const auto& [id, list] : byTarget)
     {
         const Binding& b = *list.front();
@@ -2175,7 +2369,7 @@ std::vector<int> NeptuneProcessor::macrosOf (neptune::core::ParamId id) const
     using namespace neptune::core::control;
     std::vector<int> out;
     for (const auto& b : control_.config().bindings)
-        if (b.source.kind == SourceKind::Macro && ! b.target.isAction && b.target.param == id) out.push_back (b.source.number);
+        if (b.source.kind == SourceKind::Macro && b.target.isParam() && b.target.param == id) out.push_back (b.source.number);
     return out;
 }
 
@@ -2186,7 +2380,7 @@ void NeptuneProcessor::uiToggleMacro (neptune::core::ParamId id, int macro)
     auto c = control_.config();
     const auto before = c.bindings.size();
     c.bindings.erase (std::remove_if (c.bindings.begin(), c.bindings.end(), [&] (const Binding& b)
-                      { return b.source.kind == SourceKind::Macro && b.source.number == macro && ! b.target.isAction && b.target.param == id; }), c.bindings.end());
+                      { return b.source.kind == SourceKind::Macro && b.source.number == macro && b.target.isParam() && b.target.param == id; }), c.bindings.end());
     if (c.bindings.size() == before)
     {
         Binding b;
@@ -2203,7 +2397,7 @@ void NeptuneProcessor::uiClearMacros (neptune::core::ParamId id)
     using namespace neptune::core::control;
     auto c = control_.config();
     c.bindings.erase (std::remove_if (c.bindings.begin(), c.bindings.end(), [&] (const Binding& b)
-                      { return b.source.kind == SourceKind::Macro && ! b.target.isAction && b.target.param == id; }), c.bindings.end());
+                      { return b.source.kind == SourceKind::Macro && b.target.isParam() && b.target.param == id; }), c.bindings.end());
     uiSetControlConfig (std::move (c));
 }
 
@@ -2363,6 +2557,11 @@ void NeptuneProcessor::controlTick()
 {
     using neptune::core::control::Action;
     control_.collectGarbage();
+    if (const auto epoch = insertEpoch_.load (std::memory_order_relaxed); epoch != seenInsertEpoch_)
+    {
+        seenInsertEpoch_ = epoch;
+        if (hasInsertBindings_) reconcileInsertBindings();   // un insert a changé : les assignations qui le visent suivent ou disparaissent
+    }
     glideTick();
     if (++latencyTicks_ >= 6)   // environ 5 fois par seconde : le plan de compensation suit les inserts, le routage et le profil
     {
@@ -2553,8 +2752,9 @@ void NeptuneProcessor::restoreRecovered()
     {
         profile_.setLocked (result.profileLock);
         macroResync_.store (true);
-        control_.configure (result.controlJson.empty() ? neptune::core::control::Config {} : neptune::core::control::configFromJson (result.controlJson), params_);
-    refreshMacroNames();
+        control_.configure (result.controlJson.empty() ? neptune::core::control::Config {} : neptune::core::control::configFromJson (result.controlJson), params_, controlResolver());
+        refreshMacroNames();
+        insertEpoch_.fetch_add (1, std::memory_order_relaxed);   // les inserts du projet sont posés dans la foulée : les assignations qui les visent sont reliées (ou retirées) au prochain tic
         adoptMixerFromState (result.mixer);
     }
     autosave_->resolveRecovered();
@@ -2829,6 +3029,8 @@ bool NeptuneProcessor::uiLoadGlobalState (const std::string& stateText, std::str
     notifyHostOnSeed_ = false;
     adoptMixerFromState (result.mixer);
     notifyHostOnSeed_ = true;
+    refreshMacroNames();
+    insertEpoch_.fetch_add (1, std::memory_order_relaxed);   // les assignations qui visent des inserts sont reliées (ou retirées) au prochain tic, quand tout est en place
     updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
     notifyStateChanged();
     return true;
@@ -2851,7 +3053,7 @@ void NeptuneProcessor::setStateInformation (const void* data, int sizeInBytes)
     profile_.setLocked (result.profileLock); // avant adoptStateIdentity : la référence de l'autosave le contient
     // couche de contrôle : absente des projets d'avant (tout désactivé)
     macroResync_.store (true);
-    control_.configure (result.controlJson.empty() ? neptune::core::control::Config {} : neptune::core::control::configFromJson (result.controlJson), params_);
+    control_.configure (result.controlJson.empty() ? neptune::core::control::Config {} : neptune::core::control::configFromJson (result.controlJson), params_, controlResolver());
     notifyHostOnSeed_ = false; // le rescan ci-dessous prévient l'hôte des valeurs d'enveloppe recopiées depuis les descriptions
     adoptMixerFromState (result.mixer);
     notifyHostOnSeed_ = true;

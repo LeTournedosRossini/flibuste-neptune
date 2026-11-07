@@ -447,3 +447,155 @@ TEST_CASE ("control: relative mode and NRPN round trip in JSON, relative is limi
     Config c2; c2.bindings.push_back (out);
     CHECK (sanitised (c2).bindings.empty());
 }
+
+// ---- cibles d'insert : le réglage d'un effet posé sur une tranche, piloté par une macro, un CC ou OSC ----
+namespace
+{
+// Un « module » : son jeu de paramètres, gardé en vie par la table de recherche qui le vise.
+struct FakeModule
+{
+    ParameterSet set;
+    FakeModule()
+    {
+        REQUIRE (set.add (ParamSpec::continuous (kVolume, "Threshold", Unit::Decibel, -60.0, 0.0, -20.0)));
+    }
+};
+
+Target insertTarget (ParamId param, int strip = 0, int index = 0, int slot = 1, const char* type = "compressor")
+{
+    Target t;
+    t.param = param;
+    t.insertStrip = strip;
+    t.insertIndex = index;
+    t.insertSlot = slot;
+    t.insertType = type;
+    return t;
+}
+
+Binding macroToInsert (int macro, const Target& t)
+{
+    Binding b;
+    b.source.kind = SourceKind::Macro;
+    b.source.number = macro;
+    b.target = t;
+    return b;
+}
+} // namespace
+
+TEST_CASE ("control: an insert target is written to the module, not to the Neptune parameter with the same number", "[control][insert]")
+{
+    Rig r;   // Neptune a un paramètre kVolume (10) ; le module aussi (même numéro)
+    auto module = std::make_shared<FakeModule>();
+    const auto target = insertTarget (kVolume);
+    int resolved = 0;
+    Config c;
+    c.bindings = { macroToInsert (3, target) };
+    r.engine.configure (c, r.set, [&] (const Target& t) -> ResolvedTarget { ++resolved; return t == target ? ResolvedTarget { module, &module->set } : ResolvedTarget {}; });
+    CHECK (resolved == 1);
+    const double neptuneBefore = r.set.get (kVolume);
+    r.engine.macroChanged (3, 1.0, r.set);
+    CHECK (module->set.getNormalized (kVolume) == Approx (1.0));
+    CHECK (r.set.get (kVolume) == Approx (neptuneBefore));                 // le paramètre de Neptune n'a pas bougé
+    std::vector<std::size_t> changed;
+    CHECK (r.engine.drainChanges (changed) == 0);                          // rien à signaler à l'hôte pour un réglage d'insert
+    r.engine.macroChanged (3, 0.0, r.set);
+    CHECK (module->set.getNormalized (kVolume) == Approx (0.0));
+}
+
+TEST_CASE ("control: an unresolved insert target does nothing, and the module stays alive as long as the tables use it", "[control][insert]")
+{
+    Rig r;
+    const auto target = insertTarget (kVolume);
+    Config c;
+    c.bindings = { macroToInsert (0, target) };
+    // 1. aucun résolveur, ou résolveur qui ne trouve rien : l'assignation est gardée mais n'agit pas
+    r.engine.configure (c, r.set);
+    r.engine.macroChanged (0, 1.0, r.set);
+    CHECK (r.set.get (kVolume) == Approx (0.0));
+    r.engine.configure (c, r.set, [] (const Target&) { return ResolvedTarget {}; });
+    r.engine.macroChanged (0, 1.0, r.set);
+    CHECK (r.set.get (kVolume) == Approx (0.0));
+    CHECK (r.engine.config().bindings.size() == 1);
+    // 2. le module résolu est gardé en vie par les tables : le relâcher ailleurs ne laisse pas un pointeur pendant
+    std::weak_ptr<FakeModule> watch;
+    {
+        auto module = std::make_shared<FakeModule>();
+        watch = module;
+        r.engine.configure (c, r.set, [&] (const Target&) { return ResolvedTarget { module, &module->set }; });
+    }
+    CHECK_FALSE (watch.expired());
+    r.engine.macroChanged (0, 0.5, r.set);        // écrit dans le module encore en vie, sans accès invalide
+    r.engine.configure (c, r.set);                // nouvelle table : l'ancienne est rendue au thread de message
+    r.engine.macroChanged (0, 0.5, r.set);
+    r.engine.collectGarbage();
+    CHECK (watch.expired());                      // le module est libéré une fois les tables remplacées, sur ce thread
+}
+
+TEST_CASE ("control: insert targets round trip and a malformed one drops the whole assignment", "[control][insert]")
+{
+    Config c;
+    c.bindings = { macroToInsert (2, insertTarget (7, 1, 5, 3, "equalizer")), macroToInsert (4, insertTarget (9, 3, 0, 7, "delay")) };
+    c.bindings.push_back (cc (0, 7, kVolume));
+    const auto back = configFromJson (toJson (c));
+    REQUIRE (back.bindings.size() == 3);
+    CHECK (back == c);
+    CHECK (back.bindings[0].target.isInsert());
+    CHECK_FALSE (back.bindings[2].target.isInsert());
+    CHECK (back.bindings[2].target.isParam());
+    // cibles mal formées : l'assignation est écartée (jamais lue comme un paramètre de Neptune du même numéro)
+    const char* bad = R"({"bindings":[
+        {"source":{"type":"macro","index":1},"target":{"param":10,"insert":{"strip":"nope","index":0,"slot":0,"type":"compressor"}}},
+        {"source":{"type":"macro","index":1},"target":{"param":10,"insert":{"strip":"track","index":99,"slot":0,"type":"compressor"}}},
+        {"source":{"type":"macro","index":1},"target":{"param":10,"insert":{"strip":"track","index":0,"slot":8,"type":"compressor"}}},
+        {"source":{"type":"macro","index":1},"target":{"param":10,"insert":{"strip":"track","index":0,"slot":0,"type":""}}},
+        {"source":{"type":"macro","index":1},"target":{"param":10,"insert":"oups"}},
+        {"source":{"type":"macro","index":1},"target":{"param":10,"insert":{"strip":"master","index":0,"slot":2,"type":"limiter"}}}
+    ]})";
+    const auto s = configFromJson (bad);
+    REQUIRE (s.bindings.size() == 1);
+    CHECK (s.bindings[0].target.insertStrip == static_cast<int> (InsertStrip::Master));
+    CHECK (s.bindings[0].target.insertType == "limiter");
+}
+
+TEST_CASE ("control: a CC drives an insert parameter, with its range and curve", "[control][insert]")
+{
+    Rig r;
+    auto module = std::make_shared<FakeModule>();
+    const auto target = insertTarget (kVolume);
+    Binding b;
+    b.source.kind = SourceKind::CC;
+    b.source.channel = 0;
+    b.source.number = 21;
+    b.target = target;
+    b.lo = 0.2;
+    b.hi = 0.6;
+    Config c;
+    c.settings.ccEnabled = true;
+    c.bindings = { b };
+    r.engine.configure (c, r.set, [&] (const Target&) { return ResolvedTarget { module, &module->set }; });
+    r.engine.controlChange (0, 21, 127, r.set);
+    CHECK (module->set.getNormalized (kVolume) == Approx (0.6));
+    r.engine.controlChange (0, 21, 0, r.set);
+    CHECK (module->set.getNormalized (kVolume) == Approx (0.2));
+}
+
+TEST_CASE ("control: assignments to an insert that is gone are dropped, the others are kept", "[control][insert]")
+{
+    Config c;
+    c.bindings = { macroToInsert (0, insertTarget (7, 0, 0, 1, "compressor")),     // gardée : le compresseur est toujours là
+                   macroToInsert (1, insertTarget (7, 0, 0, 2, "compressor")),     // retirée : l'emplacement 2 est vide
+                   macroToInsert (2, insertTarget (7, 0, 0, 1, "equalizer")),      // retirée : un autre type de module sur l'emplacement 1
+                   cc (0, 7, kVolume) };                                            // un paramètre de Neptune : jamais touché
+    int remaining = 0;
+    const int dropped = dropMissingInsertTargets (c, [] (const Target& t) { return t.insertSlot == 1 && t.insertType == "compressor"; }, &remaining);
+    CHECK (dropped == 2);
+    CHECK (remaining == 1);
+    REQUIRE (c.bindings.size() == 2);
+    CHECK (c.bindings[0].source.number == 0);
+    CHECK (c.bindings[1].target.isParam());
+    // sans prédicat : toutes les cibles d'insert sont retirées, les autres restent
+    Config d;
+    d.bindings = { macroToInsert (0, insertTarget (7)), cc (0, 7, kVolume) };
+    CHECK (dropMissingInsertTargets (d, {}) == 1);
+    CHECK (d.bindings.size() == 1);
+}

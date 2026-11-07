@@ -104,6 +104,7 @@ public:
     void uiClearMacros (neptune::core::ParamId) override;
     // Réserve d'automation : en liste réduite, les macros sont les emplacements que voit l'hôte ; un réglage s'y relie par clic droit (ReserveMenu.h).
     int reserveCount() const override { return settings_.reducedHostList ? neptune::core::control::kMacros : 0; }
+    bool reserveSupportsLock() const override { return false; }
     bool reserveCanAssign (neptune::core::ParamId) const override;
     bool reserveDirect (neptune::core::ParamId) const override;
     int reserveSlotOf (neptune::core::ParamId) const override;
@@ -111,6 +112,16 @@ public:
     int uiReserveAssign (neptune::core::ParamId, int slot, bool replace) override;
     void uiReserveRelease (neptune::core::ParamId id) override { uiClearMacros (id); }
     void uiReserveReleaseSlot (int slot) override;
+    // Réglages des effets posés en insert : une macro peut les piloter (clic droit sur le potard d'un insert). Voir Control.h (Target::isInsert).
+    std::string describeTarget (const neptune::core::control::Target&) const;                       // « Piste 1 - insert 2 Compresseur - Threshold »
+    std::shared_ptr<neptune::core::InsertInstance> insertInstanceFor (const neptune::core::control::Target&) const;   // nul : emplacement vide ou d'un autre type
+    neptune::core::control::TargetResolver controlResolver();
+    static neptune::core::control::Target insertTarget (neptune::core::StripKind, int index, int slot, const std::string& type, neptune::core::ParamId param);
+    int insertParamMacro (const neptune::core::control::Target&) const;                                // macro qui pilote ce réglage d'insert, ou -1
+    int assignInsertParam (const neptune::core::control::Target&, int macro, bool replace);          // renvoie la macro utilisée, ou -1
+    void releaseInsertParam (const neptune::core::control::Target&);
+    juce::AudioProcessorParameter* hostParamForInsert (const neptune::core::control::Target&) const;   // macro de l'hôte qui porte seule ce réglage (gestes d'écriture d'automation)
+    void reconcileInsertBindings();   // thread de message : retire les assignations dont l'insert a disparu ou changé de type, relie les autres au module actuel
     void refreshMacroNames();   // le nom de chaque macro vu par l'hôte (« 3 · Volume piste 2 ») et la table réglage -> macro des gestes d'édition
     std::string uiText (std::string_view key) const override;
     int mixerZoomPercent() const { return settings_.mixerZoomPercent; }
@@ -534,6 +545,12 @@ private:
         const auto it = singleMacro_.find (id);
         return it == singleMacro_.end() ? nullptr : hostParam (macroFirst_ + static_cast<std::size_t> (it->second));
     }
+    std::unordered_map<std::string, int> singleInsertMacro_;           // clé de réglage d'insert -> macro, quand une seule macro le pilote en pleine course
+    static std::string insertKey (const neptune::core::control::Target&);
+    void setEngineInsert (StripKind, int index, int slot, std::shared_ptr<const neptune::core::InsertInstance>);   // engine_.setInsert + signale le changement à la couche de contrôle
+    std::atomic<std::uint32_t> insertEpoch_ { 0 };
+    std::uint32_t seenInsertEpoch_ = 0;
+    bool hasInsertBindings_ = false;                                   // thread de message
     std::unordered_map<neptune::core::ParamId, int> singleMacro_;   // réglage -> macro, quand une seule macro le pilote en pleine course (thread de message)
     juce::AudioProcessorParameter* hostParam (std::size_t index) const
     {

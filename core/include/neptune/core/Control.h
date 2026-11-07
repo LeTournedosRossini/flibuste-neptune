@@ -8,6 +8,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -54,13 +55,35 @@ struct Source
 
 std::string sourceLabel (const Source&);       // « CC 74 », « CC 74 ch 2 », « Macro 3 », « OSC /a/b » (indépendant de la langue)
 
+// Un réglage d'effet posé dans un emplacement d'insert (piste, bus, pistes parallèles ou Master) : `param` est alors l'identifiant du réglage DANS le module, et
+// `insertType` le type du module (« compressor », ...) : l'assignation n'agit que si l'emplacement contient bien un module de ce type, jamais sur un autre module
+// qui aurait les mêmes numéros de réglages.
+enum class InsertStrip { Track = 0, Bus = 1, Parallel = 2, Master = 3 };
 struct Target
 {
     bool isAction = false;
     ParamId param = 0;        // si ! isAction
     Action action = Action::None;
-    bool operator== (const Target& o) const noexcept { return isAction == o.isAction && param == o.param && action == o.action; }
+    int insertStrip = -1;     // -1 : un paramètre de Neptune ; sinon InsertStrip
+    int insertIndex = 0;      // piste, bus ou piste parallèle (0 pour le Master)
+    int insertSlot = 0;       // emplacement d'insert 0..7
+    std::string insertType;   // type du module visé
+    bool isInsert() const noexcept { return ! isAction && insertStrip >= 0; }
+    bool isParam() const noexcept { return ! isAction && insertStrip < 0; }   // un paramètre de Neptune (pas une action, pas un réglage d'insert)
+    bool operator== (const Target& o) const noexcept
+    {
+        return isAction == o.isAction && param == o.param && action == o.action && insertStrip == o.insertStrip && insertIndex == o.insertIndex && insertSlot == o.insertSlot
+            && insertType == o.insertType;
+    }
 };
+// Où se trouve le réglage visé par une cible d'insert (thread de message) : le jeu de paramètres du module et de quoi le garder en vie tant que les tables de recherche
+// qui l'utilisent existent (le module n'est ainsi jamais détruit sous les pieds du thread audio). Vide : l'emplacement est vide ou d'un autre type.
+struct ResolvedTarget
+{
+    std::shared_ptr<const void> keepAlive;
+    ParameterSet* set = nullptr;
+};
+using TargetResolver = std::function<ResolvedTarget (const Target&)>;
 
 // Pickup : le paramètre ne bouge que lorsque la source passe par sa valeur actuelle (pas de saut).
 // Relatifs (encodeurs sans fin, sources CC et paramètres seulement) : la valeur reçue est un incrément ajouté à la valeur du paramètre, 1/127 de la
@@ -108,6 +131,9 @@ struct Config
     bool operator== (const Config& o) const noexcept { return settings == o.settings && bindings == o.bindings; }
 };
 
+// Retire les assignations dont la cible d'insert n'existe plus (`exists` dit si le module visé est encore sur son emplacement, avec son type) ; les autres cibles ne sont pas
+// touchées. Renvoie le nombre d'assignations retirées ; `remaining` reçoit le nombre d'assignations d'insert gardées.
+int dropMissingInsertTargets (Config&, const std::function<bool (const Target&)>& exists, int* remaining = nullptr);
 Config sanitised (Config);                       // bornes, adresses valides, au plus kMaxBindings assignations
 std::string toJson (const Config&);              // UTF-8
 Config configFromJson (std::string_view text);   // lecture tolérante : un champ ou une assignation invalide est ignoré
@@ -126,7 +152,8 @@ public:
     // ---- thread de message ----
     // Construit les tables de recherche pour ce jeu de paramètres (taille fixe après la déclaration) et les remet à l'audio. Les
     // assignations qui visent un paramètre inconnu sont gardées dans la configuration mais n'agissent pas.
-    void configure (const Config&, const ParameterSet&);
+    // `resolve` : où trouver les réglages d'insert visés (sans lui, ces assignations n'agissent pas).
+    void configure (const Config&, const ParameterSet&, const TargetResolver& resolve = {});
     Config config() const;
     Settings settings() const;                   // les réglages seuls (léger : sans les assignations)
     void collectGarbage();                       // libère les tables remplacées

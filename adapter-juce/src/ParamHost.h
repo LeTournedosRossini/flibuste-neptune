@@ -32,6 +32,7 @@ public:
     virtual int reserveSlotOf (neptune::core::ParamId) const { return -1; }               // emplacement du réglage, ou -1
     virtual std::string reserveSlotName (int /*slot*/) const { return {}; }               // nom du réglage visé, vide si libre
     virtual bool reserveLocked (int /*slot*/) const { return false; }
+    virtual bool reserveSupportsLock() const { return true; }                             // faux : pas de verrou d'emplacement (Neptune)
     // Relie le réglage à `slot` (-1 : le premier libre). `replace` : l'emplacement occupé est repris. Renvoie l'emplacement utilisé, ou -1 si refusé.
     virtual int uiReserveAssign (neptune::core::ParamId, int /*slot*/, bool /*replace*/) { return -1; }
     virtual void uiReserveRelease (neptune::core::ParamId) {}
