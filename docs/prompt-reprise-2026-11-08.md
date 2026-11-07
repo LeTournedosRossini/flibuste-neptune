@@ -17,8 +17,14 @@ Tu reprends le travail sur la Flibuste Suite (Neptune : sampler / orgue / synth�
 - Notes de Neptune : à l'échantillon près (banc, 4 novembre → 7 novembre, Linux et Windows). Le « pic au début de note » du banc vient de 8 instances qui démarrent ensemble ; une instance coûte 0,10 à 0,17 ms (8 à 13 % à 64 échantillons). Décision de Jean : laisser. Outil de mesure du cœur : `neptune_bench_note_start`.
 - Où est quoi dans Neptune : panneau de contrôle = bouton **CC** de la barre du haut > « Gérer les assignations… » (CC MIDI, macros, OSC).
 
+## Ajouté dans la soirée du 7 novembre
+- **Réglages d'inserts de Neptune pilotables par les macros** : `control::Target` porte maintenant `insertStrip / insertIndex / insertSlot / insertType` (Control.h) ; `ControlEngine::configure (config, set, resolver)` résout le module (le module est gardé en vie par `ResolvedTarget::keepAlive` tant que les tables existent) ; côté adaptateur : `NeptuneProcessor::insertInstanceFor`, `assignInsertParam`, `reconcileInsertBindings` (appelé par `controlTick` quand `insertEpoch_` change : pose, retrait, remplacement, chargement d'état) ; `InsertHost` (éditeurs d'insert) implémente l'interface de réserve. **Piège** : tout code qui lit `binding.target.param` doit tester `target.isParam()` (jamais seulement `! isAction`).
+- Limite connue de Reaper : le nom d'une macro libérée reste affiché jusqu'à la réouverture du plugin.
+- Moteur : `Engine::enforceGlobalVoiceLimit` ne parcourt que les pistes actives et le moteur de leur type ; tests de la limite globale dans `tests/test_polyphony.cpp`.
+- Où poser des macros dans la liste de Reaper : liste réduite cochée (menu CC), 526 paramètres.
+
 ## Git
-Dernier commit poussé : `f2d241c`. Non poussés : `8660e97` (icônes), `bd2bded` (outil de mesure), `ac77e93` (Délai, Diapason, Neptune 526), et les commits de documentation de ce soir. CI : dernière exécution verte `42234923672` sur `d103b7c` (6 novembre) ; rien depuis.
+Dernier commit poussé : `5441fee`. Non poussés : `dd6b016` (chargement d'état : assignations d'insert reliées), `4818b9a` (second renommage), et les documents de ce soir. CI : dernière exécution verte `42234923672` sur `d103b7c` (6 novembre) ; une autre lancée le 7 novembre au soir sur `5441fee` (run `42411632795`) : résultat à lire.
 
 ## À faire, dans l'ordre conseillé
 1. Jean essaie Neptune, Délai et Diapason dans Reaper ; corriger ce qui casse.
