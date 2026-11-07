@@ -6,6 +6,11 @@ using namespace neptune::core;
 
 namespace
 {
+constexpr int kReserveSlots = 128;
+}
+
+namespace
+{
 constexpr const char* kFormat = "diapason-state";
 
 // Même dossier de configuration que Neptune : le thème, le contraste et la langue sont communs à toute la suite.
@@ -30,12 +35,22 @@ juce::AudioProcessor::BusesProperties DiapasonProcessor::makeBuses()
     return BusesProperties().withInput ("Input", juce::AudioChannelSet::stereo(), true).withOutput ("Output", juce::AudioChannelSet::stereo(), true);
 }
 
-DiapasonProcessor::DiapasonProcessor() : juce::AudioProcessor (makeBuses())
+DiapasonProcessor::DiapasonProcessor() : juce::AudioProcessor (makeBuses()),
+      reserve_ (kReserveSlots,
+                [this] (std::uint32_t, std::uint32_t, ParamId id) -> ParamReserve::Ref
+                {
+                    const auto i = engine_.params().indexOf (id);
+                    return i == ParameterSet::npos ? ParamReserve::Ref {} : ParamReserve::Ref { &engine_.params(), i };
+                },
+                [this] (const ParamReserve::Target& t)
+                {
+                    const auto* spec = engine_.params().find (t.param);
+                    return spec != nullptr ? spec->name : std::string();
+                })
 {
     jassert (engine_.ok());
-    auto& set = engine_.params();
-    for (std::size_t i = 0; i < set.size(); ++i)
-        addParameter (new NeptuneParameter (set, i, probe_)); // l'AudioProcessor en prend la propriété ; même ordre que le jeu
+    // L'hôte ne voit que les emplacements de la réserve : les réglages du module restent dans l'état du plugin.
+    reserve_.addHostParameters (*this, probe_);
     std::vector<std::string> warnings;
     settings_ = settings::loadFile (configDirectory() / "settings.json", &warnings);
     for (auto& s : modal_) s = {};
@@ -48,13 +63,18 @@ bool DiapasonProcessor::isBusesLayoutSupported (const BusesLayout& l) const
         && (in.isDisabled() || in == juce::AudioChannelSet::mono() || in == juce::AudioChannelSet::stereo());   // l'entrée sert à l'accordeur
 }
 
-void DiapasonProcessor::prepareToPlay (double sampleRate, int samplesPerBlock) { engine_.prepare (sampleRate, samplesPerBlock); }
+void DiapasonProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+{
+    engine_.prepare (sampleRate, samplesPerBlock);
+    startTimerHz (20);
+}
 
 void DiapasonProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
     const int n = buffer.getNumSamples();
     if (n <= 0 || buffer.getNumChannels() < 2) return;
+    reserve_.sync();   // les emplacements que l'hôte a bougés règlent leurs réglages avant le traitement
     // entrée audio pour l'accordeur : lue avant que le rendu n'écrase le tampon, et jamais renvoyée à la sortie
     if (const int nIn = getTotalNumInputChannels(); nIn >= 1)
         engine_.pushInput (buffer.getReadPointer (0), nIn >= 2 ? buffer.getReadPointer (1) : nullptr, n);
@@ -164,6 +184,7 @@ void DiapasonProcessor::getStateInformation (juce::MemoryBlock& dest)
     const auto& set = engine_.params();
     for (std::size_t i = 0; i < set.size(); ++i) params[std::to_string (set.spec (i).id)] = set.getAt (i);
     doc["parameters"] = std::move (params);
+    doc["reserve"] = reserve_.toJson();
     const auto text = doc.dump (2);
     dest.append (text.data(), text.size());
 }
@@ -186,6 +207,7 @@ void DiapasonProcessor::setStateInformation (const void* data, int size)
     }
     undo_.clear();
     engine_.reset();
+    reserve_.fromJson (*this, doc.contains ("reserve") ? doc["reserve"] : nlohmann::json::array());
     updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
 }
 
@@ -194,7 +216,7 @@ void DiapasonProcessor::uiBeginEdit (ParamId id)
 {
     const auto index = engine_.params().indexOf (id);
     if (index == ParameterSet::npos) return;
-    getParameters()[static_cast<int> (index)]->beginChangeGesture();
+    if (auto* hp = reserve_.hostParameterFor (*this, id)) hp->beginChangeGesture();
     undo_.beginGesture();
 }
 
@@ -204,7 +226,7 @@ void DiapasonProcessor::uiSetNormalised (ParamId id, double n)
     const auto index = set.indexOf (id);
     if (index == ParameterSet::npos) return;
     undo_.setParameter (set, id, set.spec (index).fromNormalized (n));
-    getParameters()[static_cast<int> (index)]->setValueNotifyingHost (static_cast<float> (set.getNormalizedAt (index)));
+    if (auto* hp = reserve_.hostParameterFor (*this, id)) hp->setValueNotifyingHost (static_cast<float> (set.getNormalizedAt (index)));
 }
 
 void DiapasonProcessor::uiEndEdit (ParamId id)
@@ -212,7 +234,7 @@ void DiapasonProcessor::uiEndEdit (ParamId id)
     const auto index = engine_.params().indexOf (id);
     if (index == ParameterSet::npos) return;
     undo_.endGesture();
-    getParameters()[static_cast<int> (index)]->endChangeGesture();
+    if (auto* hp = reserve_.hostParameterFor (*this, id)) hp->endChangeGesture();
 }
 
 void DiapasonProcessor::uiResetToDefault (ParamId id)
@@ -270,6 +292,7 @@ void DiapasonPluginEditor::buildContent()
     NovaDiapasonEditor::Options opt;
     opt.brand = true;
     opt.moduleName = "diapason";
+    opt.reserveOverlay = true;   // pastille AUTOMATION dans l\'en-tête
     opt.stretchAuto = true;   // fenêtre étirable en largeur
     opt.noPresets = true;
     opt.noAB = true;
@@ -295,3 +318,11 @@ void DiapasonPluginEditor::paint (juce::Graphics& g) { g.fillAll (juce::Colours:
 bool DiapasonPluginEditor::keyPressed (const juce::KeyPress& k) { return content_ != nullptr && content_->keyPressed (k); }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new DiapasonProcessor(); }
+
+bool DiapasonProcessor::reserveCanAssign (ParamId id) const
+{
+    const auto* spec = engine_.params().find (id);
+    return spec != nullptr && ! spec->hidden;
+}
+
+void DiapasonProcessor::timerCallback() { reserve_.notifyFollowed (*this); }

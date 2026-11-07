@@ -97,11 +97,11 @@ bool isBandOrMacroParam (ParamId id) noexcept
 {
     if (id >= kMacroBase && id < kMacroBase + static_cast<ParamId> (kMacros)) return true;
     if (id >= 1 && id <= 14) return true;                          // master
-    // pistes (1000 + 100.t), bus (3000 + 100.b), pistes parallèles (5000 + 100.p) : décalages 0..4 et 10..27 (volume... type, inserts, envois)
+    // pistes (1000 + 100.t), bus (3000 + 100.b), pistes parallèles (5000 + 100.p) : décalages 0..3 seulement (volume, pan, mute, solo). Les envois, les bypass
+    // d'inserts et le type de piste passent par les macros (clic droit : « Automatiser ce réglage »).
     const bool strip = (id >= 1000 && id < 2600) || (id >= 3000 && id < 4600) || (id >= 5000 && id < 8200);
     if (! strip) return false;
-    const auto off = id % 100;
-    return off <= 4 || (off >= 10 && off <= 27);
+    return id % 100 <= 3;
 }
 
 Config sanitised (Config c)

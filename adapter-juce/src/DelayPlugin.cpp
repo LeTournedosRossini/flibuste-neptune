@@ -7,6 +7,11 @@ using namespace neptune::core;
 
 namespace
 {
+constexpr int kReserveSlots = 128;
+}
+
+namespace
+{
 constexpr const char* kFormat = "delai-state";
 
 // Même dossier de configuration que Neptune : le thème, le contraste et la langue sont communs à toute la suite.
@@ -33,12 +38,22 @@ juce::AudioProcessor::BusesProperties DelayProcessor::makeBuses()
 }
 
 DelayProcessor::DelayProcessor()
-    : juce::AudioProcessor (makeBuses()), runner_ (std::make_unique<DelayModule>())
+    : juce::AudioProcessor (makeBuses()), runner_ (std::make_unique<DelayModule>()),
+      reserve_ (kReserveSlots,
+                [this] (std::uint32_t, std::uint32_t, ParamId id) -> ParamReserve::Ref
+                {
+                    const auto i = runner_.params().indexOf (id);
+                    return i == ParameterSet::npos ? ParamReserve::Ref {} : ParamReserve::Ref { &runner_.params(), i };
+                },
+                [this] (const ParamReserve::Target& t)
+                {
+                    const auto* spec = runner_.params().find (t.param);
+                    return spec != nullptr ? spec->name : std::string();
+                })
 {
     jassert (runner_.ok());
-    auto& set = runner_.params();
-    for (std::size_t i = 0; i < set.size(); ++i)
-        addParameter (new NeptuneParameter (set, i, probe_)); // l'AudioProcessor en prend la propriété ; même ordre que le jeu
+    // L'hôte ne voit que les emplacements de la réserve : les réglages du module restent dans l'état du plugin.
+    reserve_.addHostParameters (*this, probe_);
     std::vector<std::string> warnings;
     settings_ = settings::loadFile (configDirectory() / "settings.json", &warnings);
     for (auto& s : modal_) s = {};
@@ -49,7 +64,11 @@ bool DelayProcessor::isBusesLayoutSupported (const BusesLayout& l) const
     return l.getMainInputChannelSet() == juce::AudioChannelSet::stereo() && l.getMainOutputChannelSet() == juce::AudioChannelSet::stereo();
 }
 
-void DelayProcessor::prepareToPlay (double sampleRate, int samplesPerBlock) { runner_.prepare (sampleRate, samplesPerBlock); }
+void DelayProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+{
+    runner_.prepare (sampleRate, samplesPerBlock);
+    startTimerHz (20);
+}
 
 void DelayProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
@@ -60,6 +79,7 @@ void DelayProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
     if (auto* head = getPlayHead())
         if (const auto pos = head->getPosition())
             if (const auto bpm = pos->getBpm()) static_cast<DelayModule&> (runner_.module()).setTempo (*bpm);
+    reserve_.sync();   // les emplacements que l'hôte a bougés règlent leurs réglages avant le traitement
     runner_.process (buffer.getWritePointer (0), buffer.getWritePointer (1), n); // en place ; le bypass est le paramètre du plugin
 }
 
@@ -74,6 +94,7 @@ void DelayProcessor::getStateInformation (juce::MemoryBlock& dest)
     const auto& set = runner_.params();
     for (std::size_t i = 0; i < set.size(); ++i) params[std::to_string (set.spec (i).id)] = set.getAt (i);
     doc["parameters"] = std::move (params);
+    doc["reserve"] = reserve_.toJson();
     const auto text = doc.dump (2);
     dest.append (text.data(), text.size());
 }
@@ -96,6 +117,7 @@ void DelayProcessor::setStateInformation (const void* data, int size)
     }
     undo_.clear();
     runner_.reset();
+    reserve_.fromJson (*this, doc.contains ("reserve") ? doc["reserve"] : nlohmann::json::array());
     updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
 }
 
@@ -104,7 +126,7 @@ void DelayProcessor::uiBeginEdit (ParamId id)
 {
     const auto index = runner_.params().indexOf (id);
     if (index == ParameterSet::npos) return;
-    getParameters()[static_cast<int> (index)]->beginChangeGesture();
+    if (auto* hp = reserve_.hostParameterFor (*this, id)) hp->beginChangeGesture();
     undo_.beginGesture();
 }
 
@@ -114,7 +136,7 @@ void DelayProcessor::uiSetNormalised (ParamId id, double n)
     const auto index = set.indexOf (id);
     if (index == ParameterSet::npos) return;
     undo_.setParameter (set, id, set.spec (index).fromNormalized (n));
-    getParameters()[static_cast<int> (index)]->setValueNotifyingHost (static_cast<float> (set.getNormalizedAt (index)));
+    if (auto* hp = reserve_.hostParameterFor (*this, id)) hp->setValueNotifyingHost (static_cast<float> (set.getNormalizedAt (index)));
 }
 
 void DelayProcessor::uiEndEdit (ParamId id)
@@ -122,7 +144,7 @@ void DelayProcessor::uiEndEdit (ParamId id)
     const auto index = runner_.params().indexOf (id);
     if (index == ParameterSet::npos) return;
     undo_.endGesture();
-    getParameters()[static_cast<int> (index)]->endChangeGesture();
+    if (auto* hp = reserve_.hostParameterFor (*this, id)) hp->endChangeGesture();
 }
 
 void DelayProcessor::uiResetToDefault (ParamId id)
@@ -181,6 +203,7 @@ void DelayPluginEditor::buildContent()
     opt.brand = true;
     opt.hostTempo = true;
     opt.moduleName = "delay";
+    opt.reserveOverlay = true;   // pastille AUTOMATION dans l\'en-tête
     opt.stretchAuto = true;   // fenêtre étirable en largeur
     opt.sampleRate = [&p] { return p.getSampleRate() > 0.0 ? p.getSampleRate() : 48000.0; };
     opt.getSettings = [&p] { return p.settings(); };
@@ -202,3 +225,11 @@ void DelayPluginEditor::paint (juce::Graphics& g) { g.fillAll (juce::Colours::bl
 bool DelayPluginEditor::keyPressed (const juce::KeyPress& k) { return content_ != nullptr && content_->keyPressed (k); }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new DelayProcessor(); }
+
+bool DelayProcessor::reserveCanAssign (ParamId id) const
+{
+    const auto* spec = runner_.params().find (id);
+    return spec != nullptr && ! spec->hidden;
+}
+
+void DelayProcessor::timerCallback() { reserve_.notifyFollowed (*this); }

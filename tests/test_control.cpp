@@ -307,10 +307,12 @@ TEST_CASE ("control: the reduced host list keeps strips, master and macros only"
 {
     CHECK (isBandOrMacroParam (1));                  // volume du master
     CHECK (isBandOrMacroParam (1000));               // volume de la piste 1
-    CHECK (isBandOrMacroParam (1010 + 100 * 3));     // bypass d'insert 1 de la piste 4
-    CHECK (isBandOrMacroParam (1027));               // niveau d'envoi 8
+    CHECK_FALSE (isBandOrMacroParam (1010 + 100 * 3)); // bypass d'insert 1 de la piste 4 : par les macros
+    CHECK_FALSE (isBandOrMacroParam (1027));           // niveau d'envoi 8 : par les macros
+    CHECK (isBandOrMacroParam (1003 + 100 * 3));       // solo de la piste 4
+    CHECK_FALSE (isBandOrMacroParam (1004));           // type de piste
     CHECK (isBandOrMacroParam (3100));               // volume du bus 2
-    CHECK (isBandOrMacroParam (5004 + 100 * 31));    // dernière piste parallèle
+    CHECK (isBandOrMacroParam (5003 + 100 * 31));    // solo de la dernière piste parallèle
     CHECK (isBandOrMacroParam (macroParamId (10)));
     CHECK_FALSE (isBandOrMacroParam (100));          // gain du sampler (piste 1)
     CHECK_FALSE (isBandOrMacroParam (1030));         // paramètre d'instrument

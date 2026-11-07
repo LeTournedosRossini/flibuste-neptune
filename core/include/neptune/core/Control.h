@@ -28,7 +28,7 @@ constexpr int kMaxAddressLength = 128;
 constexpr ParamId kMacroBase = 13000;
 constexpr ParamId macroParamId (int index) noexcept { return kMacroBase + static_cast<ParamId> (index); }
 bool addMacroParams (ParameterSet&, std::string* error = nullptr);
-// Paramètres de « bande » (volume, pan, mute, solo, inserts, envois du master, des pistes, bus et pistes parallèles) et macros : ce que garde
+// Paramètres de « bande » (volume, pan, mute, solo du master, des pistes, bus et pistes parallèles ; trim, mono et bypass d'inserts du master) et macros : ce que garde
 // la liste réduite des paramètres visibles de l'hôte.
 bool isBandOrMacroParam (ParamId) noexcept;
 

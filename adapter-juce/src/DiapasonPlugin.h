@@ -9,6 +9,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include <vector>
 #include "HostProbe.h"
 #include "ParamHost.h"
+#include "ReserveHost.h"
 #include "NovaDiapasonEditor.h"
 #include "neptune/core/I18n.h"
 #include "neptune/core/Settings.h"
@@ -20,7 +21,8 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 // travail ; ici : les paramètres de l'hôte, les notes MIDI (découpe du bloc à chaque événement), la position de lecture et l'état.
 class DiapasonProcessor : public juce::AudioProcessor,
                           public clap_juce_extensions::clap_juce_audio_processor_capabilities,
-                          public ParamHost
+                          public ParamHost,
+                             private juce::Timer
 {
 public:
     DiapasonProcessor();
@@ -54,6 +56,16 @@ public:
     void uiResetToDefault (neptune::core::ParamId) override;
     bool uiUndo() override;
     bool uiRedo() override;
+    // Réserve d'automation : l'hôte ne voit que 128 emplacements ; un réglage s'y relie par clic droit (ReserveMenu.h) ou depuis la fenêtre AUTOMATION.
+    int reserveCount() const override { return reserve_.count(); }
+    bool reserveCanAssign (neptune::core::ParamId) const override;
+    int reserveSlotOf (neptune::core::ParamId id) const override { return reserve_.slotOf (id); }
+    std::string reserveSlotName (int slot) const override { return reserve_.slotName (slot); }
+    bool reserveLocked (int slot) const override { return reserve_.locked (slot); }
+    int uiReserveAssign (neptune::core::ParamId id, int slot, bool replace) override { return reserve_.assign (*this, id, slot, replace); }
+    void uiReserveRelease (neptune::core::ParamId id) override { if (const int k = reserve_.slotOf (id); k >= 0) reserve_.release (*this, k); }
+    void uiReserveReleaseSlot (int slot) override { reserve_.release (*this, slot); }
+    void uiReserveSetLocked (int slot, bool locked) override { reserve_.setLocked (*this, slot, locked); }
     neptune::core::uistate::Size modalSize (neptune::core::uistate::Terminal t) const override { return modal_[t == neptune::core::uistate::Terminal::Touch ? 1 : 0]; }
     void setModalSize (neptune::core::uistate::Terminal t, neptune::core::uistate::Size s) override { modal_[t == neptune::core::uistate::Terminal::Touch ? 1 : 0] = s; }
 
@@ -72,6 +84,8 @@ private:
 
     neptune::core::generator::GeneratorEngine engine_;
     HostProbe probe_;
+    ReserveHost reserve_;   // les seuls paramètres vus par l'hôte : 128 emplacements reliés aux réglages
+    void timerCallback() override;   // les réglages assignés qui ont bougé sans l'interface font suivre leur emplacement
     neptune::core::UndoManager undo_;
     neptune::core::settings::GlobalSettings settings_;
     neptune::core::uistate::Size modal_[2] {};
