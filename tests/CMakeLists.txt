@@ -16,6 +16,10 @@ catch_discover_tests(neptune_core_tests)
 add_executable(neptune_perf_callback perf_callback.cpp)
 target_link_libraries(neptune_perf_callback PRIVATE neptune_core)
 
+# Coût du bloc qui contient un début de note (hors ctest, voir le commentaire du fichier).
+add_executable(neptune_bench_note_start bench_note_start.cpp)
+target_link_libraries(neptune_bench_note_start PRIVATE neptune_core)
+
 # Tests WavPack : ils encodent un fichier avec libwavpack avant de le relire.
 if(NEPTUNE_WITH_WAVPACK)
   target_link_libraries(neptune_core_tests PRIVATE wavpack)
