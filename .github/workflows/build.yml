@@ -6,6 +6,12 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      os:
+        description: "Systèmes à compiler (Linux seulement coûte un tiers de la CI complète)"
+        type: choice
+        default: all
+        options: [all, Linux, Windows, macOS]
 
 jobs:
   build:
@@ -14,10 +20,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { name: Linux,   os: ubuntu-24.04 }
-          - { name: Windows, os: windows-latest }
-          - { name: macOS,   os: macos-latest }
+        # lancement manuel : un seul système au choix (entrée `os`) ; poussée, tag et pull request : les trois
+        include: ${{ fromJSON(github.event.inputs.os == 'Linux' && '[{"name":"Linux","os":"ubuntu-24.04"}]' || github.event.inputs.os == 'Windows' && '[{"name":"Windows","os":"windows-latest"}]' || github.event.inputs.os == 'macOS' && '[{"name":"macOS","os":"macos-latest"}]' || '[{"name":"Linux","os":"ubuntu-24.04"},{"name":"Windows","os":"windows-latest"},{"name":"macOS","os":"macos-latest"}]') }}
 
     steps:
       - uses: actions/checkout@v7
