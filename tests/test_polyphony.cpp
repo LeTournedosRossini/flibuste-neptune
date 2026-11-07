@@ -6,8 +6,11 @@
 #include <memory>
 #include <vector>
 
+#include "neptune/core/Engine.h"
 #include "neptune/core/InstrumentEdit.h"
+#include "neptune/core/Mixer.h"
 #include "neptune/core/SamplerVoices.h"
+#include "neptune/core/Synth.h"
 
 using namespace neptune::core;
 using Catch::Matchers::WithinAbs;
@@ -338,4 +341,65 @@ TEST_CASE ("edits of the file pool and of the replace option survive the undo hi
     CHECK (current == before);
     um.redo();
     CHECK (current == d);
+}
+
+// ---- limite globale de voix (Engine::enforceGlobalVoiceLimit) : une seule limite pour toutes les pistes ----
+namespace
+{
+struct GlobalRig
+{
+    Engine engine;
+    std::vector<std::vector<float>> storage;
+    std::vector<float*> chans;
+    int block = 64;
+    explicit GlobalRig (int limit)
+    {
+        engine.prepare (48000.0, block);
+        storage.assign (64, std::vector<float> (static_cast<std::size_t> (block), 0.0f));
+        for (auto& s : storage) chans.push_back (s.data());
+        neptune::core::mixer::MasterSettings m;
+        m.maxVoices = limit;
+        engine.setMasterSettings (m);
+        for (int t = 0; t < 2; ++t)
+        {
+            engine.setTrackType (t, neptune::core::TrackType::Synth);
+            engine.setTrackActive (t, true);
+            neptune::core::SynthDescription d;
+            d.maxVoices = 16;
+            engine.publishSynth (t, std::make_shared<neptune::core::SynthPatch> (d));
+        }
+        run (4);
+    }
+    void run (int blocks) { for (int i = 0; i < blocks; ++i) engine.process (chans.data(), static_cast<int> (chans.size()), block); }
+    int voices() { return engine.activeVoices (0) + engine.activeVoices (1); }
+};
+} // namespace
+
+TEST_CASE ("global voice limit: one limit shared by all tracks, the weakest voice goes first")
+{
+    GlobalRig r (4);
+    for (int k = 60; k < 63; ++k) r.engine.noteOnTrack (0, 0, k, 1.0f);   // 3 voix sur la piste 1
+    r.engine.noteOnTrack (1, 0, 72, 1.0f);                               // la 4e : sur la piste 2
+    r.run (8);
+    CHECK (r.voices() == 4);
+    r.engine.noteOnTrack (1, 0, 73, 1.0f);   // la 5e dépasse la limite : une voix est sacrifiée, où qu'elle soit
+    r.run (200);                             // le temps que la voix volée finisse son fondu
+    CHECK (r.voices() == 4);
+}
+
+TEST_CASE ("global voice limit: a deactivated track drops its voices and no longer counts against the limit")
+{
+    GlobalRig r (4);
+    for (int k = 60; k < 63; ++k) r.engine.noteOnTrack (0, 0, k, 1.0f);
+    r.run (8);
+    r.engine.setTrackActive (0, false);   // la piste 1 est désactivée : le moteur arrête ses voix au bloc suivant (donc plus rien à compter ni à sacrifier)
+    r.run (4);
+    CHECK (r.engine.activeVoices (0) == 0);
+    for (int k = 72; k < 76; ++k) r.engine.noteOnTrack (1, 0, k, 1.0f);   // quatre notes sur la piste 2 : exactement la limite, rien n'est volé
+    r.run (200);
+    CHECK (r.engine.activeVoices (1) == 4);   // aucune n'a été volée à cause des voix de la piste 1
+    r.engine.noteOnTrack (1, 0, 76, 1.0f);    // une de plus : une seule voix de la piste 2 est sacrifiée
+    r.run (200);
+    CHECK (r.engine.activeVoices (1) == 4);
+    CHECK (r.engine.activeVoices (0) == 0);
 }

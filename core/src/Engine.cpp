@@ -445,19 +445,30 @@ void Engine::noteOnTrack (int track, int channel, int key, float velocity) noexc
 void Engine::enforceGlobalVoiceLimit() noexcept
 {
     const int limit = globalMaxVoices_.load (std::memory_order_relaxed);
+    // Une piste compte (et peut être sacrifiée) par le moteur de son type, seulement si elle est active : parcourir les voix de toutes les pistes et des trois moteurs
+    // coûtait environ 10 µs à chaque note (mesuré par neptune_bench_note_start), davantage quand la mémoire cache est froide. Le décompte et le choix de la voix à
+    // sacrifier regardent les mêmes moteurs : sinon on volerait des voix qui ne sont pas comptées sans jamais passer sous la limite.
+    auto kindOf = [] (const Track& t) -> int
+    {
+        if (t.active.load (std::memory_order_relaxed) == 0) return -1;
+        switch (static_cast<TrackType> (t.type.load (std::memory_order_relaxed)))
+        {
+            case TrackType::Sampler: return 0;
+            case TrackType::Synth: return 1;
+            case TrackType::Fm: return 2;
+            default: return -1;   // orgue, entrée audio : pas de voix comptées
+        }
+    };
     for (int guard = 0; guard < 32; ++guard)
     {
         int total = 0;
-        // seules les pistes actives comptent, et pour chacune le moteur de son type : parcourir les voix de toutes les pistes et des trois moteurs coûtait environ
-        // 10 µs à chaque note (mesuré par neptune_bench_note_start), davantage quand la mémoire cache est froide
         for (const auto& t : tracks_)
         {
-            if (t.active.load (std::memory_order_relaxed) == 0) continue;
-            switch (static_cast<TrackType> (t.type.load (std::memory_order_relaxed)))
+            switch (kindOf (t))
             {
-                case TrackType::Synth: total += t.synth.soundingVoices(); break;
-                case TrackType::Fm: total += t.fm.soundingVoices(); break;
-                case TrackType::Sampler: total += t.voices.soundingVoices(); break;
+                case 0: total += t.voices.soundingVoices(); break;
+                case 1: total += t.synth.soundingVoices(); break;
+                case 2: total += t.fm.soundingVoices(); break;
                 default: break;
             }
         }
@@ -477,9 +488,13 @@ void Engine::enforceGlobalVoiceLimit() noexcept
         {
             const auto& t = tracks_[static_cast<std::size_t> (i)];
             bool rel; float level; std::uint64_t order;
-            if (t.voices.weakestVoice (rel, level, order)) consider (i, 0, rel, level, order);
-            if (t.synth.weakestVoice (rel, level, order)) consider (i, 1, rel, level, order);
-            if (t.fm.weakestVoice (rel, level, order)) consider (i, 2, rel, level, order);
+            switch (kindOf (t))
+            {
+                case 0: if (t.voices.weakestVoice (rel, level, order)) consider (i, 0, rel, level, order); break;
+                case 1: if (t.synth.weakestVoice (rel, level, order)) consider (i, 1, rel, level, order); break;
+                case 2: if (t.fm.weakestVoice (rel, level, order)) consider (i, 2, rel, level, order); break;
+                default: break;
+            }
         }
         if (bestTrack < 0) return;
         auto& t = tracks_[static_cast<std::size_t> (bestTrack)];
