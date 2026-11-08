@@ -383,6 +383,20 @@ private:
     }
 
     // Remplace l'accord `hm` par son accord d'approche quand le coup à `t` tombe juste avant un changement d'accord (voir ApproachParams).
+public:
+    // Pour l'aperçu : l'accord d'approche joué à l'instant `t` à la place de l'accord en cours ; faux s'il n'y en a pas.
+    bool approachAt (double t, Harmony& out) const
+    {
+        Harmony hm;
+        if (env_ == nullptr || ! env_->harmonyAt (t, hm)) return false;
+        const Harmony before = hm;
+        applyApproach (t, hm);
+        if (hm.rootPc == before.rootPc && hm.rel == before.rel) return false;
+        out = hm;
+        return true;
+    }
+
+private:
     void applyApproach (double t, Harmony& hm) const
     {
         if (approach_.kind == ApproachParams::Kind::Off || env_ == nullptr || hm.lengthBeats <= 0.0) return;

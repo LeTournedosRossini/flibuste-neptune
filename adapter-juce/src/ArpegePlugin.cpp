@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 using namespace neptune::core;
 namespace arp = neptune::core::arp;
@@ -182,6 +183,65 @@ arp::Params ArpegeProcessor::currentParams() const
     p.accentBoost = accentBoost->get();
     p.transpose = transpose->get();
     return p;
+}
+
+ArpegeProcessor::PreviewResult ArpegeProcessor::makePreview() const
+{
+    PreviewResult r;
+    if (source->getIndex() != 1)
+    {
+        r.problem = juce::String::fromUTF8 ("L'aperçu montre ce que joue Arpège avec la carte : choisissez « Source : Carte ».");
+        return r;
+    }
+    if (! reader_.connected())
+    {
+        r.problem = juce::String::fromUTF8 ("Carte n'est pas connectée : chargez le plugin Carte sur le même canal (le canal de Carte d'Arpège doit être le sien).");
+        return r;
+    }
+    arp::ChordMapEnvironment::Slots slots;
+    {
+        const juce::SpinLock::ScopedLockType l (slotLock_);
+        slots = slots_;
+    }
+    arp::ChordMapEnvironment env (reader_, slots);
+    pattern::Pattern pat;
+    arp::PreviewSettings s;
+    s.params = currentParams();
+    const int sl = slot->get();
+    if (sl > 0 && slots[static_cast<size_t> (sl) - 1] != nullptr)
+    {
+        pat = *slots[static_cast<size_t> (sl) - 1];
+        s.pattern = &pat;
+    }
+    const int am = absentMode->getIndex();
+    s.absent = am == 2 ? pattern::Absent::Scale : (am == 1 ? pattern::Absent::Play : pattern::Absent::Skip);
+    s.env = &env;
+    s.baseNote = 12 * (baseOctave->get() + 1);
+    s.ledVoices = ledVoices->get();
+    s.strum.mode = static_cast<arp::StrumParams::Mode> (strumMode->getIndex());
+    s.strum.delayMs = strumDelay->get();
+    s.approach.kind = static_cast<arp::ApproachParams::Kind> (approachMode->getIndex());
+    r.preview = arp::renderPreview (s);
+    if (r.preview.chords.empty()) r.problem = juce::String::fromUTF8 ("Aucun accord dans Carte : posez des accords sur sa piste d'accords.");
+    return r;
+}
+
+std::uint64_t ArpegeProcessor::previewKey() const
+{
+    std::uint64_t h = 1469598103934665603ull;
+    const auto mix = [&h] (std::uint64_t v) { h ^= v; h *= 1099511628211ull; };
+    for (auto* p : getParameters())
+        if (auto* r = dynamic_cast<juce::RangedAudioParameter*> (p))
+        {
+            const float v = r->getValue();
+            std::uint32_t bits = 0;
+            std::memcpy (&bits, &v, sizeof bits);
+            mix (bits);
+        }
+    mix (static_cast<std::uint64_t> (slotsVersion_.load()));
+    mix (reader_.sequence());
+    mix (reader_.connected() ? 1u : 0u);
+    return h;
 }
 
 bool ArpegeProcessor::slotUsed (int i) const
@@ -707,6 +767,209 @@ private:
     pattern::Pattern strokeBefore_;
 };
 
+// ================================================================================================ l'aperçu en partition
+
+// Ce qu'Arpège jouera quand on lance la lecture, en notation proportionnelle (l'axe du temps est régulier) sur une portée de sol et une de fa. Pour contrôler,
+// pas pour écrire : les notes sont posées à leur instant, avec un trait pour leur durée.
+class ArpegeEditor::ScoreView : public juce::Component
+{
+public:
+    explicit ScoreView (const nova::Skin& s) : skin_ (s) { setWantsKeyboardFocus (false); }
+
+    void setPreview (neptune::core::arp::Preview pv, juce::String problem)
+    {
+        pv_ = std::move (pv);
+        problem_ = std::move (problem);
+        repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        using T = theme::Token;
+        const auto area = getLocalBounds().toFloat();
+        skin_.fill (g, T::PanelBg, area, skin_.px (8.0f));
+        // l'écart entre deux lignes de portée suit la hauteur disponible (deux portées, lignes supplémentaires, noms d'accords)
+        const float sp = juce::jlimit (skin_.px (8.0f), skin_.px (17.0f), (static_cast<float> (getHeight()) - skin_.px (150.0f)) / 19.0f);
+        g.setFont (skin_.font (13.0f));
+        g.setColour (skin_.colour (T::TextDim));
+        const auto head = juce::Rectangle<int> (skin_.ipx (14.0f), skin_.ipx (6.0f), getWidth() - skin_.ipx (28.0f), skin_.ipx (22.0f));
+        if (! problem_.isEmpty())
+        {
+            g.drawFittedText (problem_, getLocalBounds().reduced (skin_.ipx (40.0f)), juce::Justification::centred, 3);
+            return;
+        }
+        juce::String info = juce::String::fromUTF8 ("Aperçu : ce qu'Arpège jouera à la lecture (Carte seule, sans notes tenues)  ·  ")
+                            + juce::String (static_cast<int> (pv_.notes.size())) + " notes  ·  "
+                            + juce::String (static_cast<int> (pv_.chords.size())) + " accords";
+        if (pv_.truncated) info << juce::String::fromUTF8 ("  ·  début seulement");
+        g.drawText (info, head, juce::Justification::centredLeft, true);
+
+        // géométrie
+        const float left = skin_.px (46.0f), right = skin_.px (14.0f);
+        const float top = skin_.px (78.0f) + 4.0f * sp;
+        const float nameY = top - 3.6f * sp - skin_.px (44.0f), approachY = nameY + skin_.px (22.0f);
+        const float trebleBottom = top + 4.0f * sp;
+        const float gap = 5.0f * sp;
+        const float bassBottom = trebleBottom + gap + 4.0f * sp;
+        const double span = std::max (1.0, pv_.end - pv_.start);
+        const float width = static_cast<float> (getWidth()) - left - right;
+        ppb_ = std::max (skin_.px (26.0f), width / static_cast<float> (span));
+        scrollMax_ = std::max (0.0f, static_cast<float> (span) * ppb_ - width);
+        scroll_ = juce::jlimit (0.0f, scrollMax_, scroll_);
+        const auto xOf = [&] (double t) { return left + static_cast<float> (t - pv_.start) * ppb_ - scroll_; };
+
+        g.saveState();
+        g.reduceClipRegion (juce::Rectangle<int> (static_cast<int> (left), 0, static_cast<int> (width), getHeight()));
+
+        // bandes des accords, nom au-dessus
+        for (size_t i = 0; i < pv_.chords.size(); ++i)
+        {
+            const auto& c = pv_.chords[i];
+            const float x0 = xOf (c.start), x1 = xOf (c.start + c.length);
+            if (x1 < left || x0 > left + width) continue;
+            if (i % 2 == 0)
+            {
+                g.setColour (skin_.colour (T::BgApp, 0.35f));
+                g.fillRect (x0, nameY, x1 - x0, bassBottom + skin_.px (30.0f) - nameY);
+            }
+            g.setColour (skin_.colour (T::TextDim, 0.5f));
+            g.drawVerticalLine (static_cast<int> (x0), nameY, bassBottom + skin_.px (30.0f));
+            g.setColour (skin_.colour (T::Text));
+            g.setFont (skin_.font (15.0f, true));
+            g.drawText (chordText (c.harmony), juce::Rectangle<float> (x0 + 3.0f, nameY, std::max (30.0f, x1 - x0), skin_.px (20.0f)).toNearestInt(), juce::Justification::centredLeft, false);
+            if (c.hasApproach)
+            {
+                const float ax = xOf (c.approachFrom);
+                g.setColour (skin_.colour (T::Pink));
+                g.setFont (skin_.font (12.0f, true));
+                g.drawText (juce::String::fromUTF8 ("approche ") + chordText (c.approach), juce::Rectangle<float> (ax + 3.0f, approachY, skin_.px (150.0f), skin_.px (18.0f)).toNearestInt(), juce::Justification::centredLeft, false);
+                g.drawVerticalLine (static_cast<int> (ax), approachY, bassBottom + skin_.px (30.0f));
+            }
+        }
+        // temps
+        g.setColour (skin_.colour (T::TextDim, 0.18f));
+        for (double t = std::ceil (pv_.start); t < pv_.end; t += 1.0)
+            g.drawVerticalLine (static_cast<int> (xOf (t)), top, bassBottom);
+
+        // portées
+        g.setColour (skin_.colour (T::TextDim));
+        for (int k = 0; k < 5; ++k)
+        {
+            g.drawHorizontalLine (static_cast<int> (trebleBottom - k * sp), left, left + width);
+            g.drawHorizontalLine (static_cast<int> (bassBottom - k * sp), left, left + width);
+        }
+
+        // notes
+        for (const auto& n : pv_.notes)
+        {
+            const float x0 = xOf (n.start), x1 = xOf (n.end);
+            if (x1 < left - 20.0f || x0 > left + width + 20.0f) continue;
+            const bool sharp = sharpFor (n.start);
+            int step = 0, acc = 0;
+            spell (n.note, sharp, step, acc);
+            const bool treble = n.note >= 60;
+            const float base = treble ? trebleBottom : bassBottom;
+            const int baseStep = treble ? 30 : 18;
+            const float y = base - static_cast<float> (step - baseStep) * sp * 0.5f;
+            const auto col = n.approach ? skin_.colour (T::Pink) : (n.bass ? skin_.colour (T::Accent) : skin_.colour (T::Text));
+            const float alpha = 0.45f + 0.55f * static_cast<float> (n.velocity) / 127.0f;
+            // lignes supplémentaires
+            g.setColour (skin_.colour (T::TextDim));
+            const int bottomLine = baseStep, topLine = baseStep + 8;
+            if (step < bottomLine)
+                for (int s = bottomLine - 2; s >= step; s -= 2) g.drawHorizontalLine (static_cast<int> (base - (s - baseStep) * sp * 0.5f), x0 - sp, x0 + sp * 1.4f);
+            if (step > topLine)
+                for (int s = topLine + 2; s <= step; s += 2) g.drawHorizontalLine (static_cast<int> (base - (s - baseStep) * sp * 0.5f), x0 - sp, x0 + sp * 1.4f);
+            if (treble && step < 30 && step >= 28) g.drawHorizontalLine (static_cast<int> (base - (28 - baseStep) * sp * 0.5f), x0 - sp, x0 + sp * 1.4f);
+            if (! treble && step > 26) for (int s = 28; s <= step; s += 2) g.drawHorizontalLine (static_cast<int> (base - (s - baseStep) * sp * 0.5f), x0 - sp, x0 + sp * 1.4f);
+            // durée
+            g.setColour (col.withAlpha (alpha * 0.45f));
+            g.fillRect (x0, y - 1.0f, std::max (2.0f, x1 - x0), 2.0f);
+            // tête
+            g.setColour (col.withAlpha (alpha));
+            g.fillEllipse (x0 - sp * 0.65f, y - sp * 0.5f, sp * 1.3f, sp);
+            if (acc != 0) drawAccidental (g, x0 - sp * 1.15f, y, sp, acc);
+        }
+        g.restoreState();
+
+        // clés (étiquettes) et accolade
+        g.setColour (skin_.colour (T::Text));
+        g.setFont (skin_.font (12.0f, true));
+        g.drawText ("Sol", juce::Rectangle<float> (skin_.px (6.0f), trebleBottom - 3.0f * sp, left - skin_.px (8.0f), 2.0f * sp).toNearestInt(), juce::Justification::centred, false);
+        g.drawText ("Fa", juce::Rectangle<float> (skin_.px (6.0f), bassBottom - 3.0f * sp, left - skin_.px (8.0f), 2.0f * sp).toNearestInt(), juce::Justification::centred, false);
+        g.setColour (skin_.colour (T::TextDim));
+        g.setFont (skin_.font (12.0f));
+        g.drawText (juce::String::fromUTF8 ("Rose : accord d'approche  ·  couleur d'accent : partie basse du motif  ·  plus c'est pâle, plus la vélocité est faible  ·  faites glisser pour défiler"),
+                    juce::Rectangle<int> (skin_.ipx (14.0f), getHeight() - skin_.ipx (24.0f), getWidth() - skin_.ipx (28.0f), skin_.ipx (18.0f)), juce::Justification::centredLeft, true);
+    }
+
+    void mouseDown (const juce::MouseEvent&) override { dragFrom_ = scroll_; }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        scroll_ = juce::jlimit (0.0f, scrollMax_, dragFrom_ - static_cast<float> (e.getDistanceFromDragStartX()));
+        repaint();
+    }
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w) override
+    {
+        scroll_ = juce::jlimit (0.0f, scrollMax_, scroll_ - (std::abs (w.deltaX) > std::abs (w.deltaY) ? w.deltaX : w.deltaY) * skin_.px (160.0f));
+        repaint();
+    }
+
+private:
+    // le nom de l'accord, écrit comme Carte l'écrit ; dièses pour les tonalités à dièses, bémols sinon
+    juce::String chordText (const neptune::core::arp::Harmony& h) const
+    {
+        neptune::core::chords::Chord c;
+        c.root = h.rootPc;
+        c.bass = h.bassPc;
+        c.rel = h.rel;
+        c.sharp = sharpRoot (h.rootPc);
+        return juce::String::fromUTF8 (neptune::core::chords::formatChord (c, neptune::core::chords::Naming::Letters).c_str());
+    }
+    static bool sharpRoot (int pc) { return pc == 7 || pc == 2 || pc == 9 || pc == 4 || pc == 11 || pc == 6; }
+    bool sharpFor (double t) const
+    {
+        for (const auto& c : pv_.chords)
+            if (t >= c.start && t < c.start + c.length)
+                return sharpRoot (c.hasApproach && t >= c.approachFrom ? c.approach.rootPc : c.harmony.rootPc);
+        return false;
+    }
+    // position sur la portée (degrés diatoniques depuis do-1) et altération (+1 dièse, -1 bémol)
+    static void spell (int midi, bool sharp, int& step, int& acc)
+    {
+        static const int letterSharp[12] = { 0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6 };
+        static const int accSharp[12] = { 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0 };
+        static const int letterFlat[12] = { 0, 1, 1, 2, 2, 3, 4, 4, 5, 5, 6, 6 };
+        static const int accFlat[12] = { 0, -1, 0, -1, 0, 0, -1, 0, -1, 0, -1, 0 };
+        const int pc = ((midi % 12) + 12) % 12, oct = midi / 12 - 1;
+        step = oct * 7 + (sharp ? letterSharp[pc] : letterFlat[pc]);
+        acc = sharp ? accSharp[pc] : accFlat[pc];
+    }
+    static void drawAccidental (juce::Graphics& g, float x, float y, float sp, int acc)
+    {
+        juce::Path p;
+        if (acc > 0)   // dièse : deux traits verticaux, deux obliques
+        {
+            p.addLineSegment ({ x - sp * 0.15f, y - sp * 0.8f, x - sp * 0.15f, y + sp * 0.8f }, 1.0f);
+            p.addLineSegment ({ x + sp * 0.2f, y - sp * 0.8f, x + sp * 0.2f, y + sp * 0.8f }, 1.0f);
+            p.addLineSegment ({ x - sp * 0.4f, y + sp * 0.15f, x + sp * 0.45f, y - sp * 0.15f }, 1.2f);
+            p.addLineSegment ({ x - sp * 0.4f, y + sp * 0.5f, x + sp * 0.45f, y + sp * 0.2f }, 1.2f);
+        }
+        else           // bémol : un trait et une panse
+        {
+            p.addLineSegment ({ x - sp * 0.1f, y - sp * 1.0f, x - sp * 0.1f, y + sp * 0.5f }, 1.0f);
+            p.startNewSubPath (x - sp * 0.1f, y + sp * 0.5f);
+            p.cubicTo (x + sp * 0.5f, y + sp * 0.2f, x + sp * 0.5f, y - sp * 0.35f, x - sp * 0.1f, y - sp * 0.05f);
+        }
+        g.strokePath (p, juce::PathStrokeType (1.1f));
+    }
+
+    const nova::Skin& skin_;
+    neptune::core::arp::Preview pv_;
+    juce::String problem_;
+    float ppb_ = 30.0f, scroll_ = 0.0f, scrollMax_ = 0.0f, dragFrom_ = 0.0f;
+};
+
 ArpegeEditor::ArpegeEditor (ArpegeProcessor& p)
     : juce::AudioProcessorEditor (p), proc_ (p), skin_ (makePalette (p.settings()), themeOf (p.settings()).knob, themeOf (p.settings()).id)
 {
@@ -738,9 +1001,11 @@ ArpegeEditor::ArpegeEditor (ArpegeProcessor& p)
 
     matrix_ = std::make_unique<MatrixView> (proc_, skin_);
     addAndMakeVisible (*matrix_);
+    score_ = std::make_unique<ScoreView> (skin_);
+    addChildComponent (*score_);
 
     // actions : 0 grille, 1 durée, 2 mesures, 3 fourni, 4 charger, 5 importer, 6 exporter, 7 effacer, 8 mode du motif
-    for (int i = 0; i < 16; ++i)
+    for (int i = 0; i < 17; ++i)
     {
         actions_.push_back (std::make_unique<nova::Pill> (skin_, nova::Pill::Look::Small));
         addAndMakeVisible (*actions_.back());
@@ -860,6 +1125,15 @@ ArpegeEditor::ArpegeEditor (ArpegeProcessor& p)
         matrix_->repaint();
         refreshActions();
     };
+    actions_[16]->onClick = [this]
+    {
+        showScore_ = ! showScore_;
+        matrix_->setVisible (! showScore_);
+        score_->setVisible (showScore_);
+        refreshScore (true);
+        refreshActions();
+        resized();
+    };
     actions_[9]->setText ("Annuler");
     actions_[9]->onClick = [this] { proc_.undo().undo(); matrix_->repaint(); refreshActions(); };
     actions_[10]->setText (juce::String::fromUTF8 ("Rétablir"));
@@ -934,6 +1208,7 @@ void ArpegeEditor::refreshActions()
         actions_[12]->setDim (! on || nAlts >= 7);
         for (int i : { 13, 14, 15 }) actions_[(size_t) i]->setDim (a < 0);
     }
+    actions_[16]->setText (showScore_ ? juce::String::fromUTF8 ("Vue : partition") : juce::String::fromUTF8 ("Vue : motif"));
     actions_[9]->setDim (! proc_.undo().canUndo());
     actions_[10]->setDim (! proc_.undo().canRedo());
 }
@@ -979,8 +1254,8 @@ void ArpegeEditor::resized()
         pills_[i]->setBounds (x[r], y0 + r * gap, px (w[i]), h);
         x[r] += px (w[i] + 8.0f);
     }
-    const float aw[] = { 160, 130, 100, 160, 90, 90, 90, 90, 170, 90, 100, 180, 120, 170, 150, 190 };   // rangée 3 : Source, Canal Carte, puis ces actions ; Annuler et Rétablir en fin de rangée 1 ; rangée 4 : variantes
-    const int aRow[] = { 2, 2, 2, 3, 3, 3, 3, 3, 2, 1, 1, 4, 4, 4, 4, 4 };
+    const float aw[] = { 160, 130, 100, 160, 90, 90, 90, 90, 170, 90, 100, 180, 120, 170, 150, 190, 160 };   // rangée 3 : Source, Canal Carte, puis ces actions ; Annuler et Rétablir en fin de rangée 1 ; rangée 4 : variantes
+    const int aRow[] = { 2, 2, 2, 3, 3, 3, 3, 3, 2, 1, 1, 4, 4, 4, 4, 4, 4 };
     for (size_t i = 0; i < actions_.size(); ++i)
     {
         const int r = aRow[i];
@@ -989,6 +1264,7 @@ void ArpegeEditor::resized()
     }
     const int my = y0 + 5 * gap + px (4.0f);
     matrix_->setBounds (px (16.0f), my, getWidth() - px (32.0f), getHeight() - my - px (40.0f));
+    score_->setBounds (matrix_->getBounds());
 }
 
 void ArpegeEditor::paint (juce::Graphics& g)
@@ -1021,8 +1297,19 @@ void ArpegeEditor::paint (juce::Graphics& g)
                 juce::Justification::centredLeft, true);
 }
 
+void ArpegeEditor::refreshScore (bool force)
+{
+    if (! showScore_) return;
+    const auto key = proc_.previewKey();
+    if (! force && key == scoreKey_) return;
+    scoreKey_ = key;
+    auto r = proc_.makePreview();
+    score_->setPreview (std::move (r.preview), r.problem);
+}
+
 void ArpegeEditor::timerCallback()
 {
+    refreshScore (false);
     for (auto& p : pills_) p->refresh();
     // les réglages qui ne servent pas au mode en cours sont grisés (ils restent réglables)
     const bool carteSrc = proc_.source->getIndex() == 1;

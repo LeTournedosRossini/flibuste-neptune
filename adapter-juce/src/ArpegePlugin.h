@@ -7,6 +7,7 @@
 #include <vector>
 #include "NovaKit.h"
 #include "neptune/core/Arpeggiator.h"
+#include "neptune/core/ArpeggioPreview.h"
 #include "neptune/core/ChordMapEnvironment.h"
 #include "neptune/core/ChordPattern.h"
 #include "neptune/core/ChordTimeline.h"
@@ -80,6 +81,11 @@ public:
     juce::String carteChordText() const;
     bool hostPlaying() const noexcept { return playing_.load(); }
 
+    // Aperçu (fil de messages) : rejoue Arpège hors ligne sur la carte et rend les notes qui seraient lues. `problem` non vide : pourquoi il n'y a rien à montrer.
+    struct PreviewResult { neptune::core::arp::Preview preview; juce::String problem; };
+    PreviewResult makePreview() const;
+    std::uint64_t previewKey() const;   // change quand une chose qui influe sur l'aperçu change (réglages, motifs, carte)
+
     static const std::array<double, 8>& rateBeats();
 
 private:
@@ -131,6 +137,7 @@ public:
 private:
     class ParamPill;
     class MatrixView;
+    class ScoreView;
     bool keyPressed (const juce::KeyPress&) override;
     void editSlot (const char* name, const std::function<void (neptune::core::pattern::Pattern&)>& edit);
     void timerCallback() override;
@@ -141,6 +148,10 @@ private:
     juce::ComponentBoundsConstrainer constrainer_;
     std::vector<std::unique_ptr<ParamPill>> pills_;
     std::unique_ptr<MatrixView> matrix_;
+    std::unique_ptr<ScoreView> score_;
+    bool showScore_ = false;
+    std::uint64_t scoreKey_ = 0;
+    void refreshScore (bool force);
     std::vector<std::unique_ptr<nova::Pill>> actions_;
     int fournis_ = 0, shownSlot_ = -2;
     std::unique_ptr<juce::FileChooser> chooser_;
