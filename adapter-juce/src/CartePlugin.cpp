@@ -364,6 +364,14 @@ public:
                 g.drawText (cols_[c].items[r], row.reduced (skin_.ipx (8.0f), 0), juce::Justification::centredLeft, true);
             }
             g.restoreState();
+            if (maxScroll (c) > 0.0f)   // repère de position quand la colonne défile
+            {
+                const float total = static_cast<float> (cols_[c].items.size()), shown = static_cast<float> (area.getHeight()) / static_cast<float> (rh);
+                const float h = std::max (static_cast<float> (skin_.ipx (18.0f)), static_cast<float> (area.getHeight()) * shown / total);
+                const float y = static_cast<float> (area.getY()) + (static_cast<float> (area.getHeight()) - h) * cols_[c].scrollRows / maxScroll (c);
+                g.setColour (skin_.colour (T::Accent, 0.55f));
+                g.fillRoundedRectangle (static_cast<float> (area.getRight() - skin_.ipx (5.0f)), y, static_cast<float> (skin_.ipx (3.0f)), h, 1.5f);
+            }
         }
     }
 
@@ -386,21 +394,41 @@ public:
         return false;
     }
 
+    // Un glissement vertical dans une colonne la fait défiler (doigt ou souris) ; un simple appui choisit la ligne, au relâchement.
     void mouseDown (const juce::MouseEvent& e) override
     {
+        dragCol_ = -1;
+        dragged_ = false;
         for (size_t c = 0; c < cols_.size(); ++c)
             if (columnRect (c).contains (e.getPosition()))
             {
-                const int row = static_cast<int> (std::floor (static_cast<float> (e.y - columnRect (c).getY()) / rowHeight() + cols_[c].scrollRows));
-                if (row >= 0 && row < cols_[c].items.size())
-                {
-                    cols_[c].selected = row;
-                    repaint();
-                    if (onChanged) onChanged();
-                }
+                dragCol_ = static_cast<int> (c);
+                dragStartScroll_ = cols_[c].scrollRows;
                 return;
             }
         if (! panelRect().contains (e.getPosition()) && onCancel) onCancel();
+    }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (dragCol_ < 0) return;
+        if (! dragged_ && std::abs (e.getDistanceFromDragStartY()) < skin_.ipx (6.0f)) return;
+        dragged_ = true;
+        auto& col = cols_[static_cast<size_t> (dragCol_)];
+        col.scrollRows = juce::jlimit (0.0f, maxScroll (static_cast<size_t> (dragCol_)), dragStartScroll_ - static_cast<float> (e.getDistanceFromDragStartY()) / static_cast<float> (rowHeight()));
+        repaint();
+    }
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        const int c = dragCol_;
+        dragCol_ = -1;
+        if (c < 0 || dragged_) return;
+        const int row = static_cast<int> (std::floor (static_cast<float> (e.y - columnRect (static_cast<size_t> (c)).getY()) / rowHeight() + cols_[static_cast<size_t> (c)].scrollRows));
+        if (row >= 0 && row < cols_[static_cast<size_t> (c)].items.size())
+        {
+            cols_[static_cast<size_t> (c)].selected = row;
+            repaint();
+            if (onChanged) onChanged();
+        }
     }
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
@@ -412,8 +440,7 @@ public:
         for (size_t c = 0; c < cols_.size(); ++c)
             if (columnRect (c).contains (e.getPosition()))
             {
-                const float maxScroll = std::max (0.0f, static_cast<float> (cols_[c].items.size()) - static_cast<float> (columnRect (c).getHeight()) / rowHeight());
-                cols_[c].scrollRows = juce::jlimit (0.0f, maxScroll, cols_[c].scrollRows - w.deltaY * 6.0f);
+                cols_[c].scrollRows = juce::jlimit (0.0f, maxScroll (c), cols_[c].scrollRows - w.deltaY * 6.0f);
                 repaint();
                 return;
             }
@@ -421,6 +448,7 @@ public:
 
 private:
     int rowHeight() const { return skin_.ipx (27.0f); }
+    float maxScroll (size_t c) const { return std::max (0.0f, static_cast<float> (cols_[c].items.size()) - static_cast<float> (columnRect (c).getHeight()) / rowHeight()); }
     juce::Rectangle<int> panelRect() const
     {
         const int w = std::min (getWidth() - skin_.ipx (30.0f), static_cast<int> (cols_.size()) * skin_.ipx (230.0f) + skin_.ipx (32.0f));
@@ -455,6 +483,9 @@ private:
     bool withText_;
     juce::TextEditor text_;
     nova::Pill ok_, cancel_, del_, extra_;
+    int dragCol_ = -1;
+    bool dragged_ = false;
+    float dragStartScroll_ = 0.0f;
 };
 
 // ================================================================================================ la timeline
