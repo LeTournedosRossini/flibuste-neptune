@@ -81,7 +81,7 @@ public:
     bool carteHasPatterns() const noexcept { return carteHasPatterns_.load(); }   // la voie des motifs de Carte a des éléments (et Carte est la source)
     juce::String carteChordText() const;
     bool hostPlaying() const noexcept { return playing_.load(); }
-    std::atomic<int> sectionsOpen { 0x1F };   // sections de l'éditeur dépliées (un bit par section) : gardé dans l'état
+    std::atomic<int> sectionsOpen { 0x01 };   // sections de l'éditeur dépliées (un bit par section) : gardé dans l'état ; par défaut seule « Source et Carte » est dépliée
 
     // Aperçu (fil de messages) : rejoue Arpège hors ligne sur la carte et rend les notes qui seraient lues. `problem` non vide : pourquoi il n'y a rien à montrer.
     struct PreviewResult { neptune::core::arp::Preview preview; juce::String problem; };
