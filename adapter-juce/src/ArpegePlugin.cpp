@@ -851,7 +851,7 @@ public:
         g.drawText (info, head, juce::Justification::centredLeft, true);
 
         // géométrie
-        const float left = skin_.px (46.0f), right = skin_.px (14.0f);
+        const float left = skin_.px (62.0f), right = skin_.px (14.0f);
         const float top = skin_.px (78.0f) + 4.0f * sp;
         const float nameY = top - 3.6f * sp - skin_.px (44.0f), approachY = nameY + skin_.px (22.0f);
         const float trebleBottom = top + 4.0f * sp;
@@ -933,16 +933,15 @@ public:
             g.fillRect (x0, y - 1.0f, std::max (2.0f, x1 - x0), 2.0f);
             // tête
             g.setColour (col.withAlpha (alpha));
-            g.fillEllipse (x0 - sp * 0.65f, y - sp * 0.5f, sp * 1.3f, sp);
+            g.fillEllipse (x0 - sp * 0.55f, y - sp * 0.4f, sp * 1.1f, sp * 0.8f);   // tête fine
             if (acc != 0) drawAccidental (g, x0 - sp * 1.15f, y, sp, acc);
         }
         g.restoreState();
 
         // clés (étiquettes) et accolade
         g.setColour (skin_.colour (T::Text));
-        g.setFont (skin_.font (12.0f, true));
-        g.drawText ("Sol", juce::Rectangle<float> (skin_.px (6.0f), trebleBottom - 3.0f * sp, left - skin_.px (8.0f), 2.0f * sp).toNearestInt(), juce::Justification::centred, false);
-        g.drawText ("Fa", juce::Rectangle<float> (skin_.px (6.0f), bassBottom - 3.0f * sp, left - skin_.px (8.0f), 2.0f * sp).toNearestInt(), juce::Justification::centred, false);
+        drawTrebleClef (g, left * 0.5f, trebleBottom - sp, sp);
+        drawBassClef (g, left * 0.5f, bassBottom - 3.0f * sp, sp);
         g.setColour (skin_.colour (T::TextDim));
         g.setFont (skin_.font (12.0f));
         g.drawText (juce::String::fromUTF8 ("Rose : accord d'approche  ·  couleur d'accent : partie basse du motif  ·  plus c'est pâle, plus la vélocité est faible  ·  faites glisser pour défiler"),
@@ -990,6 +989,31 @@ private:
         const int pc = ((midi % 12) + 12) % 12, oct = midi / 12 - 1;
         step = oct * 7 + (sharp ? letterSharp[pc] : letterFlat[pc]);
         acc = sharp ? accSharp[pc] : accFlat[pc];
+    }
+    // Clé de sol (esquisse) : `y0` est la ligne du sol, la deuxième depuis le bas
+    static void drawTrebleClef (juce::Graphics& g, float cx, float y0, float sp)
+    {
+        juce::Path p;
+        p.startNewSubPath (cx - 0.5f * sp, y0 + 1.7f * sp);                                                              // crochet du bas
+        p.cubicTo (cx - 0.5f * sp, y0 + 2.5f * sp, cx + 0.6f * sp, y0 + 2.5f * sp, cx + 0.6f * sp, y0 + 1.8f * sp);
+        p.lineTo (cx + 0.1f * sp, y0 - 3.0f * sp);                                                                       // la hampe, un peu penchée
+        p.cubicTo (cx + 0.1f * sp, y0 - 3.9f * sp, cx + 1.2f * sp, y0 - 3.6f * sp, cx + 1.0f * sp, y0 - 2.5f * sp);      // boucle du haut
+        p.cubicTo (cx + 0.8f * sp, y0 - 1.5f * sp, cx - 1.0f * sp, y0 - 1.0f * sp, cx - 1.0f * sp, y0 + 0.1f * sp);      // descend autour de la ligne du sol
+        p.cubicTo (cx - 1.0f * sp, y0 + 1.1f * sp, cx + 0.9f * sp, y0 + 1.1f * sp, cx + 0.9f * sp, y0 - 0.1f * sp);
+        p.cubicTo (cx + 0.9f * sp, y0 - 1.0f * sp, cx - 0.2f * sp, y0 - 1.1f * sp, cx - 0.4f * sp, y0 - 0.2f * sp);      // le rond autour du sol
+        g.strokePath (p, juce::PathStrokeType (juce::jmax (1.4f, sp * 0.16f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+    // Clé de fa (esquisse) : `yF` est la ligne du fa, la quatrième depuis le bas
+    static void drawBassClef (juce::Graphics& g, float cx, float yF, float sp)
+    {
+        g.fillEllipse (cx - 0.9f * sp, yF - 0.5f * sp, 1.0f * sp, 1.0f * sp);                                            // la tête
+        juce::Path p;
+        p.startNewSubPath (cx - 0.9f * sp, yF);
+        p.cubicTo (cx - 0.6f * sp, yF - 0.9f * sp, cx + 1.1f * sp, yF - 0.7f * sp, cx + 1.1f * sp, yF + 0.6f * sp);      // la courbe vers la droite
+        p.cubicTo (cx + 1.1f * sp, yF + 1.8f * sp, cx - 0.1f * sp, yF + 2.8f * sp, cx - 1.0f * sp, yF + 3.4f * sp);      // puis vers le bas
+        g.strokePath (p, juce::PathStrokeType (juce::jmax (1.4f, sp * 0.16f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.fillEllipse (cx + 1.35f * sp, yF - 0.85f * sp, 0.45f * sp, 0.45f * sp);                                        // les deux points
+        g.fillEllipse (cx + 1.35f * sp, yF + 0.4f * sp, 0.45f * sp, 0.45f * sp);
     }
     static void drawAccidental (juce::Graphics& g, float x, float y, float sp, int acc)
     {
