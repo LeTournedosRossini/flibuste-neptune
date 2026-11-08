@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "neptune/core/Intervals.h"
 #include "neptune/core/SharedChordMap.h"
 
 namespace neptune::core::chords
@@ -15,18 +16,24 @@ struct Chord
 {
     int root = 0;                       // 0..11, do = 0
     int bass = -1;                      // 0..11 ou -1 : pas de basse distincte
-    std::uint16_t rel = 0x091;          // notes relatives à la fondamentale, bit n = n demi-tons au-dessus (défaut : majeur 0-4-7)
+    std::uint32_t rel = 0x091;          // intervalles relatifs à la fondamentale SUR DEUX OCTAVES, bit n = n demi-tons (n de 0 à 23 ; une neuvième = 14, pas 2) ; défaut : majeur 0-4-7
     bool sharp = false;                 // écriture avec dièse (C# plutôt que Db) pour la fondamentale et la basse
 
     bool operator== (const Chord& o) const { return root == o.root && bass == o.bass && rel == o.rel && sharp == o.sharp; }
 };
 
+// Les écritures sont celles du dictionnaire de Scorsaire (« M7 », « o7 », « m7b5 »...) ; ses alias et ceux que Carte connaissait déjà (« maj7 », « dim », « Δ »...) sont lus aussi.
+// Une qualité hors du dictionnaire s'écrit avec ses intervalles en demi-tons : « C[0,4,7,13] » (relue à l'identique).
 // Lit « Dm7 », « C/E », « F#m7b5 », « Sib », « Do », « Ré mineur » n'est pas géré (voir la table des suffixes dans le .cpp). Faux si le texte n'est pas un accord.
 bool parseChord (const std::string& text, Chord& out);
 // Écrit l'accord ; texte UTF-8. En lettres, le résultat est relu à l'identique par parseChord.
 std::string formatChord (const Chord& c, Naming naming = Naming::Letters);
 // Les suffixes de qualité qu'on écrit (le premier de chaque famille ; « » = majeur), dans l'ordre de la table : pour le constructeur d'accords.
 const std::vector<std::string>& qualitySuffixes();
+// Intervalles (sur deux octaves) du dictionnaire pour un identifiant ou un alias ; faux si inconnu.
+bool qualityIntervals (const std::string& idOrAlias, std::uint32_t& rel);
+// Identifiant du dictionnaire de Scorsaire pour ces intervalles, ou le texte « [0,4,7,13] » s'ils n'y sont pas.
+std::string qualityId (std::uint32_t rel);
 // Les notes de l'accord comme masque de classes de hauteur absolues (do = 0), basse comprise.
 std::uint16_t absoluteMask (const Chord& c);
 // Idem sans la basse : les seules notes de l'accord (publié dans la carte partagée ; la basse y est un champ à part, pour que Am7/D ne compte pas le ré comme une note de l'accord).

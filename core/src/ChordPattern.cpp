@@ -550,7 +550,7 @@ void setNotesMode (Pattern& p, bool notes)
 namespace
 {
 // Degré (1..7) auquel appartient une note de l'accord à `semi` demi-tons de la fondamentale ; `rel` sert à départager 6, 8 et 9.
-int degreeOfInterval (int semi, std::uint16_t rel)
+int degreeOfInterval (int semi, std::uint32_t rel)
 {
     auto in = [&] (int s) { return ((rel >> s) & 1) != 0; };
     switch (semi)
@@ -569,7 +569,7 @@ int degreeOfInterval (int semi, std::uint16_t rel)
 }
 }
 
-int degreeSemitones (const Part& part, std::uint16_t rel, Absent absent, std::uint16_t scaleRel)
+int degreeSemitones (const Part& part, std::uint32_t rel, Absent absent, std::uint16_t scaleRel)
 {
     const int n = part.degree;
     if (part.signedDegree) return majorInterval (n) + part.accidental;
@@ -577,8 +577,8 @@ int degreeSemitones (const Part& part, std::uint16_t rel, Absent absent, std::ui
     const int base = (n - 1) % 7 + 1;
     for (int s = 0; s < 12; ++s)
         if (((rel >> s) & 1) != 0 && degreeOfInterval (s, rel) == base) return s + 12 * octaves;
-    // 9, 11, 13 : notes au-delà de l'octave de l'accord (bits 12..15 : 12 + k)
-    for (int s = 12; s < 16; ++s)
+    // 9, 11, 13 : notes au-delà de l'octave de l'accord (bits 12..23 : 12 + k). Une neuvième (14) n'est pas une seconde (2) : le degré 2 d'un accord de neuvième est absent.
+    for (int s = 12; s < kIntervalBits; ++s)
         if (((rel >> s) & 1) != 0 && degreeOfInterval (s - 12, rel) == base && octaves == 1) return s;
     if (absent == Absent::Scale && scaleRel != 0)   // la note de la gamme qui porte ce degré
         for (int s = 0; s < 12; ++s)
@@ -624,7 +624,7 @@ int resolvePart (const Part& part, const ChordContext& chord, Absent absent, int
             break;
         }
         case Part::Kind::Chord:
-            for (int s = 0; s < 12; ++s)
+            for (int s = 0; s < kIntervalBits; ++s)
                 if (((chord.rel >> s) & 1) != 0) put (chord.rootMidi + s);
             break;
         case Part::Kind::Degree:

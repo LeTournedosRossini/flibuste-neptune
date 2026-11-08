@@ -114,7 +114,7 @@ private:
     Ticker ticker_ { *this };
     std::atomic<int> carteState_ { -1 };
     std::atomic<bool> carteHasPatterns_ { false };
-    std::atomic<std::uint32_t> carteChord_ { 0 };   // racine | basse << 8 | rel << 16 ; 0 : aucun accord
+    std::atomic<std::uint64_t> carteChord_ { 0 };   // racine | basse << 8 | rel << 16 (rel sur 24 bits) ; 0 : aucun accord
     std::atomic<bool> playing_ { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ArpegeProcessor)

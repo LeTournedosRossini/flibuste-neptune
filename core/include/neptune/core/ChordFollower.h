@@ -87,7 +87,7 @@ private:
     {
         bool valid = false;
         int root = 0, bass = -1;
-        std::uint16_t rel = 0;
+        std::uint32_t rel = 0;
         bool operator== (const Key& o) const { return valid == o.valid && (! valid || (root == o.root && bass == o.bass && rel == o.rel)); }
     };
     struct Note { int channel = 0, note = 0; };
@@ -101,7 +101,7 @@ private:
             return;
         }
         const int root = baseNote_ + (((hm.rootPc - baseNote_) % 12) + 12) % 12;
-        for (int s = 0; s < 12; ++s)
+        for (int s = 0; s < kIntervalBits; ++s)
             if (((hm.rel >> s) & 1) != 0 && root + s <= 127 && soundingCount_ < (int) sounding_.size())
             {
                 sounding_[(size_t) soundingCount_++] = { chordChannel_, root + s };

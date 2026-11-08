@@ -424,11 +424,22 @@ json fractionOf (double beats)
     return json::array ({ n, d });
 }
 
-json intervalsOf (std::uint16_t rel)
+// Les intervalles d'un accord s'écrivent sur deux octaves (une neuvième = 14), comme chez Scorsaire.
+json intervalsOf (std::uint32_t rel, int bits = 12)
 {
     json a = json::array();
-    for (int i = 0; i < 12; ++i) if ((rel >> i) & 1u) a.push_back (i);
+    for (int i = 0; i < bits; ++i) if ((rel >> i) & 1u) a.push_back (i);
     return a;
+}
+
+// Intervalles d'une qualité d'accord du fichier : de 0 à 23 demi-tons ; au-delà, ramenés dans l'octave.
+std::uint32_t chordIntervalsFrom (const json& arr)
+{
+    std::uint32_t r = 0;
+    if (! arr.is_array()) return 0;
+    for (const auto& x : arr)
+        if (x.is_number_integer() && x.get<int>() >= 0) r |= 1u << (x.get<int>() < kIntervalBits ? x.get<int>() : x.get<int>() % 12);
+    return r;
 }
 
 // Une tonalité : `fifths` (de −7 à 7) et/ou `root` + `mode`. Si les deux sont là et d'accord, l'écriture de `root` est gardée ; sinon `fifths` fait foi
@@ -566,9 +577,9 @@ ImportResult importCommon (const std::string& text, double startBeats, bool cart
         return r;
     }
     // dictionnaire du fichier : il fait foi pour ce morceau
-    std::map<std::string, std::uint16_t> qualities;
+    std::map<std::string, std::uint32_t> qualities;
     if (j.contains ("qualities") && j["qualities"].is_object())
-        for (auto it = j["qualities"].begin(); it != j["qualities"].end(); ++it) qualities[it.key()] = relFromIntervals (it.value());
+        for (auto it = j["qualities"].begin(); it != j["qualities"].end(); ++it) qualities[it.key()] = chordIntervalsFrom (it.value());
 
     for (const auto& o : ms)
     {
@@ -607,7 +618,7 @@ ImportResult importCommon (const std::string& text, double startBeats, bool cart
             if (chords::parseChord (o["root"].get<std::string>() + q, parsed)) it.chord.rel = parsed.rel;
             else { it.chord.rel = 1; ++r.unknownQualities; }   // qualité inconnue : la fondamentale seule
         }
-        it.chord.rel = static_cast<std::uint16_t> (it.chord.rel | 1u);
+        it.chord.rel |= 1u;
         if (o.contains ("bass") && o["bass"].is_string())
         {
             int b = 0;
@@ -659,7 +670,7 @@ std::string exportCarteFile (const Score& s, const std::string& title, double st
         const auto root = noteText (it.chord.root, it.chord.sharp);
         const auto full = chords::formatChord (bare, chords::Naming::Letters);
         const auto suffix = full.compare (0, root.size(), root) == 0 ? full.substr (root.size()) : std::string();
-        if (! qualities.contains (suffix)) qualities[suffix] = intervalsOf (it.chord.rel);
+        if (! qualities.contains (suffix)) qualities[suffix] = intervalsOf (it.chord.rel, kIntervalBits);
         json o = { { "at", rel (it.start) }, { "dur", fractionOf (it.length) }, { "root", root }, { "quality", suffix } };
         o["bass"] = it.chord.bass >= 0 ? json (noteText (it.chord.bass, it.chord.sharp)) : json (nullptr);
         cs.push_back (std::move (o));

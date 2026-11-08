@@ -6,38 +6,21 @@
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
+#include <string>
 
 namespace neptune::core::chords
 {
 namespace
 {
-std::uint16_t maskOf (std::initializer_list<int> notes)
-{
-    std::uint16_t m = 0;
-    for (const int n : notes) m = static_cast<std::uint16_t> (m | (1u << (n % 12)));
-    return m;
-}
-
 struct Quality
 {
-    const char* suffix;     // premier suffixe d'une famille : celui qu'on écrit
-    std::uint16_t rel;
+    const char* suffix;     // identifiant du dictionnaire de Scorsaire : celui qu'on écrit (« » = majeur)
+    std::uint32_t rel;      // intervalles sur deux octaves
 };
 
-// Suffixes reconnus. Les synonymes sont dans `kAliases`.
+// Dictionnaire de qualités de Scorsaire (tools/gen_qualities.py).
 const Quality kQualities[] = {
-    { "", maskOf ({ 0, 4, 7 }) },        { "m", maskOf ({ 0, 3, 7 }) },        { "7", maskOf ({ 0, 4, 7, 10 }) },
-    { "maj7", maskOf ({ 0, 4, 7, 11 }) }, { "m7", maskOf ({ 0, 3, 7, 10 }) },  { "mMaj7", maskOf ({ 0, 3, 7, 11 }) },
-    { "dim", maskOf ({ 0, 3, 6 }) },     { "dim7", maskOf ({ 0, 3, 6, 9 }) },  { "m7b5", maskOf ({ 0, 3, 6, 10 }) },
-    { "aug", maskOf ({ 0, 4, 8 }) },     { "7#5", maskOf ({ 0, 4, 8, 10 }) },  { "sus2", maskOf ({ 0, 2, 7 }) },
-    { "sus4", maskOf ({ 0, 5, 7 }) },    { "7sus4", maskOf ({ 0, 5, 7, 10 }) }, { "6", maskOf ({ 0, 4, 7, 9 }) },
-    { "m6", maskOf ({ 0, 3, 7, 9 }) },   { "9", maskOf ({ 0, 4, 7, 10, 2 }) }, { "maj9", maskOf ({ 0, 4, 7, 11, 2 }) },
-    { "m9", maskOf ({ 0, 3, 7, 10, 2 }) }, { "add9", maskOf ({ 0, 4, 7, 2 }) }, { "madd9", maskOf ({ 0, 3, 7, 2 }) },
-    { "5", maskOf ({ 0, 7 }) },          { "7b9", maskOf ({ 0, 4, 7, 10, 1 }) }, { "7#9", maskOf ({ 0, 4, 7, 10, 3 }) },
-    // comparées au dictionnaire de Scorsaire (5 novembre 2026) : ces huit-là manquaient à Carte
-    { "11", maskOf ({ 0, 4, 7, 10, 2, 5 }) }, { "13", maskOf ({ 0, 4, 7, 10, 2, 5, 9 }) }, { "69", maskOf ({ 0, 4, 7, 9, 2 }) },
-    { "7#11", maskOf ({ 0, 4, 7, 10, 2, 6 }) }, { "7b5", maskOf ({ 0, 4, 6, 10 }) }, { "7b13", maskOf ({ 0, 4, 7, 10, 8 }) },
-    { "alt", maskOf ({ 0, 4, 6, 8, 10, 1, 3 }) },
+#include "QualityCatalog.inc"
 };
 
 struct Alias
@@ -46,15 +29,9 @@ struct Alias
     const char* canonical;
 };
 
+// Les alias de Scorsaire et ceux que Carte connaissait déjà (tools/gen_qualities.py).
 const Alias kAliases[] = {
-    { "maj", "" }, { "major", "" }, { "min", "m" }, { "mi", "m" }, { "-", "m" }, { "minor", "m" }, { "mineur", "m" }, { "majeur", "" },
-    { "M7", "maj7" }, { "ma7", "maj7" }, { "\xCE\x94", "maj7" }, { "\xCE\x94" "7", "maj7" }, { "\xE2\x96\xB3", "maj7" }, { "\xE2\x96\xB3" "7", "maj7" },
-    { "min7", "m7" }, { "-7", "m7" }, { "mM7", "mMaj7" }, { "m(maj7)", "mMaj7" }, { "min(maj7)", "mMaj7" },
-    { "o", "dim" }, { "\xC2\xB0", "dim" }, { "o7", "dim7" }, { "\xC2\xB0" "7", "dim7" },
-    { "\xC3\xB8", "m7b5" }, { "\xC3\xB8" "7", "m7b5" }, { "min7b5", "m7b5" }, { "m7-5", "m7b5" },
-    { "+", "aug" }, { "+7", "7#5" }, { "aug7", "7#5" }, { "sus", "sus4" }, { "min6", "m6" }, { "min9", "m9" }, { "maj9", "maj9" }, { "M9", "maj9" },
-    { "2", "add9" }, { "add2", "add9" }, { "(add9)", "add9" }, { "mi7", "m7" },
-    { "7sus", "7sus4" },
+#include "QualityAliases.inc"
 };
 
 bool isCollisionKey (const std::string& lower)
@@ -69,8 +46,32 @@ std::string lowered (const std::string& s)
     return r;
 }
 
-bool qualityFromSuffix (const std::string& suffix, std::uint16_t& rel)
+// « [0,4,7,13] » : des intervalles en demi-tons (de 0 à 23) ; la fondamentale est toujours là.
+bool customQuality (const std::string& s, std::uint32_t& rel)
 {
+    if (s.size() < 3 || s.front() != '[' || s.back() != ']') return false;
+    std::uint32_t r = 1u;
+    std::size_t i = 1;
+    bool any = false;
+    while (i + 1 < s.size())
+    {
+        std::size_t j = i;
+        int v = 0;
+        while (j + 1 < s.size() && std::isdigit (static_cast<unsigned char> (s[j]))) { v = v * 10 + (s[j] - '0'); if (v > 99) return false; ++j; }
+        if (j == i || v >= kIntervalBits) return false;
+        r |= 1u << v;
+        any = true;
+        i = j;
+        if (i + 1 < s.size()) { if (s[i] != ',') return false; ++i; }
+    }
+    if (! any) return false;
+    rel = r;
+    return true;
+}
+
+bool qualityFromSuffix (const std::string& suffix, std::uint32_t& rel)
+{
+    if (customQuality (suffix, rel)) return true;
     auto findCanonical = [&] (const std::string& s) -> bool {
         for (const auto& q : kQualities)
             if (s == q.suffix) { rel = q.rel; return true; }
@@ -165,26 +166,46 @@ bool parseChord (const std::string& textIn, Chord& out)
 
     const auto slash = text.find ('/', pos);
     const std::string suffix = text.substr (pos, slash == std::string::npos ? std::string::npos : slash - pos);
-    if (! qualityFromSuffix (suffix, c.rel)) return false;
-
-    if (slash != std::string::npos)
+    bool ok = qualityFromSuffix (suffix, c.rel);
+    if (ok && slash != std::string::npos)
     {
         std::size_t bp = slash + 1;
         int bass = 0;
         bool bsharp = false;
-        if (! readNote (text, bp, bass, bsharp) || bp != text.size()) return false;
-        if (bass != c.root) c.bass = bass;
-        if (bsharp) c.sharp = true;
+        ok = readNote (text, bp, bass, bsharp) && bp == text.size();
+        if (ok)
+        {
+            if (bass != c.root) c.bass = bass;
+            if (bsharp) c.sharp = true;
+        }
+    }
+    // « 6/9 » contient une barre : toute la fin du texte est peut-être la qualité (pas de basse)
+    if (! ok)
+    {
+        if (slash == std::string::npos || ! qualityFromSuffix (text.substr (pos), c.rel)) return false;
+        c.bass = -1;
+        c.sharp = sharp;
     }
     out = c;
     return true;
 }
 
+bool qualityIntervals (const std::string& idOrAlias, std::uint32_t& rel) { return qualityFromSuffix (idOrAlias, rel); }
+
+std::string qualityId (std::uint32_t rel)
+{
+    rel |= 1u;
+    for (const auto& q : kQualities)
+        if (q.rel == rel) return q.suffix;
+    std::string t = "[";
+    for (int n = 0; n < kIntervalBits; ++n)
+        if ((rel >> n) & 1u) t += (t.size() > 1 ? "," : "") + std::to_string (n);
+    return t + "]";
+}
+
 std::string formatChord (const Chord& c, Naming naming)
 {
-    std::string suffix = "?";
-    for (const auto& q : kQualities)
-        if (q.rel == c.rel) { suffix = q.suffix; break; }
+    const std::string suffix = qualityId (c.rel);
     std::string s = noteName (c.root, c.sharp, naming) + suffix;
     if (c.bass >= 0 && c.bass != c.root) s += "/" + noteName (c.bass, c.sharp, naming);
     return s;
@@ -193,7 +214,7 @@ std::string formatChord (const Chord& c, Naming naming)
 std::uint16_t chordMask (const Chord& c)
 {
     std::uint16_t m = 0;
-    for (int n = 0; n < 12; ++n)
+    for (int n = 0; n < kIntervalBits; ++n)
         if ((c.rel & (1u << n)) != 0) m = static_cast<std::uint16_t> (m | (1u << ((c.root + n) % 12)));
     return m;
 }
@@ -341,6 +362,7 @@ std::vector<chordmap::Container> toContainers (const std::vector<Item>& items)
         c.root = static_cast<std::uint8_t> (it.chord.root);
         c.bass = it.chord.bass >= 0 ? static_cast<std::uint8_t> (it.chord.bass) : static_cast<std::uint8_t> (255);
         c.pitchMask = chordMask (it.chord);
+        c.setIntervals (it.chord.rel & kIntervalMask);
         v.push_back (c);
     }
     return v;

@@ -23,7 +23,7 @@ Les champs `timeSignatures`, `measures`, `qualities` et `chords` sont **exacteme
   "unrolled": true,
   "timeSignatures": [ { "fromMeasure": 0, "ts": [4, 4] }, { "fromMeasure": 8, "ts": [3, 4] } ],
   "measures": [ { "at": [0, 1], "dur": [1, 1], "ts": [4, 4] } ],
-  "qualities": { "m7": [0, 3, 7, 10], "7": [0, 4, 7, 10], "maj7": [0, 4, 7, 11] },
+  "qualities": { "m7": [0, 3, 7, 10], "9": [0, 4, 7, 10, 14], "M7": [0, 4, 7, 11] },
   "chords": [ { "at": [0, 1], "dur": [1, 1], "root": "D", "quality": "m7", "bass": null } ],
   "scales": [ { "at": [0, 1], "dur": [2, 1], "root": "D", "scale": "dorian", "intervals": [0, 2, 3, 5, 7, 9, 10], "name": "Dorien" } ],
   "keys": [ { "at": [0, 1], "root": "C", "mode": "major", "fifths": 0 } ],
@@ -39,7 +39,14 @@ Toutes les voies sont **facultatives**. Une voie absente du fichier n'est pas to
 Comme `flibuste-accords`. Les mesures donnent la règle de Carte (anacrouse, changements de chiffrage). Si `measures` manque, Carte garde les siennes.
 
 ### `chords`
-Comme `flibuste-accords` : `root`, `quality` (identifiant de qualité), `bass` (ou `null`), et `nc: true` pour « pas d'accord » (un trou). `qualities` donne les intervalles de chaque identifiant ; **le dictionnaire du fichier fait foi pour ce morceau**. Carte l'écrit avec les suffixes qu'elle affiche (`m7`, `maj7`, `7`, `m7b5`...).
+Comme `flibuste-accords` : `root`, `quality` (identifiant de qualité), `bass` (ou `null`), et `nc: true` pour « pas d'accord » (un trou).
+
+**Un seul dictionnaire de qualités : celui de Scorsaire** (`docs/exemples-flibuste/scorsaire-chord-qualities.json` dans son dépôt, format `scorsaire-chord-qualities` version 3, 31 qualités). Carte l'embarque (`core/src/QualityCatalog.inc` et `QualityAliases.inc`, générés par `tools/gen_qualities.py`) :
+- Les identifiants qui voyagent dans `chords[].quality` sont ceux de Scorsaire (`M7`, `M9`, `o`, `o7`, `m7b5`, `69`, `7#11`, `add9`...). Ce que Carte **affiche** est ce même identifiant.
+- Les **intervalles s'écrivent sur deux octaves**, de 0 à 23 demi-tons : une neuvième est `14`, une seconde `2`, et `add9` (`[0,4,7,14]`) n'est pas `sus2` (`[0,2,7]`). Carte garde ces intervalles en interne (pour les degrés des motifs, la conduite de voix et le jeu des accords) : une neuvième sonne dans l'octave du dessus. Dans la carte partagée, les intervalles voyagent dans `Container::intervals()` (24 bits) en plus du masque d'une octave.
+- À la lecture, Carte accepte les identifiants, les alias de Scorsaire (`maj7`, `mM7`, `m(maj7)`, `+7`, `aug7`, `6/9`, `7sus`, `°7`, `ø7`...) et les écritures que Carte connaissait déjà (`dim`, `Δ`, `△`, `min7`, `m7-5`...). `2` et `add2` ne sont plus acceptés (une seconde ajoutée n'est pas une neuvième ajoutée).
+- `qualities` donne les intervalles de chaque identifiant utilisé ; **le dictionnaire du fichier fait foi pour ce morceau**.
+- **Qualité libre** : un identifiant inconnu de Carte mais présent dans `qualities` avec ses intervalles est joué avec ces intervalles et s'affiche `C[0,4,7,13]` ; sans intervalles, seule la fondamentale est gardée (comptée comme « qualité inconnue »). Dans Carte, on peut écrire soi-même les degrés d'un accord : taper `C[0,4,7,14]` dans le champ d'accord (demi-tons depuis la fondamentale, de 0 à 23). Une qualité libre s'écrit à l'export avec ce texte comme identifiant.
 
 ### `scales` : une gamme placée sur un tronçon
 C'est le parallèle avec les gammes de Scorsaire (« écrire une gamme à partir de la mesure N, sur n mesures »).

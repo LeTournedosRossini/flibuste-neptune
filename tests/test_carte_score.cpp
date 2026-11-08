@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 
 #include "neptune/core/CarteScore.h"
+#include "neptune/core/ChordPattern.h"
 
 using namespace neptune::core;
 using namespace neptune::core::carte;
@@ -557,4 +558,152 @@ TEST_CASE ("carte exchange: keys carry fifths, and fifths alone is enough on imp
     CHECK (r.score.keys.empty());
     CHECK (r.skipped == 1);
     CHECK (r.score.globalKey.root == 7);
+}
+
+TEST_CASE ("carte qualities: Scorsaire's dictionary is the reference, on two octaves", "[carte][exchange]")
+{
+    using namespace neptune::core;
+    CHECK (chords::qualitySuffixes().size() == 31);
+    chords::Chord c;
+    // les identifiants de Scorsaire s'écrivent et se relisent
+    for (const char* t : { "CM7", "Do9", "Bo7", "Fo", "GM9", "Am7b5", "D7#11", "E69", "Cadd9", "Cmadd9", "C7#5", "C13", "Calt" })
+    {
+        REQUIRE (chords::parseChord (t, c));
+        CHECK (chords::parseChord (chords::formatChord (c), c));
+    }
+    REQUIRE (chords::parseChord ("Cmaj7", c));
+    CHECK (chords::formatChord (c) == "CM7");   // l'écriture affichée est l'identifiant de Scorsaire
+    // alias de Scorsaire et de Carte
+    for (const char* t : { "C\xCE\x94", "Cmaj7", "CM7", "C\xE2\x96\xB3" "7" })
+    {
+        chords::Chord x;
+        REQUIRE (chords::parseChord (t, x));
+        CHECK (x.rel == 0x891);
+    }
+    REQUIRE (chords::parseChord ("Cdim", c));
+    CHECK (chords::formatChord (c) == "Co");
+    REQUIRE (chords::parseChord ("Cdim7", c));
+    CHECK (chords::formatChord (c) == "Co7");
+    REQUIRE (chords::parseChord ("C6/9", c));
+    CHECK (chords::formatChord (c) == "C69");
+    REQUIRE (chords::parseChord ("Cm(maj7)", c));
+    CHECK (chords::formatChord (c) == "CmMaj7");
+    // une seconde ajoutée n'est pas une neuvième ajoutée
+    CHECK (! chords::parseChord ("Cadd2", c));
+    CHECK (! chords::parseChord ("C2", c));
+    // deux octaves : la neuvième est à 14 demi-tons, la seconde à 2
+    chords::Chord nine, sus2, add9;
+    REQUIRE (chords::parseChord ("C9", nine));
+    REQUIRE (chords::parseChord ("Csus2", sus2));
+    REQUIRE (chords::parseChord ("Cadd9", add9));
+    CHECK ((nine.rel & (1u << 14)) != 0);
+    CHECK ((nine.rel & (1u << 2)) == 0);
+    CHECK ((sus2.rel & (1u << 2)) != 0);
+    CHECK ((add9.rel & (1u << 14)) != 0);
+    CHECK (add9.rel != sus2.rel);
+    CHECK (chords::chordMask (nine) == (1u << 0 | 1u << 4 | 1u << 7 | 1u << 10 | 1u << 2));   // classes de hauteur : la neuvième est un ré
+    // une qualité hors dictionnaire s'écrit avec ses intervalles, et se relit à l'identique
+    chords::Chord free;
+    REQUIRE (chords::parseChord ("C[0,4,7,13,20]", free));
+    CHECK (free.rel == (1u | 1u << 4 | 1u << 7 | 1u << 13 | 1u << 20));
+    CHECK (chords::formatChord (free) == "C[0,4,7,13,20]");
+    CHECK (! chords::parseChord ("C[0,4,99]", c));
+    CHECK (! chords::parseChord ("C[]", c));
+    REQUIRE (chords::parseChord ("D[0,3,7]/F", c));
+    CHECK (c.rel == 0x089);
+    CHECK (c.bass == 5);
+    CHECK (chords::formatChord (c) == "Dm/F");   // ces intervalles sont ceux de « m » : l'identifiant du dictionnaire est préféré
+}
+
+TEST_CASE ("carte qualities: the shared map carries the two octaves, and old writers still work", "[carte][exchange]")
+{
+    using namespace neptune::core;
+    chords::Item it;
+    it.start = 0.0;
+    it.length = 4.0;
+    REQUIRE (chords::parseChord ("G13", it.chord));
+    const auto v = chords::toContainers ({ it });
+    REQUIRE (v.size() == 1);
+    CHECK (v[0].intervals() == it.chord.rel);
+    CHECK (v[0].pitchMask == chords::chordMask (it.chord));
+    // l'écrivain d'avant (intervalles à 0) : seul le masque d'une octave sert
+    chordmap::Container old = v[0];
+    old.setIntervals (0);
+    CHECK (old.intervals() == 0);
+    // via le lecteur, un accord de neuvième garde sa neuvième
+    chordmap::Writer w ("qual-test");
+    chordmap::Reader r ("qual-test");
+    REQUIRE (w.open (3) == chordmap::Status::Ok);
+    w.publish (v);
+    r.setChannel (3);
+    r.poll();
+    chordmap::Container got;
+    REQUIRE (r.lookup (1.0, chordmap::Kind::Chord, got));
+    CHECK (got.intervals() == it.chord.rel);
+    CHECK ((got.intervals() & (1u << 14)) != 0);
+}
+
+TEST_CASE ("carte qualities: pattern degrees tell a ninth from a second", "[carte][exchange]")
+{
+    using namespace neptune::core;
+    chords::Chord nine, sus2;
+    REQUIRE (chords::parseChord ("C9", nine));
+    REQUIRE (chords::parseChord ("Csus2", sus2));
+    pattern::Part ninth, second;
+    REQUIRE (pattern::parsePart ("9", ninth));
+    REQUIRE (pattern::parsePart ("2", second));
+    CHECK (pattern::degreeSemitones (ninth, nine.rel, pattern::Absent::Skip) == 14);
+    CHECK (pattern::degreeSemitones (second, nine.rel, pattern::Absent::Skip) == -1);   // un accord de neuvième n'a pas de seconde
+    CHECK (pattern::degreeSemitones (second, sus2.rel, pattern::Absent::Skip) == 2);
+    CHECK (pattern::degreeSemitones (ninth, sus2.rel, pattern::Absent::Skip) == 14);
+    pattern::ChordContext ctx;
+    ctx.rootMidi = 48;
+    ctx.rel = nine.rel;
+    pattern::Part all;
+    REQUIRE (pattern::parsePart ("C", all));
+    int notes[24];
+    const int n = pattern::resolvePart (all, ctx, pattern::Absent::Skip, notes, 24);
+    CHECK (n == 5);
+    CHECK (notes[n - 1] == 48 + 14);   // la neuvième sonne dans l'octave du dessus
+}
+
+TEST_CASE ("carte exchange: qualities are written with Scorsaire ids and two-octave intervals, and read back", "[carte][exchange]")
+{
+    using namespace neptune::core;
+    carte::Score s;
+    for (const char* t : { "CM7", "D9", "Eadd9", "Fo7" })
+    {
+        chords::Item it;
+        it.start = static_cast<double> (s.chords.size()) * 4.0;
+        it.length = 4.0;
+        REQUIRE (chords::parseChord (t, it.chord));
+        s.chords.push_back (it);
+    }
+    const auto text = carte::exportCarteFile (s, "t");
+    const auto j = nlohmann::json::parse (text);
+    CHECK (j["chords"][0]["quality"] == "M7");
+    CHECK (j["chords"][3]["quality"] == "o7");
+    CHECK (j["qualities"]["9"] == nlohmann::json::array ({ 0, 4, 7, 10, 14 }));
+    CHECK (j["qualities"]["add9"] == nlohmann::json::array ({ 0, 4, 7, 14 }));
+    const auto back = carte::importCarteFile (text, 0.0);
+    REQUIRE (back.ok);
+    REQUIRE (back.score.chords.size() == 4);
+    for (std::size_t i = 0; i < 4; ++i) CHECK (back.score.chords[i].chord.rel == s.chords[i].chord.rel);
+    // anciens noms de qualité (Carte d'avant) : relus par leurs alias
+    const std::string old = R"({"format":"flibuste-carte","version":1,"qualities":{"maj7":[0,4,7,11]},"chords":[{"at":[0,1],"dur":[1,1],"root":"C","quality":"maj7"},{"at":[1,1],"dur":[1,1],"root":"D","quality":"dim"}]})";
+    const auto r = carte::importCarteFile (old, 0.0);
+    REQUIRE (r.score.chords.size() == 2);
+    CHECK (chords::formatChord (r.score.chords[0].chord) == "CM7");
+    CHECK (chords::formatChord (r.score.chords[1].chord) == "Do");
+    // une qualité que personne ne connaît : avec ses intervalles dans le fichier, elle est jouée ; sans, seule la fondamentale reste
+    const std::string odd = R"({"format":"flibuste-carte","version":1,"qualities":{"zz":[0,2,5,13]},"chords":[{"at":[0,1],"dur":[1,1],"root":"C","quality":"zz"},{"at":[1,1],"dur":[1,1],"root":"D","quality":"yy"}]})";
+    const auto q = carte::importCarteFile (odd, 0.0);
+    REQUIRE (q.score.chords.size() == 2);
+    CHECK (q.score.chords[0].chord.rel == (1u | 1u << 2 | 1u << 5 | 1u << 13));
+    CHECK (q.score.chords[1].chord.rel == 1u);
+    CHECK (q.unknownQualities == 1);
+    // la qualité libre se réécrit et se relit
+    const auto again = carte::importCarteFile (carte::exportCarteFile (q.score, "t"), 0.0);
+    REQUIRE (again.score.chords.size() == 2);
+    CHECK (again.score.chords[0].chord.rel == q.score.chords[0].chord.rel);
 }

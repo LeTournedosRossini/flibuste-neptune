@@ -147,7 +147,7 @@ public:
             put (e.on, bassCh, e.note, e.velocity, e.offset);
         }
         neptune::core::arp::Harmony hm;
-        if (follow && playing && hasPos && reader_.connected() && env_->harmonyAt (ppq, hm)) chordNow_.store (hm.rootPc | static_cast<int> (hm.rel) << 8);
+        if (follow && playing && hasPos && reader_.connected() && env_->harmonyAt (ppq, hm)) chordNow_.store (static_cast<std::int64_t> (hm.rootPc) | static_cast<std::int64_t> (hm.rel) << 8);
         else chordNow_.store (-2);
     }
 
@@ -157,11 +157,11 @@ public:
         if (! follow_.load()) return juce::String::fromUTF8 ("Carte : OFF");
         juce::String s = juce::String::fromUTF8 ("Carte : ON  ·  canal ") + juce::String (channel_.load());
         if (! reader_.connected()) return s + juce::String::fromUTF8 ("  ·  non connectée");
-        const int v = chordNow_.load();
+        const auto v = chordNow_.load();
         if (v < 0) return s + juce::String::fromUTF8 ("  ·  en attente de la lecture");
         neptune::core::chords::Chord c;
-        c.root = v & 0xFF;
-        c.rel = static_cast<std::uint16_t> (v >> 8 & 0xFFFF);
+        c.root = static_cast<int> (v & 0xFF);
+        c.rel = static_cast<std::uint32_t> (v >> 8 & 0xFFFFFF);
         return s + "  ·  " + juce::String::fromUTF8 (neptune::core::chords::formatChord (c, neptune::core::chords::Naming::Letters).c_str());
     }
 
@@ -468,7 +468,7 @@ private:
     } pedalEnv_;
     neptune::core::arp::Arpeggiator arp_, pedalArp_;
     std::array<neptune::core::arp::NoteOut, 256> arpOut_ {}, pedalOut_ {};
-    std::atomic<int> chordNow_ { -2 };   // -2 : pas en lecture ou pas de Carte ; sinon racine | rel << 8
+    std::atomic<std::int64_t> chordNow_ { -2 };   // -2 : pas en lecture ou pas de Carte ; sinon racine | rel << 8 (rel sur 24 bits)
     std::shared_ptr<juce::FileChooser> chooser_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CarteDriver)

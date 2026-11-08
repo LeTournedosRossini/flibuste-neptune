@@ -37,7 +37,7 @@ public:
         out.startBeats = c.startBeats;
         out.lengthBeats = c.lengthBeats;
         out.bassPc = c.bass <= 11 ? c.bass : -1;
-        out.rel = relativeMask (c.pitchMask, c.root);
+        out.rel = c.intervals() != 0 ? c.intervals() : relativeMask (c.pitchMask, c.root);   // sur deux octaves ; un ancien écrivain n'en donne qu'une
         if (out.rel == 0) out.rel = 1;
         out.hasScale = false;
         out.scaleRel = 0;

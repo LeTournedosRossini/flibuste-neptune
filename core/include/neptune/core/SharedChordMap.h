@@ -40,9 +40,12 @@ struct Container
     Kind kind = Kind::Chord;
     std::uint8_t root = 0;            // 0..11 (do = 0) ; Pattern : emplacement 1..16 ; Measure : numérateur du chiffrage 1..64
     std::uint8_t bass = 255;          // 0..11, 255 : pas de basse distincte ; Measure : dénominateur du chiffrage 1..64
-    std::uint8_t reserved = 0;
+    std::uint8_t intervalsLo = 0;     // Chord : les intervalles de l'accord SUR DEUX OCTAVES, relatifs à la fondamentale (bit n = n demi-tons, n de 0 à 23) : bits 0 à 7 ici, 8 à 23 dans `intervalsHi`
     std::uint16_t pitchMask = 0;      // classes de hauteur, bit n = note n (absolue, do = 0) : notes de l'accord (sans la basse, qui a son champ), ou gamme (tonalité, gamme) ; 0 pour Pattern et Measure
-    std::uint16_t pad = 0;
+    std::uint16_t intervalsHi = 0;    // voir `intervalsLo`. Un ancien écrivain laisse 0 aux deux : le lecteur retombe alors sur `pitchMask` (une octave)
+
+    std::uint32_t intervals() const noexcept { return static_cast<std::uint32_t> (intervalsLo) | static_cast<std::uint32_t> (intervalsHi) << 8; }
+    void setIntervals (std::uint32_t v) noexcept { intervalsLo = static_cast<std::uint8_t> (v & 0xFFu); intervalsHi = static_cast<std::uint16_t> ((v >> 8) & 0xFFFFu); }
 };
 static_assert (sizeof (Container) == 24, "format partagé : taille figée");
 

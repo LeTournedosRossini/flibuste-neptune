@@ -12,6 +12,7 @@
 #include <cstdint>
 
 #include "neptune/core/ChordPattern.h"
+#include "neptune/core/Intervals.h"
 #include "neptune/core/VoiceLeading.h"
 
 namespace neptune::core::arp
@@ -75,7 +76,7 @@ struct Harmony
 {
     int rootPc = 0;                 // fondamentale (0..11)
     int bassPc = -1;                // basse (0..11) ou -1
-    std::uint16_t rel = 0x091;      // notes de l'accord relatives à la fondamentale
+    std::uint32_t rel = 0x091;      // intervalles de l'accord relatifs à la fondamentale, sur deux octaves (une neuvième = 14)
     bool hasScale = false;
     std::uint16_t scaleRel = 0;     // gamme en vigueur, relative à la fondamentale de l'accord
     double startBeats = 0.0;        // début et longueur du conteneur d'accord de Carte (noires de l'hôte)
@@ -647,7 +648,7 @@ private:
             const int low = a.baseNote_;
             const int root = low + (((hm.rootPc - low) % 12) + 12) % 12;
             const auto vel = static_cast<std::uint8_t> (a.params_.fixedVelocity ? a.params_.velocity : 90);
-            for (int s = 0; s < 12 && a.heldCount_ < kMaxHeld; ++s)
+            for (int s = 0; s < kIntervalBits && a.heldCount_ < kMaxHeld; ++s)
                 if (((hm.rel >> s) & 1) != 0 && root + s <= 127) a.held_[(size_t) a.heldCount_++] = { static_cast<std::uint8_t> (root + s), vel };
             active = a.heldCount_ > 0;
         }

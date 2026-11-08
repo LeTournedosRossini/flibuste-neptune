@@ -225,14 +225,14 @@ inline int bassNote (int pc, int prev = -1)
     return best;
 }
 
-// Classes de hauteur jouées par la main droite : fondamentale et notes de l'accord (masque `rel` : bit s = intervalle s au-dessus de la fondamentale) ;
+// Classes de hauteur jouées par la main droite : fondamentale et notes de l'accord (masque `rel` : bit s = intervalle s au-dessus de la fondamentale, sur deux octaves) ;
 // au-delà de quatre notes, la quinte tombe. `skip` : classe à laisser de côté (la basse, pour un clavier qui la laisse au bassiste), -1 = aucune.
-inline int chordTones (int rootPc, std::uint16_t rel, int* out, int skip = -1)
+inline int chordTones (int rootPc, std::uint32_t rel, int* out, int skip = -1)
 {
     int n = 0;
     auto add = [&] (int pc) { pc = detail::mod12 (pc); if (pc == skip) return; for (int i = 0; i < n; ++i) if (out[i] == pc) return; if (n < kMaxVoices) out[n++] = pc; };
     add (rootPc);
-    for (int s = 0; s < 12; ++s) if (((rel >> s) & 1) != 0) add (rootPc + s);
+    for (int s = 0; s < 24; ++s) if (((rel >> s) & 1) != 0) add (rootPc + s);   // sur deux octaves : la neuvième vient après la septième
     if (n > 4)
     {
         const int fifth = detail::mod12 (rootPc + 7);

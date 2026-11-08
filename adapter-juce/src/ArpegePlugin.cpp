@@ -163,7 +163,7 @@ juce::String ArpegeProcessor::carteChordText() const
     chords::Chord c;
     c.root = static_cast<int> (v & 0xFF);
     c.bass = (v >> 8 & 0xFF) <= 11 ? static_cast<int> (v >> 8 & 0xFF) : -1;
-    c.rel = static_cast<std::uint16_t> (v >> 16 & 0xFFFF);
+    c.rel = static_cast<std::uint32_t> (v >> 16 & 0xFFFFFF);
     return juce::String::fromUTF8 (chords::formatChord (c, chords::Naming::Letters).c_str());
 }
 
@@ -292,7 +292,7 @@ void ArpegeProcessor::processBlock (juce::AudioBuffer<float>& audio, juce::MidiB
     {
         arp::Harmony hm;
         const double t = tr.hasPosition ? tr.ppq : 0.0;
-        if (env_->harmonyAt (t, hm)) carteChord_.store (static_cast<std::uint32_t> (hm.rootPc) | static_cast<std::uint32_t> (hm.bassPc < 0 ? 255 : hm.bassPc) << 8 | static_cast<std::uint32_t> (hm.rel) << 16);
+        if (env_->harmonyAt (t, hm)) carteChord_.store (static_cast<std::uint64_t> (hm.rootPc) | static_cast<std::uint64_t> (hm.bassPc < 0 ? 255 : hm.bassPc) << 8 | static_cast<std::uint64_t> (hm.rel) << 16);
         else carteChord_.store (0);
         carteState_.store (carteChord_.load() != 0 ? 1 : 0);
     }

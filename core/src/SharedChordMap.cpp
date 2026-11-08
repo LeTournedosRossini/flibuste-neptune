@@ -1,4 +1,5 @@
 #include "neptune/core/SharedChordMap.h"
+#include "neptune/core/Intervals.h"
 
 #include <algorithm>
 #include <chrono>
@@ -204,8 +205,7 @@ int Writer::publish (std::vector<Container> containers)
                 c.pitchMask = static_cast<std::uint16_t> (c.pitchMask & 0x0FFFu);
                 break;
         }
-        c.reserved = 0;
-        c.pad = 0;
+        c.setIntervals (k == static_cast<int> (Kind::Chord) ? (c.intervals() & kIntervalMask) : 0u);   // seul l'accord porte des intervalles
         byKind[k].push_back (c);
     }
     int total = 0;

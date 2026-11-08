@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "neptune/core/Intervals.h"
+
 namespace neptune::core::pattern
 {
 constexpr int kFormatVersion = 1;
@@ -122,7 +124,7 @@ void clearHits (Pattern& p);
 struct ChordContext
 {
     int rootMidi = 48;         // fondamentale (note MIDI) du degré 1
-    std::uint16_t rel = 0x091; // notes de l'accord relatives à la fondamentale, bit n = n demi-tons (défaut : majeur 0-4-7)
+    std::uint32_t rel = 0x091; // intervalles de l'accord relatifs à la fondamentale SUR DEUX OCTAVES, bit n = n demi-tons (une neuvième = 14) ; défaut : majeur 0-4-7
     int bassPc = -1;           // classe de hauteur de la basse (0..11) ou -1 : la fondamentale
     std::uint16_t scaleRel = 0; // gamme en vigueur, relative à la fondamentale de l'accord (bit n = n demi-tons) ; 0 : pas de gamme
 };
@@ -136,7 +138,7 @@ enum class Absent { Skip, Play, Scale };
 // remonte d'une octave en repartant de la plus grave (4 sur trois notes = la plus grave plus une octave). « B » : la plus grave, une octave plus bas ; « C » : toutes.
 int resolveRank (const Part& part, const int* sorted, int count, int* out, int cap);
 // Demi-tons au-dessus de la fondamentale du degré (octave comprise), ou -1 si le degré est absent de l'accord et que `absent` = Skip.
-int degreeSemitones (const Part& part, std::uint16_t rel, Absent absent, std::uint16_t scaleRel = 0);
+int degreeSemitones (const Part& part, std::uint32_t rel, Absent absent, std::uint16_t scaleRel = 0);
 // Notes MIDI d'une part (vide : rien ne sonne). Basse : sous la fondamentale ; accord : toutes les notes de l'accord (12 premiers demi-tons).
 int resolvePart (const Part& part, const ChordContext& chord, Absent absent, int* out, int cap);
 } // namespace neptune::core::pattern
