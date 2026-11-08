@@ -2,6 +2,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <array>
 #include <atomic>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -80,6 +81,7 @@ public:
     bool carteHasPatterns() const noexcept { return carteHasPatterns_.load(); }   // la voie des motifs de Carte a des éléments (et Carte est la source)
     juce::String carteChordText() const;
     bool hostPlaying() const noexcept { return playing_.load(); }
+    std::atomic<int> sectionsOpen { 0x1F };   // sections de l'éditeur dépliées (un bit par section) : gardé dans l'état
 
     // Aperçu (fil de messages) : rejoue Arpège hors ligne sur la carte et rend les notes qui seraient lues. `problem` non vide : pourquoi il n'y a rien à montrer.
     struct PreviewResult { neptune::core::arp::Preview preview; juce::String problem; };
@@ -138,6 +140,8 @@ private:
     class ParamPill;
     class MatrixView;
     class ScoreView;
+    class SectionHeader;
+    struct Section;
     bool keyPressed (const juce::KeyPress&) override;
     void editSlot (const char* name, const std::function<void (neptune::core::pattern::Pattern&)>& edit);
     void timerCallback() override;
@@ -149,6 +153,12 @@ private:
     std::vector<std::unique_ptr<ParamPill>> pills_;
     std::unique_ptr<MatrixView> matrix_;
     std::unique_ptr<ScoreView> score_;
+    std::vector<std::shared_ptr<Section>> sections_;
+    std::map<juce::Component*, juce::String> help_;       // texte d'aide d'un réglage, montré en bas quand on le survole ou le touche
+    juce::String helpText_;
+    juce::uint32 helpAt_ = 0;
+    void addHelp (juce::Component& c, const char* text);
+    void mouseEnter (const juce::MouseEvent&) override;
     bool showScore_ = false;
     std::uint64_t scoreKey_ = 0;
     void refreshScore (bool force);

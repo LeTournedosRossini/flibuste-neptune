@@ -10,7 +10,7 @@ namespace arp = neptune::core::arp;
 
 namespace
 {
-constexpr int kDesignW = 1100, kDesignH = 690;
+constexpr int kDesignW = 1100, kDesignH = 780;
 
 std::filesystem::path configDirectory()
 {
@@ -391,6 +391,7 @@ void ArpegeProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
     juce::XmlElement xml ("ARPEGE");
     xml.setAttribute ("version", 1);
+    xml.setAttribute ("sections", sectionsOpen.load());
     for (auto* p : getParameters())
         if (auto* r = dynamic_cast<juce::RangedAudioParameter*> (p)) xml.setAttribute (r->getParameterID(), r->convertFrom0to1 (r->getValue()));
     for (int i = 0; i < kSlots; ++i)
@@ -413,6 +414,7 @@ void ArpegeProcessor::setStateInformation (const void* data, int size)
     if (auto xml = getXmlFromBinary (data, size))
         if (xml->hasTagName ("ARPEGE"))
         {
+            if (xml->hasAttribute ("sections")) sectionsOpen.store (xml->getIntAttribute ("sections") & 0x1F);
             for (int i = 0; i < kSlots; ++i) clearSlot (i);
             undo_.clear();
             for (auto* e : xml->getChildWithTagNameIterator ("SLOT"))
@@ -765,6 +767,50 @@ private:
     bool painting_ = false, paintOn_ = true, dirty_ = false, reset_ = false;
     enum class Band { Cells, Accent, Muted, Vel, Gate } band_ = Band::Cells;
     pattern::Pattern strokeBefore_;
+};
+
+// ================================================================================================ sections repliables
+
+// Titre d'une section : une flèche (dépliée / repliée), le titre et un court résumé. Un clic plie ou déplie.
+class ArpegeEditor::SectionHeader : public juce::Component
+{
+public:
+    SectionHeader (const nova::Skin& s, juce::String title, juce::String summary) : skin_ (s), title_ (std::move (title)), summary_ (std::move (summary)) {}
+    std::function<void()> onClick;
+    bool open = true;
+
+    void paint (juce::Graphics& g) override
+    {
+        using T = theme::Token;
+        const auto b = getLocalBounds().toFloat();
+        g.setColour (skin_.colour (T::PanelBg, 0.6f));
+        g.fillRoundedRectangle (b, skin_.px (5.0f));
+        const float cx = skin_.px (14.0f), cy = b.getCentreY(), r = skin_.px (4.5f);
+        juce::Path tri;
+        if (open) tri.addTriangle (cx - r, cy - r * 0.6f, cx + r, cy - r * 0.6f, cx, cy + r * 0.8f);
+        else tri.addTriangle (cx - r * 0.6f, cy - r, cx - r * 0.6f, cy + r, cx + r * 0.8f, cy);
+        g.setColour (skin_.colour (T::Accent));
+        g.fillPath (tri);
+        g.setColour (skin_.colour (T::Text));
+        g.setFont (skin_.font (14.0f, true));
+        const int tx = skin_.ipx (28.0f);
+        const int tw = static_cast<int> (std::ceil (juce::GlyphArrangement::getStringWidth (skin_.font (14.0f, true), title_)));
+        g.drawText (title_, tx, 0, tw + 4, getHeight(), juce::Justification::centredLeft, false);
+        g.setColour (skin_.colour (T::TextDim));
+        g.setFont (skin_.font (12.0f));
+        g.drawText (summary_, tx + tw + skin_.ipx (14.0f), 0, getWidth() - tx - tw - skin_.ipx (20.0f), getHeight(), juce::Justification::centredLeft, true);
+    }
+    void mouseUp (const juce::MouseEvent& e) override { if (getLocalBounds().contains (e.getPosition()) && onClick) onClick(); }
+
+private:
+    const nova::Skin& skin_;
+    juce::String title_, summary_;
+};
+
+struct ArpegeEditor::Section
+{
+    std::unique_ptr<SectionHeader> header;
+    std::vector<size_t> pills, actions;   // indices dans pills_ et actions_
 };
 
 // ================================================================================================ l'aperçu en partition
@@ -1150,6 +1196,83 @@ ArpegeEditor::ArpegeEditor (ArpegeProcessor& p)
         refreshActions();
     };
 
+
+    // ---- aide : un texte par réglage, montré en bas quand on le survole ou le touche
+    static const char* const pillHelp[20] = {
+        "Motif automatique : comment les notes tenues (ou l'accord de Carte) sont parcourues : montant, descendant, aller-retour, aléatoire, dans l'ordre joué, ou accord. Sans effet quand un motif dessiné ou un motif de Carte joue.",
+        "Nombre d'octaves parcourues par le motif automatique.",
+        "Durée d'un pas du motif automatique, calée sur la grille de l'hôte (1/16 = double-croche).",
+        "Longueur de chaque note, en pourcentage du pas.",
+        "Retard des pas impairs : 0 = régulier ; plus haut, le rythme est plus chaloupé.",
+        "Garde les notes après le relâchement des touches, jusqu'à un nouvel accord.",
+        "Jouée : reprend la force de la touche. Fixe : utilise la valeur « Fixe ».",
+        "Vélocité utilisée quand le mode est « Fixe ».",
+        "Un pas sur N est renforcé (0 : pas d'accent).",
+        "Vélocité ajoutée aux pas accentués.",
+        "Décale toutes les notes, en demi-tons.",
+        "Emplacement (1 à 16) du motif dessiné dans la matrice ; « aucun » : motifs automatiques. Avec Carte, les motifs posés sur sa voie des motifs passent en premier.",
+        "Quand un degré demandé par le motif n'existe pas dans l'accord (la neuvième d'un accord simple, par exemple) : le sauter, jouer la note par défaut du degré, ou prendre la note de la gamme de Carte.",
+        "Notes tenues : Arpège arpège ce que vous jouez. Carte : il suit les accords, gammes, motifs et mesures de Carte et joue seul pendant la lecture.",
+        "Numéro de liaison (1 à 8) : le même que celui du plugin Carte.",
+        "Octave où Carte joue seule, sans note tenue (3 = do 48).",
+        "Chaque accord est posé au plus près du précédent, avec le moins de mouvement possible (comme dans Scorsaire).",
+        "Les notes des parties « accord » partent l'une après l'autre : coup bas, ou alterné bas / haut.",
+        "Durée entre deux notes du grattage, en millisecondes ; « auto » : d'après le tempo.",
+        "Avant un changement d'accord, un coup du motif joue un accord qui mène au suivant : dominante (V7), triton (bII7), chromatique, ou parallèle. Voir la vue partition." };
+    for (size_t i = 0; i < pills_.size() && i < 20; ++i) addHelp (*pills_[i], pillHelp[i]);
+    static const char* const actionHelp[17] = {
+        "Finesse de la grille de dessin de la matrice.",
+        "Longueur du motif dessiné, en temps.",
+        "Nombre de mesures que dure le motif avant de se répéter.",
+        "Choisit un motif fourni ; « Charger » le copie dans l'emplacement choisi.",
+        "Copie le motif fourni dans l'emplacement du motif dessiné (annulable).",
+        "Lit un motif dans un fichier JSON (Arpège ou Scorsaire).",
+        "Enregistre le motif dans un fichier JSON ; le dossier proposé est la bibliothèque lue par Orgamon.",
+        "Vide l'emplacement et prépare un motif neuf à dessiner.",
+        "Notes (rangs) : un vrai arpégiateur sur les notes tenues. Accord (degrés) : les lignes sont des degrés de l'accord de Carte.",
+        "Annule le dernier changement de motif.",
+        "Rétablit le changement annulé.",
+        "Choisit ce que la matrice dessine : le motif, ou l'une de ses variantes.",
+        "Ajoute une variante : une autre version du motif, jouée une fois sur deux sur la seconde moitié de la mesure.",
+        "Part des mesures où la variante remplace le motif.",
+        "Temps de la mesure où la variante commence.",
+        "Retire la variante choisie.",
+        "Bascule entre la matrice du motif et la partition de ce qu'Arpège jouera à la lecture (pour contrôler)." };
+    for (size_t i = 0; i < actions_.size() && i < 17; ++i) addHelp (*actions_[i], actionHelp[i]);
+
+    // ---- sections repliables
+    struct Def { const char* title; const char* summary; const char* help; std::vector<size_t> pills, actions; };
+    const std::vector<Def> defs = {
+        { "Source et Carte", "d'où viennent les notes et les accords", "Source et Carte : choisit si Arpège joue ce que vous tenez ou suit la carte d'accords de Carte (canal, octave de base, voix conduites).", { 13, 14, 15, 16 }, {} },
+        { "Motif automatique", "ce que joue Arpège sans motif dessiné", "Motif automatique : le parcours des notes (montant, descendant...), sa vitesse, sa durée, le swing, les accents et la vélocité.", { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }, {} },
+        { "Jeu des accords", "degré absent, grattage, accords d'approche", "Jeu des accords : ce que font les motifs en degrés avec les accords de Carte : degré absent, grattage, accords d'approche.", { 12, 17, 18, 19 }, {} },
+        { "Motif dessiné et fichiers", "l'emplacement, la matrice, importer / exporter", "Motif dessiné : choix de l'emplacement 1 à 16, réglages de la matrice, motifs fournis, import et export.", { 11 }, { 0, 1, 2, 8, 3, 4, 5, 6, 7, 9, 10 } },
+        { "Variantes et affichage", "variantes du motif ; vue motif ou partition", "Variantes : d'autres versions du motif jouées de temps en temps. Vue : bascule entre la matrice et la partition de ce qui sera joué.", {}, { 11, 12, 13, 14, 15, 16 } },
+    };
+    for (size_t k = 0; k < defs.size(); ++k)
+    {
+        auto sec = std::make_shared<Section>();
+        sec->header = std::make_unique<SectionHeader> (skin_, juce::String::fromUTF8 (defs[k].title), juce::String::fromUTF8 (defs[k].summary));
+        sec->pills = defs[k].pills;
+        sec->actions = defs[k].actions;
+        sec->header->open = (proc_.sectionsOpen.load() >> k & 1) != 0;
+        const auto sp = std::weak_ptr<Section> (sec);
+        sec->header->onClick = [this, k, sp]
+        {
+            if (const auto s = sp.lock())
+            {
+                s->header->open = ! s->header->open;
+                proc_.sectionsOpen.store (s->header->open ? (proc_.sectionsOpen.load() | (1 << k)) : (proc_.sectionsOpen.load() & ~(1 << k)));
+                s->header->repaint();
+                resized();
+                repaint();
+            }
+        };
+        addAndMakeVisible (*sec->header);
+        addHelp (*sec->header, defs[k].help);
+        sections_.push_back (std::move (sec));
+    }
+
     nova::configureConstrainer (constrainer_, kDesignW, kDesignH, 0.6f, 3.0f);
     setConstrainer (&constrainer_);
     setResizable (true, true);
@@ -1245,25 +1368,32 @@ void ArpegeEditor::resized()
     skin_.setScale (nova::fitScale (getWidth(), getHeight(), kDesignW, kDesignH, 0.6f, 3.0f));
     const auto px = [this] (float v) { return skin_.ipx (v); };
     const float w[] = { 260, 110, 150, 120, 120, 120, 120, 100, 190, 100, 170, 160, 150, 140, 110, 120, 110, 140, 130, 140 };
-    const int rowOf[] = { 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 3, 3, 3, 3, 0, 0, 2 };
-    int x[5] = { px (16.0f), px (16.0f), px (16.0f), px (16.0f), px (16.0f) };
-    const int y0 = px (60.0f), h = px (30.0f), gap = px (40.0f);
-    for (size_t i = 0; i < pills_.size(); ++i)
+    const float aw[] = { 160, 130, 100, 160, 90, 90, 90, 90, 170, 90, 100, 180, 120, 170, 150, 190, 160 };
+    const int left = px (16.0f), right = getWidth() - px (16.0f), h = px (30.0f), gap = px (8.0f), hh = px (26.0f);
+    int y = px (56.0f);
+    for (auto& sec : sections_)
     {
-        const int r = rowOf[i];
-        pills_[i]->setBounds (x[r], y0 + r * gap, px (w[i]), h);
-        x[r] += px (w[i] + 8.0f);
+        sec->header->setBounds (left, y, right - left, hh);
+        y += hh + px (4.0f);
+        const bool open = sec->header->open;
+        int x = left;
+        const auto place = [&] (juce::Component& c, float width)
+        {
+            c.setVisible (open);
+            if (! open) return;
+            const int wd = px (width);
+            if (x + wd > right && x > left) { x = left; y += h + gap; }
+            c.setBounds (x, y, wd, h);
+            x += wd + gap;
+        };
+        for (size_t i : sec->pills) place (*pills_[i], w[i]);
+        for (size_t i : sec->actions) place (*actions_[i], aw[i]);
+        if (open && (! sec->pills.empty() || ! sec->actions.empty())) y += h + px (8.0f);
+        else y += px (2.0f);
     }
-    const float aw[] = { 160, 130, 100, 160, 90, 90, 90, 90, 170, 90, 100, 180, 120, 170, 150, 190, 160 };   // rangée 3 : Source, Canal Carte, puis ces actions ; Annuler et Rétablir en fin de rangée 1 ; rangée 4 : variantes
-    const int aRow[] = { 2, 2, 2, 3, 3, 3, 3, 3, 2, 1, 1, 4, 4, 4, 4, 4, 4 };
-    for (size_t i = 0; i < actions_.size(); ++i)
-    {
-        const int r = aRow[i];
-        actions_[i]->setBounds (x[r], y0 + r * gap, px (aw[i]), h);
-        x[r] += px (aw[i] + 8.0f);
-    }
-    const int my = y0 + 5 * gap + px (4.0f);
-    matrix_->setBounds (px (16.0f), my, getWidth() - px (32.0f), getHeight() - my - px (40.0f));
+    const int my = y + px (2.0f);
+
+    matrix_->setBounds (px (16.0f), my, getWidth() - px (32.0f), std::max (px (80.0f), getHeight() - my - px (50.0f)));
     score_->setBounds (matrix_->getBounds());
 }
 
@@ -1293,8 +1423,30 @@ void ArpegeEditor::paint (juce::Graphics& g)
     const auto text = plays + juce::String::fromUTF8 ("Notes tenues : ") + juce::String (proc_.heldCount()) + "   ·   "
                       + (proc_.hostPlaying() ? juce::String::fromUTF8 ("calé sur la lecture de l'hôte") : juce::String::fromUTF8 ("lecture arrêtée : horloge interne"))
                       + carteInfo;
+    if (helpText_.isNotEmpty())   // l'aide du réglage survolé ou touché remplace la ligne d'état
+    {
+        g.setColour (skin_.colour (theme::Token::Text));
+        g.setFont (skin_.font (13.0f));
+        g.drawFittedText (helpText_, juce::Rectangle<int> (skin_.ipx (16.0f), getHeight() - skin_.ipx (44.0f), getWidth() - skin_.ipx (32.0f), skin_.ipx (38.0f)), juce::Justification::centredLeft, 2);
+        return;
+    }
     g.drawText (text, juce::Rectangle<float> (skin_.px (16.0f), static_cast<float> (getHeight()) - skin_.px (34.0f), static_cast<float> (getWidth()) - skin_.px (32.0f), skin_.px (24.0f)).toNearestInt(),
                 juce::Justification::centredLeft, true);
+}
+
+void ArpegeEditor::addHelp (juce::Component& c, const char* text)
+{
+    help_[&c] = juce::String::fromUTF8 (text);
+    c.addMouseListener (this, false);
+}
+
+void ArpegeEditor::mouseEnter (const juce::MouseEvent& e)
+{
+    const auto it = help_.find (e.eventComponent);
+    if (it == help_.end()) return;
+    helpText_ = it->second;
+    helpAt_ = juce::Time::getMillisecondCounter();
+    repaint (0, getHeight() - skin_.ipx (50.0f), getWidth(), skin_.ipx (50.0f));
 }
 
 void ArpegeEditor::refreshScore (bool force)
@@ -1331,7 +1483,8 @@ void ArpegeEditor::timerCallback()
         matrix_->repaint();
         refreshActions();
     }
-    repaint (0, getHeight() - skin_.ipx (40.0f), getWidth(), skin_.ipx (40.0f));
+    if (helpText_.isNotEmpty() && juce::Time::getMillisecondCounter() - helpAt_ > 7000) helpText_ = {};   // l'aide s'efface au bout de quelques secondes (utile au doigt)
+    repaint (0, getHeight() - skin_.ipx (50.0f), getWidth(), skin_.ipx (50.0f));
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new ArpegeProcessor(); }
