@@ -633,6 +633,17 @@ TEST_CASE ("analogsynth state: the modulation matrix is saved when it is not emp
     CHECK (stateFromJson (without, set, back, id));   // l'appel d'avant, sans matrice, marche toujours
 }
 
+TEST_CASE ("analogsynth: the default MIDI matrix routes the common controllers to valid destinations", "[analogsynth][modulation]")
+{
+    ParameterSet set;
+    REQUIRE (analogsynth::addParams (set));
+    const auto m = analogsynth::defaultMidiMatrix();
+    CHECK (m == modulation::sanitised (m));   // aucune route retirée par les bornes
+    REQUIRE (m.routes.size() == 4);
+    for (const auto& r : m.routes) CHECK (set.indexOf (r.dest) != ParameterSet::npos);
+    CHECK (m.routes[0].source == modulation::Source { modulation::SourceKind::ControlChange, 1, 0 });
+}
+
 TEST_CASE ("preset: the modulation field round trips, is bounded and defaults to empty", "[preset][modulation]")
 {
     preset::Preset p;

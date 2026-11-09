@@ -46,6 +46,7 @@ AnalogSynthProcessor::AnalogSynthProcessor() : juce::AudioProcessor (makeBuses()
     library_->open (&warnings);
     if (library_->config().parameterCaptureDefaults.empty()) library_->setConfig (analog::defaultConfig());
     for (auto& s : modal_) s = {};
+    rig_.setMatrix (analog::defaultMidiMatrix(), engine_.params());   // plugin neuf : contrôleurs MIDI courants déjà reliés
 }
 
 bool AnalogSynthProcessor::isBusesLayoutSupported (const BusesLayout& l) const
@@ -251,11 +252,11 @@ void AnalogSynthProcessor::modEdit (int, modulation::Matrix matrix)
         "Modulation", "modulation"));
 }
 
-// La matrice pour un preset : vide si elle l'est (un preset sans matrice reste identique).
+// La matrice pour un preset, écrite même vide (un texte absent veut dire « matrice de départ des contrôleurs MIDI »).
 std::string AnalogSynthProcessor::modulationText() const
 {
     const auto& m = rig_.matrix();
-    return m == modulation::Matrix {} ? std::string() : modulation::toJson (m);
+    return modulation::toJson (m);
 }
 
 std::string AnalogSynthProcessor::modDestName (int, ParamId dest) const
@@ -296,7 +297,7 @@ bool AnalogSynthProcessor::loadPreset (const std::string& id)
     if (p == nullptr) return false;
     const auto before = snapshotNormalised();
     if (! engine_.loadPreset (*p, library_->config())) return false; // capture par voix : voir AnalogSynthEngine::loadPreset
-    rig_.setMatrix (p->modulation.empty() ? modulation::Matrix {} : modulation::fromJson (p->modulation), engine_.params());   // un preset sans matrice la vide
+    rig_.setMatrix (p->modulation.empty() ? analog::defaultMidiMatrix() : modulation::fromJson (p->modulation), engine_.params());   // un preset sans matrice reçoit celle des contrôleurs MIDI
     currentPresetId_ = id;
     undo_.clear();
     notifyHostOfParameterChanges (before);
@@ -315,7 +316,7 @@ bool AnalogSynthProcessor::isModified() const
 {
     const auto* p = currentPreset();
     if (p == nullptr) return false;
-    const auto stored = p->modulation.empty() ? modulation::Matrix {} : modulation::sanitised (modulation::fromJson (p->modulation));
+    const auto stored = p->modulation.empty() ? modulation::sanitised (analog::defaultMidiMatrix()) : modulation::sanitised (modulation::fromJson (p->modulation));
     return analog::differsFromPreset (*p, engine_.params(), engine_.description(), library_->config()) || stored != rig_.matrix();
 }
 

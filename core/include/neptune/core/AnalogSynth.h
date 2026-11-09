@@ -40,6 +40,10 @@ constexpr const char* glideKey = "synth.glide"; // réglage de la description (n
 // Défauts de capture du plugin : volume et pan de sortie, glissando : libres ; tout le reste capturé.
 preset::LibraryConfig defaultConfig();
 
+// Matrice de départ des contrôleurs MIDI courants, pour un plugin neuf et pour un preset qui n'en porte pas : molette (CC 1), brillance (CC 74)
+// et pression de canal ouvrent le filtre 1, résonance (CC 71) sur la résonance du filtre 1. Tous partent de zéro (un CC jamais reçu ne change rien).
+modulation::Matrix defaultMidiMatrix();
+
 // ---- enveloppes, glissando, équilibre des filtres : paramètres <-> description ----
 // Le moteur lit ces réglages dans les paramètres de la piste (automatisables) ; la description (éditeur graphique, JSON, presets)
 // porte les mêmes valeurs. Règle : à chaque fois que la description change (édition, preset, chargement d'un état), on

@@ -76,6 +76,18 @@ preset::LibraryConfig defaultConfig()
     return c;
 }
 
+modulation::Matrix defaultMidiMatrix()
+{
+    using modulation::Route;
+    using modulation::SourceKind;
+    modulation::Matrix m;
+    m.routes.push_back (Route { { SourceKind::ControlChange, 1, 0 }, sampler::filter1Cutoff, 0.5, false });     // molette de modulation
+    m.routes.push_back (Route { { SourceKind::ControlChange, 74, 0 }, sampler::filter1Cutoff, 0.5, false });    // brillance
+    m.routes.push_back (Route { { SourceKind::ControlChange, 71, 0 }, sampler::filter1Resonance, 0.4, false });  // résonance
+    m.routes.push_back (Route { { SourceKind::Aftertouch, 0, 0 }, sampler::filter1Cutoff, 0.3, false });        // pression de canal
+    return m;
+}
+
 // ---------------------------------------------------------------------------------------------------- enveloppes
 
 namespace
