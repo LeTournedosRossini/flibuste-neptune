@@ -11,7 +11,7 @@ Note destinée à une nouvelle session de travail. Elle complète `brief-projet-
 
 ## Le projet en une phrase
 
-**Neptune** : sampler CLAP (JUCE + clap-juce-extensions), open source (AGPLv3), basse latence avant tout, dans la **Flibuste Suite** (les autres plugins, série « NOVA », sont en DPF + NanoVG). Créateur : *le Tournedos Rossini*. Dépôt : https://github.com/jelhoste/flibuste-neptune (public).
+**Neptune** : sampler CLAP (JUCE + clap-juce-extensions), open source (AGPLv3), basse latence avant tout, dans la **Flibuste Suite** (les autres plugins, série « NOVA », sont en DPF + NanoVG). Créateur : *le Tournedos Rossini*. Dépôt : https://github.com/LeTournedosRossini/flibuste-neptune (public).
 
 ## Où on en est : palier 0 (fondations)
 
@@ -55,7 +55,7 @@ Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUN
 
 - **Pour compiler le plugin en local** : installer les paquets listés dans `.github/workflows/build.yml` (étape « Dépendances système »), puis `cmake --build build --target Neptune_CLAP`.
 - **CI** : à chaque push, build + tests du cœur + `.clap` archivé (`Neptune-Windows.zip`, `Neptune-Linux.tar.gz`, `Neptune-macOS.tar.gz`). Durée : 4 à 6 minutes. Le job de **Release** sur tag `v*` n'a **jamais été exécuté**.
-- **Récupérer un binaire** : `gh run download <id> -R jelhoste/flibuste-neptune -n Neptune-Linux`. Chrome bloque parfois les archives contenant un `.clap` non signé : envoyer le `.clap` brut, ou le copier dans `~/.clap/` (Reaper sous Linux le lit déjà) puis *Re-scan*.
+- **Récupérer un binaire** : `gh run download <id> -R LeTournedosRossini/flibuste-neptune -n Neptune-Linux`. Chrome bloque parfois les archives contenant un `.clap` non signé : envoyer le `.clap` brut, ou le copier dans `~/.clap/` (Reaper sous Linux le lit déjà) puis *Re-scan*.
 - **Tests utilisateur** : Windows et Linux validés sur chaque jalon ; **macOS jamais testé** (il compile en CI).
 
 ## Pièges déjà rencontrés (à ne pas refaire)

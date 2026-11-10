@@ -4,7 +4,7 @@
 
 ---
 
-Tu reprends le développement de **Neptune** (instrument CLAP de la Flibuste Suite : C++17 / JUCE / CMake, licence AGPLv3). Dépôt : `~/Bureau/FlibusteSuite/flibuste-neptune` (GitHub `jelhoste/flibuste-neptune`). Jean parle français, ne lit pas le code : décris-lui ce qu'il verra dans Reaper, en phrases simples. Lis d'abord ta mémoire (`MEMORY.md` : limites de compilation, machine Windows, pills glissables) et `docs/passage-de-relais.md`, `docs/etude-import-grandorgue.md`, `docs/specification-combinaisons.md`, `docs/methode-de-travail-compilation.md`.
+Tu reprends le développement de **Neptune** (instrument CLAP de la Flibuste Suite : C++17 / JUCE / CMake, licence AGPLv3). Dépôt : `~/Bureau/FlibusteSuite/flibuste-neptune` (GitHub `LeTournedosRossini/flibuste-neptune`). Jean parle français, ne lit pas le code : décris-lui ce qu'il verra dans Reaper, en phrases simples. Lis d'abord ta mémoire (`MEMORY.md` : limites de compilation, machine Windows, pills glissables) et `docs/passage-de-relais.md`, `docs/etude-import-grandorgue.md`, `docs/specification-combinaisons.md`, `docs/methode-de-travail-compilation.md`.
 
 ## Règles de travail (impératives)
 - **Ne jamais lancer la CI GitHub** ni pousser sans demande explicite de Jean (quota épuisé) ; les commits restent locaux. Message de commit terminé par la ligne de co-auteur demandée par le système.

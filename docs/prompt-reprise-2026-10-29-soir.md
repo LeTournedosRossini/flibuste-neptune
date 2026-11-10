@@ -4,7 +4,7 @@
 
 ---
 
-Tu reprends le développement de **Neptune** (instrument CLAP de la Flibuste Suite, 12 plugins : C++17 / JUCE / CMake, licence AGPLv3). Dépôt : `~/Bureau/FlibusteSuite/flibuste-neptune` (GitHub `jelhoste/flibuste-neptune`, branche `main`). Jean parle français, **ne lit pas le code** : décris-lui ce qu'il verra ou entendra dans Reaper, en phrases simples, et dis honnêtement ce que tu n'as pas pu vérifier (tu n'écoutes pas, tu ne pilotes pas Reaper).
+Tu reprends le développement de **Neptune** (instrument CLAP de la Flibuste Suite, 12 plugins : C++17 / JUCE / CMake, licence AGPLv3). Dépôt : `~/Bureau/FlibusteSuite/flibuste-neptune` (GitHub `LeTournedosRossini/flibuste-neptune`, branche `main`). Jean parle français, **ne lit pas le code** : décris-lui ce qu'il verra ou entendra dans Reaper, en phrases simples, et dis honnêtement ce que tu n'as pas pu vérifier (tu n'écoutes pas, tu ne pilotes pas Reaper).
 
 Lis d'abord ta mémoire (`MEMORY.md` : limites de compilation et file `claude-build`, machine Windows, pills glissables, installation après compilation, dossier d'échanges avec le banc), puis `docs/passage-de-relais.md`, `docs/methode-de-travail-compilation.md`, et `~/Bureau/FlibusteSuite/echanges/README.md` + `echanges/etat-versions.md`. Dis à Jean où nous en sommes en quelques lignes, puis **attends sa demande**.
 
