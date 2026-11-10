@@ -302,8 +302,8 @@ TEST_CASE ("compressor: parameters are declared with the documented defaults", "
     const auto& p = r.runner.params();
     CHECK (p.get (c::threshold) == Approx (-32.0));
     CHECK (p.get (c::ratio) == Approx (3.0));
-    CHECK (p.get (c::attack) == Approx (100.0));
-    CHECK (p.get (c::release) == Approx (500.0));
+    CHECK (p.get (c::attack) == Approx (2.0));
+    CHECK (p.get (c::release) == Approx (70.0));
     CHECK (p.get (c::wet) == Approx (100.0));
     CHECK (p.find (c::bandParam (7, c::kQ)) != nullptr);
     CHECK (p.find (c::lookahead)->automatable == false);

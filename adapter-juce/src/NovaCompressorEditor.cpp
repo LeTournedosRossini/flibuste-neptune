@@ -428,9 +428,9 @@ void NovaCompressorEditor::buildCompressorPage()
         if (const auto* spec = host().parameters().find (s.id))
             c.knob->setRangeLabels (juce::String::fromUTF8 (host().parameters().toText (*spec, spec->min).c_str()),
                                     juce::String::fromUTF8 (host().parameters().toText (*spec, spec->max).c_str()));
-        // course du potard réduite : attaque 0..200 ms, relâchement 0..800 ms, gain -12..+12 dB ; la modale (appui long) garde toute la plage du paramètre
-        if (s.id == cm::attack) c.knob->setDisplayRange (0.0, 200.0, 2.0);
-        else if (s.id == cm::release) c.knob->setDisplayRange (0.0, 800.0, 2.0);
+        // course du potard réduite : attaque 0..50 ms, relâchement 40..350 ms, gain -12..+12 dB ; la modale (appui long) garde toute la plage du paramètre
+        if (s.id == cm::attack) c.knob->setDisplayRange (0.0, 50.0, 2.0);
+        else if (s.id == cm::release) c.knob->setDisplayRange (40.0, 350.0, 1.5);
         else if (s.id == cm::makeup) c.knob->setDisplayRange (-12.0, 12.0, 1.0);
         if (s.sub != 0)
         {

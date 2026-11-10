@@ -34,8 +34,8 @@ bool CompressorModule::declareParams (ParameterSet& set, std::string* error) con
     add (P::continuous (kneeWidth, "Knee Width", Unit::Decibel, 0.0, 32.0, 8.0, Curve::Power, 2.0));
     add (pct (curve, "Curve", 0.0, 100.0, 50.0));
     add (db (floorDb, "Floor", -200.0, -80.0, -140.0));
-    add (P::continuous (attack, "Attack", Unit::Milliseconds, 0.0, 1000.0, 100.0, Curve::Power, 2.0));
-    add (P::continuous (release, "Release", Unit::Milliseconds, 0.0, 5000.0, 500.0, Curve::Power, 2.0));
+    add (P::continuous (attack, "Attack", Unit::Milliseconds, 0.0, 1000.0, 2.0, Curve::Power, 2.0));
+    add (P::continuous (release, "Release", Unit::Milliseconds, 0.0, 5000.0, 70.0, Curve::Power, 2.0));
     add (pct (pump, "Pump / Punch", -100.0, 100.0, 0.0));
     add (pct (smooth, "Smooth", 0.0, 100.0, 0.0));
     add (db (range, "Range", 0.0, 80.0, 80.0));
