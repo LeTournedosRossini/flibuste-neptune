@@ -446,29 +446,6 @@ jobs:
           path: dist-cnv/*
           if-no-files-found: error
 
-  release:
-    # Publie une Release GitHub quand on pousse un tag « v* » (ex. : git tag v0.0.2 && git push --tags).
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          path: dist
-          merge-multiple: true
-      - name: Créer la Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          ls -la dist
-          gh release create "${{ github.ref_name }}" dist/* \
-            --repo "${{ github.repository }}" \
-            --title "Neptune ${{ github.ref_name }}" \
-            --generate-notes \
-            --prerelease
-
       # Diapason séparé, archivé à part.
       - name: Archive Diapason.clap
         shell: bash
@@ -636,3 +613,51 @@ jobs:
           name: Fournaise-${{ matrix.name }}
           path: dist-fou/*
           if-no-files-found: error
+
+      # Trident (séparateur 3 voies) séparé, archivé à part.
+      - name: Archive Trident.clap
+        shell: bash
+        run: |
+          CLAP=$(find build/adapter-juce/Trident_artefacts -name 'Trident.clap' -print -quit)
+          test -n "$CLAP" || { echo "Trident.clap introuvable"; exit 1; }
+          mkdir -p dist-tri/stage
+          cp -R "$CLAP" dist-tri/stage/
+          cd dist-tri/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../Trident-${{ matrix.name }}.zip" Trident.clap
+          else
+            tar -czf "../Trident-${{ matrix.name }}.tar.gz" Trident.clap
+          fi
+          cd ../..
+          rm -rf dist-tri/stage
+          ls -la dist-tri
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Trident-${{ matrix.name }}
+          path: dist-tri/*
+          if-no-files-found: error
+
+
+  release:
+    # Publie une Release GitHub quand on pousse un tag « v* » (ex. : git tag v0.0.2 && git push --tags).
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Créer la Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la dist
+          gh release create "${{ github.ref_name }}" dist/* \
+            --repo "${{ github.repository }}" \
+            --title "Neptune ${{ github.ref_name }}" \
+            --generate-notes \
+            --prerelease
