@@ -74,6 +74,13 @@ public:
         double plain = 0.0;
         if (set_.fromText (spec_.id, text.toStdString(), plain))
             return static_cast<float> (spec_.toNormalized (plain));
+        // Le wrapper CLAP passe son `const char*` UTF-8 à juce::String, qui le lit comme du Latin-1 : « Médium » arrive en « MÃ©dium ».
+        // Chaque caractère reçu est alors un octet du texte d'origine : on les remet bout à bout.
+        std::string bytes;
+        bool latin1 = true;
+        for (auto c : text) { if (c > 255) { latin1 = false; break; } bytes.push_back (static_cast<char> (c)); }
+        if (latin1 && set_.fromText (spec_.id, bytes, plain))
+            return static_cast<float> (spec_.toNormalized (plain));
         return getValue();
     }
 
