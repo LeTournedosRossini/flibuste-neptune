@@ -153,7 +153,8 @@ jobs:
           "$CV" validate "$TRI"
           CAR=$(find build/adapter-juce/Carte_artefacts -name 'Carte.clap' -print -quit)
           test -n "$CAR" || { echo "Carte.clap introuvable"; exit 1; }
-          "$CV" validate "$CAR"
+          # Carte n'expose aucun paramètre à l'hôte : clap-validator 0.4.1 plante alors (division par zéro, params.rs:82) dans param-conversions.
+          "$CV" validate --test-filter param-conversions --invert-filter "$CAR"
           ARP=$(find build/adapter-juce/Arpege_artefacts -name 'Arpege.clap' -print -quit)
           test -n "$ARP" || { echo "Arpege.clap introuvable"; exit 1; }
           "$CV" validate "$ARP"
