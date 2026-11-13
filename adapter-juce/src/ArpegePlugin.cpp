@@ -117,11 +117,15 @@ public:
     using juce::AudioParameterChoice::AudioParameterChoice;
     float getValueForText (const juce::String& text) const override
     {
-        if (choices.contains (text)) return juce::AudioParameterChoice::getValueForText (text);
-        std::string bytes;
-        for (auto c : text) { if (c > 255) return juce::AudioParameterChoice::getValueForText (text); bytes.push_back (static_cast<char> (c)); }
-        const auto fixed = juce::String::fromUTF8 (bytes.c_str());
-        return choices.contains (fixed) ? juce::AudioParameterChoice::getValueForText (fixed) : juce::AudioParameterChoice::getValueForText (text);
+        auto index = choices.indexOf (text);
+        if (index < 0)
+        {
+            std::string bytes;
+            bool latin1 = true;
+            for (auto c : text) { if (c > 255) { latin1 = false; break; } bytes.push_back (static_cast<char> (c)); }
+            if (latin1) index = choices.indexOf (juce::String::fromUTF8 (bytes.c_str()));
+        }
+        return convertTo0to1 (static_cast<float> (index < 0 ? 0 : index));
     }
 };
 
