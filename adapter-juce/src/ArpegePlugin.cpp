@@ -109,31 +109,48 @@ const std::array<double, 8>& ArpegeProcessor::rateBeats()
 
 // ================================================================================================ processeur
 
+// Choix dont le texte reçu de l'hôte est relu en UTF-8 : le wrapper CLAP passe son `const char*` à juce::String, qui le lit en Latin-1
+// (« Alterné » arrive en « AlternÃ© »), et le choix n'est alors pas retrouvé.
+class Utf8Choice : public juce::AudioParameterChoice
+{
+public:
+    using juce::AudioParameterChoice::AudioParameterChoice;
+    float getValueForText (const juce::String& text) const override
+    {
+        if (choices.contains (text)) return juce::AudioParameterChoice::getValueForText (text);
+        std::string bytes;
+        for (auto c : text) { if (c > 255) return juce::AudioParameterChoice::getValueForText (text); bytes.push_back (static_cast<char> (c)); }
+        const auto fixed = juce::String::fromUTF8 (bytes.c_str());
+        return choices.contains (fixed) ? juce::AudioParameterChoice::getValueForText (fixed) : juce::AudioParameterChoice::getValueForText (text);
+    }
+};
+
+
 ArpegeProcessor::ArpegeProcessor() : juce::AudioProcessor (BusesProperties())
 {
     juce::StringArray patterns, rates, vels;
     for (auto* s : kPatternNames) patterns.add (juce::String::fromUTF8 (s));
     for (auto* s : kRateNames) rates.add (juce::String::fromUTF8 (s));
     for (auto* s : kVelNames) vels.add (juce::String::fromUTF8 (s));
-    addParameter (pattern = new juce::AudioParameterChoice (juce::ParameterID { "pattern", 1 }, "Motif", patterns, 0));
+    addParameter (pattern = new Utf8Choice (juce::ParameterID { "pattern", 1 }, "Motif", patterns, 0));
     addParameter (octaves = new juce::AudioParameterInt (juce::ParameterID { "octaves", 1 }, "Octaves", 1, 4, 1));
-    addParameter (rate = new juce::AudioParameterChoice (juce::ParameterID { "rate", 1 }, "Pas", rates, 3));
+    addParameter (rate = new Utf8Choice (juce::ParameterID { "rate", 1 }, "Pas", rates, 3));
     addParameter (gate = new juce::AudioParameterFloat (juce::ParameterID { "gate", 1 }, "Duree de note", juce::NormalisableRange<float> (5.0f, 100.0f, 1.0f), 50.0f));
     addParameter (swing = new juce::AudioParameterFloat (juce::ParameterID { "swing", 1 }, "Swing", juce::NormalisableRange<float> (0.0f, 75.0f, 1.0f), 0.0f));
     addParameter (hold = new juce::AudioParameterBool (juce::ParameterID { "hold", 1 }, "Maintien", false));
-    addParameter (velMode = new juce::AudioParameterChoice (juce::ParameterID { "velMode", 1 }, "Velocite", vels, 0));
+    addParameter (velMode = new Utf8Choice (juce::ParameterID { "velMode", 1 }, "Velocite", vels, 0));
     addParameter (velocity = new juce::AudioParameterInt (juce::ParameterID { "velocity", 1 }, "Velocite fixe", 1, 127, 100));
     addParameter (accentEvery = new juce::AudioParameterInt (juce::ParameterID { "accentEvery", 1 }, "Accent un pas sur", 0, 16, 0));
     addParameter (accentBoost = new juce::AudioParameterInt (juce::ParameterID { "accentBoost", 1 }, "Force de l'accent", 0, 60, 20));
     addParameter (transpose = new juce::AudioParameterInt (juce::ParameterID { "transpose", 1 }, "Transposition", -24, 24, 0));
 
     addParameter (slot = new juce::AudioParameterInt (juce::ParameterID { "slot", 1 }, "Motif", 0, kSlots, 0, juce::AudioParameterIntAttributes().withStringFromValueFunction ([] (int v, int) { return v == 0 ? juce::String::fromUTF8 ("aucun") : juce::String (v); })));
-    addParameter (absentMode = new juce::AudioParameterChoice (juce::ParameterID { "absent", 1 }, "Degre absent", juce::StringArray { "Sauter", "Jouer", "Gamme" }, 0));
-    addParameter (source = new juce::AudioParameterChoice (juce::ParameterID { "source", 1 }, "Source", juce::StringArray { "Notes tenues", "Carte" }, 0));
+    addParameter (absentMode = new Utf8Choice (juce::ParameterID { "absent", 1 }, "Degre absent", juce::StringArray { "Sauter", "Jouer", "Gamme" }, 0));
+    addParameter (source = new Utf8Choice (juce::ParameterID { "source", 1 }, "Source", juce::StringArray { "Notes tenues", "Carte" }, 0));
     addParameter (carteChannel = new juce::AudioParameterInt (juce::ParameterID { "carteChannel", 1 }, "Canal de Carte", 1, chordmap::kChannels, 1));
     addParameter (baseOctave = new juce::AudioParameterInt (juce::ParameterID { "baseOctave", 1 }, "Octave de base", 1, 6, 3));
-    addParameter (approachMode = new juce::AudioParameterChoice (juce::ParameterID { "approach", 1 }, "Approche", juce::StringArray { "Non", "Dominante", "Triton", "Chromatique", "Parallèle" }, 0));
-    addParameter (strumMode = new juce::AudioParameterChoice (juce::ParameterID { "strum", 1 }, "Grattage", juce::StringArray { "Non", "Coup bas", "Alterné" }, 0));
+    addParameter (approachMode = new Utf8Choice (juce::ParameterID { "approach", 1 }, "Approche", juce::StringArray { "Non", "Dominante", "Triton", "Chromatique", juce::String::fromUTF8 ("Parallèle") }, 0));
+    addParameter (strumMode = new Utf8Choice (juce::ParameterID { "strum", 1 }, "Grattage", juce::StringArray { "Non", "Coup bas", juce::String::fromUTF8 ("Alterné") }, 0));
     addParameter (strumDelay = new juce::AudioParameterInt (juce::ParameterID { "strumDelay", 1 }, "Delai du grattage", 0, 60, 0, juce::AudioParameterIntAttributes().withStringFromValueFunction ([] (int v, int) { return v == 0 ? juce::String::fromUTF8 ("auto") : juce::String (v) + " ms"; })));
     addParameter (ledVoices = new juce::AudioParameterBool (juce::ParameterID { "ledVoices", 1 }, "Voix conduites", false));
 
@@ -424,6 +441,8 @@ void ArpegeProcessor::setStateInformation (const void* data, int size)
                 if (n >= 1 && n <= kSlots && r.ok && ! r.patterns.empty()) setSlotPattern (n - 1, r.patterns[0]);
             }
         }
+    // L'hôte doit relire les valeurs : sans cette demande, clap-validator (state-reproducibility) voit les valeurs changer « en douce ».
+    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
 }
 
 juce::AudioProcessorEditor* ArpegeProcessor::createEditor() { return new ArpegeEditor (*this); }
