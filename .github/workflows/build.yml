@@ -37,8 +37,13 @@ jobs:
             libxrandr-dev libxrender-dev libxi-dev \
             libglu1-mesa-dev mesa-common-dev libegl-dev xvfb fonts-dejavu-core gdb
 
+      # macOS : binaires universels (arm64 + x86_64) ; le code propre à une architecture est choisi par le compilateur (__SSE2__, __aarch64__), pas par CMake.
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        shell: bash
+        run: |
+          EXTRA=()
+          if [ "$RUNNER_OS" = "macOS" ]; then EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"); fi
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release "${EXTRA[@]}"
 
       - name: Build (cœur + tests)
         run: cmake --build build --config Release --parallel --target neptune_core_tests
@@ -52,6 +57,18 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: build/tests/Release/neptune_core_tests.exe
+
+      # macOS : la tranche x86_64 du programme de tests, sous Rosetta (informatif : Rosetta peut manquer sur le runner).
+      - name: Tests du cœur, tranche x86_64 sous Rosetta (informatif)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        timeout-minutes: 30
+        shell: bash
+        run: |
+          /usr/sbin/softwareupdate --install-rosetta --agree-to-license || true
+          T=$(find build -name neptune_core_tests -type f -perm -u+x -print -quit)
+          lipo -archs "$T"
+          arch -x86_64 "$T"
 
       # Informatif : les runners sont partagés, les temps sont bruités. Jamais bloquant ; le JSON est archivé (voir docs/performance.md).
       - name: Mesure de performance du callback (informatif)
@@ -72,6 +89,23 @@ jobs:
 
       - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth, FM6Op, Orgamon, La Flèche, Compresseur, Egaliseur, Délai, Chœur, Microdécale et Convolution)
         run: cmake --build build --config Release --parallel ${{ runner.os == 'Linux' && '2' || '4' }} --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP Compresseur_CLAP Egaliseur_CLAP Delai_CLAP Choeur_CLAP Microdecale_CLAP Convolution_CLAP Diapason_CLAP Mirador_CLAP Fournaise_CLAP Digue_CLAP Carte_CLAP Arpege_CLAP EssaiCarte_CLAP Trident_CLAP
+
+      # macOS : chaque .clap doit contenir les deux architectures (Mac Apple Silicon et Mac Intel). Bloquant.
+      - name: Vérifie que chaque .clap macOS est universel
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          n=0
+          while IFS= read -r -d '' clap; do
+            exe=$(find "$clap/Contents/MacOS" -type f | head -1)
+            archs=$(lipo -archs "$exe")
+            echo "$clap : $archs"
+            case " $archs " in *" x86_64 "*) ;; *) echo "x86_64 manquant"; exit 1;; esac
+            case " $archs " in *" arm64 "*) ;; *) echo "arm64 manquant"; exit 1;; esac
+            n=$((n+1))
+          done < <(find build/adapter-juce -name '*.clap' -type d -print0)
+          echo "$n .clap universels"
+          test "$n" -ge 20 || { echo "trop peu de .clap trouvés"; exit 1; }
 
       # Galerie des composants communs NOVA rendue en PNG (Linux, sous xvfb) : sert à comparer avec les maquettes HTML.
       - name: NovaGallery (Linux)
